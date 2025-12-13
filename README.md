@@ -2,6 +2,11 @@
 
 A VS Code / Cursor extension that allows Stata code to be run directly from the editor. It connects directly to the [mcp-stata](https://github.com/tmonk/mcp-stata) MCP server over stdio.
 
+## Installation
+1. Download the latest extension .vsix from the [releases page](https://github.com/tmonk/stata-workbench/releases/latest).
+2. In your VS Code/Cursor/Antigravity/Windsurf IDE, open the command palette (`Ctrl+Shift+P` or `Cmd+Shift+P` on Mac) and select `Extensions: Install from VSIX...`.
+3. Select the downloaded .vsix file and install.
+
 ## Requirements
 - Stata 17+
 - uv/uvx on PATH (to run the published mcp-stata tool). If missing, the extension bootstraps uv locally into its storage; otherwise it surfaces a quick action to copy the install command or open the uv install docs.
