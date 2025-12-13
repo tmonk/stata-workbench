@@ -1,7 +1,7 @@
 {
   "name": "stata-workbench",
   "displayName": "Stata Workbench",
-  "description": "VS Code extension for Stata users, powered by mcp-stata.",
+  "description": "Run and visualize Stata from VS Code with syntax highlighting and graph previews, powered by mcp-stata.",
   "author": "Thomas Monk",
   "publisher": "tmonk",
   "license": "AGPL-3.0-or-later",

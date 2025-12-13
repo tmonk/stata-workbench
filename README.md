@@ -20,6 +20,7 @@ Offline/VSIX fallback:
 - uv/uvx on PATH (to run the published mcp-stata tool). If missing, the extension bootstraps uv locally into its storage; otherwise it surfaces a quick action to copy the install command or open the uv install docs.
 
 ## Features & Commands
+- Syntax highlighting for Stata, Dyndoc Markdown, and Dyndoc LaTeX.
 - Run Selection/Current Line (`stata-workbench.runSelection`) → MCP tool `run_command` with normalized output + graphs.
 - Run Current File (`stata-workbench.runFile`) → MCP tool `run_do_file` for `.do` scripts.
 - Interactive panel (`stata-workbench.showInteractive`): rerun snippets inline with the latest stdout/stderr + graph artifacts.
