@@ -4,6 +4,13 @@ out/**
 .git/**
 .github/**
 tests/**
+test/**
+node_modules/**
+build/**
+src/**
+!src/ui-shared/**
+!src/grammars/**
+!src/language_config.json
 test_samples/**
 config/**
 .cursor/**
@@ -21,3 +28,6 @@ virtualenv/**
 **/*.log
 **/*.map
 *.vsix
+!dist/**
+dist/.DS_Store
+dist/**/.DS_Store

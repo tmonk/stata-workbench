@@ -63,7 +63,8 @@ Cursor agents (`.cursor/mcp.json`):
 - Cancel a stuck run: run `Stata: Cancel Current Request` from the command palette.
 
 ## Packaging
-- Build VSIX: `npm install && npm run package` (uses `npx vsce package`).
+- Build bundle: `npm run bundle` (runs esbuild in production mode).
+- Build VSIX: `npm install && npm run package` (bundles then invokes `vsce`).
 
 ## Uninstall cleanup (optional)
 If you added agent configs and want to remove them:
@@ -72,8 +73,10 @@ If you added agent configs and want to remove them:
 
 ## Development
 - Install deps: `npm install`
-- Tests: `npm test` (placeholder)
-- Package: `npm run package` (VSIX) or `npm run package:zip`
+- Bundle once for local debugging: `npm run compile`
+- Watch mode while iterating: `npm run watch`
+- Tests: `npm test`
+- Package: `npm run package` (or `npm run package:dist` for output to the dist directory)
 
 ## Acknowledgments
 Portions of this file are derived from [stata-mcp](https://github.com/hanlulong/stata-mcp) (MIT License), [language-stata](https://github.com/kylebarron/language-stata) by Kyle Barron (MIT License), and [vscode-stata](https://github.com/kylebutts/vscode-stata) by Kyle Butts (MIT License). See license_extras for the full license texts. Do check their projects out!
