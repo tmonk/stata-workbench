@@ -5,6 +5,12 @@ A VS Code / Cursor extension that allows Stata code to be run directly from the 
 Built by [Thomas Monk](https://tdmonk.com), London School of Economics.
 
 ## Installation
+Preferred: install from the marketplace listings by searching for **Stata Workbench** in the Extensions view.
+
+- VS Code Marketplace: [tmonk.stata-workbench](https://marketplace.visualstudio.com/items?itemName=tmonk.stata-workbench)
+- Open VSX: [tmonk/stata-workbench](https://open-vsx.org/extension/tmonk/stata-workbench)
+
+Offline/VSIX fallback:
 1. Download the latest extension .vsix from the [releases page](https://github.com/tmonk/stata-workbench/releases/latest).
 2. In your VS Code/Cursor/Antigravity/Windsurf IDE, open the command palette (`Ctrl+Shift+P` or `Cmd+Shift+P` on Mac) and select `Extensions: Install from VSIX...`.
 3. Select the downloaded .vsix file and install.
