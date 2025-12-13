@@ -1,5 +1,8 @@
 name: Package VSIX on Release
 
+permissions:
+  contents: write
+
 on:
   workflow_dispatch:
   release:
