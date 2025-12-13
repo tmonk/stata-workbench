@@ -1,6 +1,6 @@
 {
   "name": "stata-workbench",
-  "displayName": "Stata MCP",
+  "displayName": "Stata Workbench",
   "description": "VS Code extension for Stata users, powered by mcp-stata.",
   "author": "Thomas Monk",
   "publisher": "tmonk",
