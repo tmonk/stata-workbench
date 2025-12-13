@@ -1,0 +1,32 @@
+name: Package VSIX on Release
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  build-and-attach:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Use Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build VSIX into dist
+        run: npm run package:dist
+
+      - name: Attach VSIX to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/stata-workbench-*.vsix
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
