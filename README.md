@@ -65,6 +65,8 @@ Cursor agents (`.cursor/mcp.json`):
 ## Packaging
 - Build bundle: `npm run bundle` (runs esbuild in production mode).
 - Build VSIX: `npm install && npm run package` (bundles then invokes `vsce`).
+- Publish to VS Code Marketplace: `VSCE_PAT=<token> npm run package && npx vsce publish` (or use your own flow).
+- Publish to Open VSX: `OVSX_TOKEN=<token> npm run publish:ovsx` (see [Open VSX publishing guide](https://github.com/EclipseFdn/open-vsx.org/wiki/Publishing-Extensions)).
 
 ## Uninstall cleanup (optional)
 If you added agent configs and want to remove them:

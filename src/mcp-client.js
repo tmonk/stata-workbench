@@ -160,6 +160,18 @@ class StataMcpClient {
             cwd: this._resolveWorkspaceRoot()
         });
 
+        // Guard against unhandled transport errors (e.g., spawn ENOENT when uvx is missing).
+        const transportErrorHandler = (err) => {
+            const message = err?.message || String(err);
+            this._recentStderr.push(message);
+            if (this._recentStderr.length > 10) this._recentStderr.shift();
+            this._log(`[mcp-stata transport error] ${message}`);
+            this._statusEmitter.emit('status', 'error');
+        };
+        if (typeof transport.on === 'function') {
+            transport.on('error', transportErrorHandler);
+        }
+
         // Capture stderr from the MCP process for debugging.
         const stderrStream = transport.stderr;
         if (stderrStream && typeof stderrStream.on === 'function') {
@@ -180,6 +192,15 @@ class StataMcpClient {
 
         this._log(`Starting mcp-stata via ${uvCommand} --from ${MCP_PACKAGE_SPEC} ${MCP_PACKAGE_NAME} (ext v${this._clientVersion})`);
         const client = new Client({ name: 'stata-vscode', version: this._clientVersion });
+        if (typeof client.on === 'function') {
+            client.on('error', (err) => {
+                const message = err?.message || String(err);
+                this._recentStderr.push(message);
+                if (this._recentStderr.length > 10) this._recentStderr.shift();
+                this._log(`[mcp-stata client error] ${message}`);
+                this._statusEmitter.emit('status', 'error');
+            });
+        }
         await client.connect(transport);
         this._log(`mcp-stata connected (pid=${transport.pid ?? 'unknown'})`);
 

@@ -24,6 +24,18 @@ jobs:
       - name: Build VSIX into dist
         run: npm run package:dist
 
+      - name: Publish to Open VSX
+        env:
+          OVSX_TOKEN: ${{ secrets.OVSX_TOKEN }}
+        run: npx ovsx publish dist/stata-workbench-*.vsix -p "$OVSX_TOKEN"
+        if: ${{ env.OVSX_TOKEN != '' }}
+
+      - name: Publish to VS Code Marketplace
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+        run: npx vsce publish --packagePath dist/stata-workbench-*.vsix -p "$VSCE_PAT"
+        if: ${{ env.VSCE_PAT != '' }}
+
       - name: Attach VSIX to release
         uses: softprops/action-gh-release@v2
         with:

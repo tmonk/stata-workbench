@@ -208,7 +208,8 @@
     "vscode:prepublish": "npm run bundle",
     "package": "npm run bundle && npx vsce package",
     "package:dist": "npm run bundle && node -e \"require('fs').mkdirSync('dist',{recursive:true});\" && npx vsce package --out dist/stata-workbench-$npm_package_version.vsix",
-    "package:zip": "npm pack"
+    "package:zip": "npm pack",
+    "publish:ovsx": "npm run bundle && npx ovsx publish -p $OVSX_TOKEN"
   },
   "capabilities": {
     "untrustedWorkspaces": {
@@ -223,6 +224,7 @@
     "chai": "^6.2.1",
     "esbuild": "^0.27.1",
     "mocha": "^11.7.5",
+    "ovsx": "^0.8.4",
     "proxyquire": "^2.1.3",
     "sinon": "^21.0.0"
   }

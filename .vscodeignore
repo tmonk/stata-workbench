@@ -27,7 +27,6 @@ virtualenv/**
 ~/**
 **/*.log
 **/*.map
-*.vsix
-!dist/**
-dist/.DS_Store
-dist/**/.DS_Store
+dist/**
+!dist/extension.js
+!dist/extension.js.map
