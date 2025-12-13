@@ -69,4 +69,4 @@ If you added agent configs and want to remove them:
 - Package: `npm run package` (VSIX) or `npm run package:zip`
 
 ## Acknowledgments
-Portions of this file are derived from [stata-mcp](https://github.com/hanlulong/stata-mcp (MIT License), [language-stata](https://github.com/kylebarron/language-stata) by Kyle Barron (MIT License), and [vscode-stata](https://github.com/kylebutts/vscode-stata) by Kyle Butts (MIT License). See license_extras for the full license texts. Do check their projects out!
+Portions of this file are derived from [stata-mcp](https://github.com/hanlulong/stata-mcp) (MIT License), [language-stata](https://github.com/kylebarron/language-stata) by Kyle Barron (MIT License), and [vscode-stata](https://github.com/kylebutts/vscode-stata) by Kyle Butts (MIT License). See license_extras for the full license texts. Do check their projects out!
