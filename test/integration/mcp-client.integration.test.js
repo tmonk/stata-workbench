@@ -82,4 +82,20 @@ describe('McpClient integration (requires mcp_stata)', function () {
         assert.include(stdout, 'integration-ok');
         assert.strictEqual(result.cwd, workDir, 'cwd metadata should reflect configured working directory');
     });
+
+    it('returns variables after sysuse auto', async () => {
+        if (!enabled) {
+            this.skip();
+            return;
+        }
+
+        const load = await client.runSelection('sysuse auto', { normalizeResult: true, includeGraphs: false });
+        assert.isTrue(load.success, 'load dataset');
+
+        const vars = await client.getVariableList();
+        assert.isArray(vars, 'variable list should be array');
+        assert.isAtLeast(vars.length, 1, 'variable list should not be empty');
+        const names = vars.map(v => v.name);
+        assert.include(names, 'price', 'should include known variable from auto dataset');
+    });
 });

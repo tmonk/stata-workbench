@@ -31,12 +31,12 @@ Offline/VSIX fallback:
 - **Syntax highlighting** for Stata, Dyndoc Markdown, and Dyndoc LaTeX.
 - **Run Selection/Current Line** (`stata-workbench.runSelection`) → Executes the selected code or current line via MCP tool `run_command` with normalized output + graphs. Results appear in the interactive panel.
 - **Run Current File** (`stata-workbench.runFile`) → Runs the entire `.do` file via MCP tool `run_do_file`. Results appear in the interactive panel.
-- **Interactive panel**: Automatically opens when running code, displaying results with stdout/stderr, execution time, return codes, and graph artifacts. You can continue running additional Stata commands directly in the panel.
+- **Interactive panel**: Automatically opens when running code, displaying results with stdout/stderr, execution time, return codes, and graph artifacts. You can continue running additional Stata commands directly in the panel. Supports quick history navigation (PageUp/PageDown) and Tab-based variable name completion sourced from the active Stata dataset.
 - **Graph viewer** (`stata-workbench.showGraphs`): View all graphs from the current Stata session via `list_graphs` and `export_graph` MCP tools. Click any graph to open it.
 - **Test MCP Server** (`stata-workbench.testMcpServer`) for quick smoke checks.
 - **Install MCP CLI helper** (`stata-workbench.installMcpCli`): Bootstraps uv locally when it is missing.
 - **Status bar + cancel** (`stata-workbench.cancelRequest`): Live request states with one-click cancellation routed through the MCP client.
-- **Auto-manage MCP configs**: Writes `.vscode/mcp.json` and `.cursor/mcp.json` so AI agents reuse the same `uvx --from mcp-stata` wiring.
+- **Auto-manage MCP configs**: Writes `.vscode/mcp.json` and `.cursor/mcp.json` so AI agents reuse the same `uvx --from mcp-stata --refresh mcp-stata` wiring, and auto-corrects older entries missing `--refresh`.
 - **Durable logs**: All run results are logged to the `Stata MCP` output channel for reference.
 
 ## Settings
@@ -54,7 +54,7 @@ VS Code agents (`.vscode/mcp.json`):
     "mcp_stata": {
       "type": "stdio",
       "command": "uvx",
-      "args": ["--from", "mcp-stata", "mcp-stata"]
+      "args": ["--from", "mcp-stata", "mcp-stata", "--refresh"]
     }
   }
 }
@@ -66,7 +66,7 @@ Cursor agents (`.cursor/mcp.json`):
   "mcpServers": {
     "mcp_stata": {
       "command": "uvx",
-      "args": ["--from", "mcp-stata", "mcp-stata"]
+      "args": ["--from", "mcp-stata", "mcp-stata", "--refresh"]
     }
   }
 }

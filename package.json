@@ -13,7 +13,7 @@
   "bugs": {
     "url": "https://github.com/tmonk/stata-workbench/issues"
   },
-  "version": "0.3.2",
+  "version": "0.4.0",
   "engines": {
     "vscode": "^1.75.0"
   },
@@ -201,6 +201,7 @@
     "bundle": "node ./build/esbuild.js --production",
     "watch": "node ./build/esbuild.js --watch",
     "test": "mocha test/unit/**/*.test.js",
+    "pretest:integration": "npm run compile",
     "test:integration": "MCP_STATA_INTEGRATION=1 node ./test/integration/runTest.js",
     "vscode:prepublish": "npm run bundle",
     "package": "npm run bundle && npx vsce package",

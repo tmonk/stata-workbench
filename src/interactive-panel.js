@@ -6,6 +6,7 @@ class InteractivePanel {
   static currentPanel = null;
   static extensionUri = null;
   static _testCapture = null;
+  static variableProvider = null;
 
   static setExtensionUri(uri) {
     InteractivePanel.extensionUri = uri;
@@ -20,8 +21,11 @@ class InteractivePanel {
    * @param {object} options.initialResult
    * @param {(code: string) => Promise<object>} options.runCommand
    */
-  static show({ filePath, initialCode, initialResult, runCommand }) {
+  static show({ filePath, initialCode, initialResult, runCommand, variableProvider }) {
     const column = vscode.ViewColumn.Beside;
+    if (typeof variableProvider === 'function') {
+      InteractivePanel.variableProvider = variableProvider;
+    }
     if (!InteractivePanel.currentPanel) {
       InteractivePanel.currentPanel = vscode.window.createWebviewPanel(
         'stataInteractive',
@@ -53,6 +57,19 @@ class InteractivePanel {
         }
         if (message.type === 'openArtifact' && message.path) {
           openArtifact(message.path, message.baseDir);
+        }
+        if (message.type === 'requestVariables') {
+          const provider = InteractivePanel.variableProvider;
+          if (typeof provider === 'function') {
+            try {
+              const vars = await provider();
+              webview.postMessage({ type: 'variables', variables: vars || [] });
+            } catch (error) {
+              webview.postMessage({ type: 'variables', variables: [], error: error?.message || String(error) });
+            }
+          } else {
+            webview.postMessage({ type: 'variables', variables: [] });
+          }
         }
         if (message.type === 'log') {
           console.log(`[Client Log] ${message.level || 'info'}: ${message.message}`);
@@ -105,14 +122,15 @@ class InteractivePanel {
    * @param {string} [filePath] - associated file path to update title if needed
    * @param {(code: string) => Promise<object>} [runCommand] - command runner if panel needs initialization
    */
-  static addEntry(code, result, filePath, runCommand) {
+  static addEntry(code, result, filePath, runCommand, variableProvider) {
     if (!InteractivePanel.currentPanel) {
       // If panel not open, open it with this as initial state
       InteractivePanel.show({
         filePath,
         initialCode: code,
         initialResult: result,
-        runCommand: runCommand || (async () => { throw new Error('Session not fully initialized'); })
+        runCommand: runCommand || (async () => { throw new Error('Session not fully initialized'); }),
+        variableProvider: variableProvider || InteractivePanel.variableProvider
       });
       return;
     }
@@ -177,8 +195,9 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
       <textarea id="command-input" placeholder="Run Stata command..." rows="1" autofocus></textarea>
       <div class="input-footer">
         <div class="key-hint">
-          <span class="kbd">Enter</span> <span>to run</span>
-          <span class="kbd" style="margin-left: 6px;">Shift + Enter</span> <span>newline</span>
+          <span class="kbd">Enter</span><span>run</span>
+          <span class="kbd">PgUp/Down</span><span>prev/next</span>
+          <span class="kbd">Tab</span><span>complete</span>
         </div>
         <button id="run-btn" class="btn btn-primary btn-sm">
           <span>Run</span>
@@ -206,6 +225,11 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
     
     // Initial history embedded from server
     const initialEntries = window.initialEntries || [];
+    const history = [];
+    let historyIndex = -1; // -1 means not currently traversing history
+    const variables = [];
+    let variablesPending = false;
+    let lastCompletion = null;
 
     let busy = false;
 
@@ -216,20 +240,64 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
       this.style.height = 'auto';
       this.style.height = Math.min(this.scrollHeight, 200) + 'px';
       if (this.value === '') this.style.height = 'auto';
+      lastCompletion = null;
     });
 
     // Handle keys
     input.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter' && !e.shiftKey) {
-            e.preventDefault();
-            doRun();
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        doRun();
+        return;
+      }
+
+      if (e.key === 'Tab') {
+        // Always prevent focus from leaving the input; attempt completion if possible.
+        e.preventDefault();
+        const used = handleTabCompletion();
+        if (!used) {
+          requestVariables();
         }
+        return;
+      }
+
+      if (e.key === 'PageUp') {
+        // Navigate backward through history
+        if (history.length === 0) return;
+        e.preventDefault();
+        if (historyIndex === -1) {
+          historyIndex = history.length - 1;
+        } else if (historyIndex > 0) {
+          historyIndex -= 1;
+        }
+        applyHistory();
+        return;
+      }
+
+      if (e.key === 'PageDown') {
+        // Navigate forward through history (or clear if past newest)
+        if (historyIndex === -1) return;
+        e.preventDefault();
+        if (historyIndex < history.length - 1) {
+          historyIndex += 1;
+          applyHistory();
+        } else {
+          historyIndex = -1;
+          clearInput();
+        }
+      }
     });
 
     runBtn.addEventListener('click', doRun);
 
     // Bind shared artifact events (delegated)
     window.stataUI.bindArtifactEvents(vscode);
+
+    function requestVariables() {
+      if (variablesPending) return;
+      variablesPending = true;
+      vscode.postMessage({ type: 'requestVariables' });
+    }
 
     function updateLastCommand(code) {
         const lastCmd = document.getElementById('last-command');
@@ -240,19 +308,35 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
     }
 
     function doRun() {
-        if (busy) return;
-        const code = input.value.trim();
-        if (!code) return;
+      if (busy) return;
+      const code = input.value.trim();
+      if (!code) return;
 
-        updateLastCommand(code);
-        vscode.postMessage({ type: 'run', code });
+      updateLastCommand(code);
+      vscode.postMessage({ type: 'run', code });
 
-        // Optimistically append user message
-        appendUserMessage(code);
+      // Optimistically append user message
+      appendUserMessage(code);
 
-        input.value = '';
-        input.style.height = 'auto';
-        input.focus();
+      clearInput();
+      historyIndex = -1; // reset traversal once we run a new command
+    }
+
+    function clearInput() {
+      input.value = '';
+      input.style.height = 'auto';
+      input.focus();
+    }
+
+    function applyHistory() {
+      if (historyIndex < 0 || historyIndex >= history.length) return;
+      input.value = history[historyIndex] || '';
+      input.style.height = 'auto';
+      input.style.height = Math.min(input.scrollHeight, 200) + 'px';
+      // Move cursor to end for quick editing
+      const len = input.value.length;
+      input.setSelectionRange(len, len);
+      lastCompletion = null;
     }
 
     function setBusy(value) {
@@ -280,6 +364,11 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
         if (lastGroup && lastGroup.dataset.optimistic) {
             lastGroup.remove();
         }
+
+      if (entry.code) {
+        history.push(entry.code);
+        historyIndex = -1; // newest entry resets traversal
+      }
 
         // Update last command in header
         updateLastCommand(entry.code);
@@ -365,6 +454,22 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
       }
       if (msg.type === 'busy') setBusy(msg.value);
 
+      if (msg.type === 'variables') {
+        variablesPending = false;
+        const incoming = Array.isArray(msg.variables) ? msg.variables : [];
+        variables.length = 0;
+        incoming.forEach((v) => {
+            if (typeof v === 'string') {
+                variables.push(v);
+                return;
+            }
+            if (v && typeof v === 'object' && v.name) {
+                variables.push(v.name);
+            }
+        });
+        lastCompletion = null;
+      }
+
       if (msg.type === 'error') {
         const div = document.createElement('div');
         div.className = 'message-group';
@@ -383,6 +488,7 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
         initialEntries.forEach(appendEntry);
         // Notify ready
         vscode.postMessage({ type: 'ready' });
+      requestVariables();
     } catch (err) {
         console.error('Failed to render initial entries', err);
         vscode.postMessage({ type: 'log', level: 'error', message: err.message });
@@ -434,6 +540,55 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
     }
 
     setBusy(false);
+    requestVariables();
+
+    function handleTabCompletion() {
+      if (!variables.length) {
+        requestVariables();
+        return false;
+      }
+
+      const token = currentToken();
+      if (!token) return false;
+
+      const names = variables.filter(Boolean);
+      const matches = names.filter((name) => name.toLowerCase().startsWith(token.prefix.toLowerCase()));
+      if (!matches.length) return false;
+
+      if (!lastCompletion || lastCompletion.prefix !== token.prefix || lastCompletion.start !== token.start || lastCompletion.end !== token.end) {
+        lastCompletion = { prefix: token.prefix, start: token.start, end: token.end, index: 0, matches };
+      } else {
+        lastCompletion.index = (lastCompletion.index + 1) % matches.length;
+      }
+
+      const replacement = matches[lastCompletion.index];
+      applyReplacement(token.start, token.end, replacement);
+      return true;
+    }
+
+    function currentToken() {
+      const pos = input.selectionStart;
+      if (pos === null || pos === undefined) return null;
+      const text = input.value;
+      const before = text.slice(0, pos);
+      const beforeMatch = before.match(/([A-Za-z0-9_\.]+)$/);
+      if (!beforeMatch) return null;
+      const prefix = beforeMatch[1];
+      const start = pos - prefix.length;
+      const after = text.slice(pos);
+      const afterMatch = after.match(/^([A-Za-z0-9_\.]+)/);
+      const end = pos + (afterMatch ? afterMatch[1].length : 0);
+      if (!prefix) return null;
+      return { prefix, start, end };
+    }
+
+    function applyReplacement(start, end, replacement) {
+      const value = input.value;
+      input.value = value.slice(0, start) + replacement + value.slice(end);
+      const cursor = start + replacement.length;
+      input.setSelectionRange(cursor, cursor);
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    }
   </script>
 </body>
 </html>`;
