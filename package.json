@@ -13,7 +13,7 @@
   "bugs": {
     "url": "https://github.com/tmonk/stata-workbench/issues"
   },
-  "version": "0.1.1",
+  "version": "0.2.0",
   "engines": {
     "vscode": "^1.75.0"
   },
@@ -138,6 +138,11 @@
           "type": "boolean",
           "default": true,
           "description": "Automatically show the Stata output channel after runs."
+        },
+        "stataMcp.runFileWorkingDirectory": {
+          "type": "string",
+          "default": "",
+          "description": "Working directory when running .do files. Supports an absolute path, ~, ${workspaceFolder} or ${fileDir}; empty uses the .do file's folder."
         }
       }
     },
@@ -205,6 +210,7 @@
     "bundle": "node ./build/esbuild.js --production",
     "watch": "node ./build/esbuild.js --watch",
     "test": "mocha test/unit/**/*.test.js",
+    "test:integration": "STATA_MCP_INTEGRATION=1 mocha test/integration/**/*.test.js",
     "vscode:prepublish": "npm run bundle",
     "package": "npm run bundle && npx vsce package",
     "package:dist": "npm run bundle && node -e \"require('fs').mkdirSync('dist',{recursive:true});\" && npx vsce package --out dist/stata-workbench-$npm_package_version.vsix",
@@ -218,7 +224,8 @@
     }
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.24.3"
+    "@modelcontextprotocol/sdk": "^1.24.3",
+    "@vscode/vsce": "^3.7.1"
   },
   "devDependencies": {
     "chai": "^6.2.1",

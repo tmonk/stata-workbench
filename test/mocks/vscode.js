@@ -1,10 +1,17 @@
 const sinon = require('sinon');
 
+const configuration = {
+    get: sinon.stub().callsFake((key, defaultValue) => {
+        if (key === 'requestTimeoutMs') return 1000;
+        if (key === 'runFileWorkingDirectory') return '';
+        if (key === 'autoRevealOutput') return true;
+        return defaultValue;
+    })
+};
+
 const vscode = {
     workspace: {
-        getConfiguration: sinon.stub().returns({
-            get: sinon.stub().returns(1000)
-        }),
+        getConfiguration: sinon.stub().returns(configuration),
         workspaceFolders: [{ uri: { fsPath: '/mock/workspace' } }]
     },
     window: {
