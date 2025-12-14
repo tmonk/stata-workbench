@@ -57,8 +57,8 @@ class StataMcpClient {
 
     async runFile(filePath, options = {}) {
         const { normalizeResult, includeGraphs, ...rest } = options || {};
-        // Set working directory to the do-file location so relative includes work.
-        const cwd = path.dirname(filePath);
+        // Resolve working directory (configurable, defaults to the .do file folder).
+        const cwd = this._resolveRunFileCwd(filePath);
         return this._enqueue('run_file', rest, async (client) => {
             const response = await this._callTool(client, 'run_do_file', {
                 // Use absolute path so the server can locate the file, but also
@@ -424,6 +424,44 @@ class StataMcpClient {
             return this._workspaceRoot;
         }
         return undefined;
+    }
+
+    _resolveRunFileCwd(filePath) {
+        const fileDir = path.dirname(filePath);
+        const config = vscode.workspace.getConfiguration('stataMcp');
+        const rawTemplate = config.get('runFileWorkingDirectory', '');
+        const template = typeof rawTemplate === 'string' ? rawTemplate : '';
+        if (!template.trim()) return fileDir;
+
+        const workspaceRoot = this._resolveWorkspaceRoot() || '';
+        const replacements = {
+            workspaceFolder: workspaceRoot,
+            workspaceRoot,
+            fileDir
+        };
+
+        const expanded = template.replace(/\$\{([^}]+)\}/g, (_m, key) => {
+            if (Object.prototype.hasOwnProperty.call(replacements, key)) {
+                return replacements[key] || '';
+            }
+            return '';
+        }).trim();
+
+        if (!expanded) return fileDir;
+
+        const homeExpanded = expanded.startsWith('~')
+            ? path.join(process.env.HOME || process.env.USERPROFILE || '', expanded.slice(1))
+            : expanded;
+
+        if (path.isAbsolute(homeExpanded)) {
+            return path.normalize(homeExpanded);
+        }
+
+        if (workspaceRoot) {
+            return path.normalize(path.join(workspaceRoot, homeExpanded));
+        }
+
+        return path.normalize(path.resolve(homeExpanded));
     }
 
     async _collectGraphArtifacts(client, meta = {}) {

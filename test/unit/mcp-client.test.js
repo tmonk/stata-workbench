@@ -1,6 +1,7 @@
 const assert = require('chai').assert;
 const sinon = require('sinon');
 const proxyquire = require('proxyquire');
+const path = require('path');
 const vscodeMock = require('../mocks/vscode');
 
 // Mock MCP SDK
@@ -42,6 +43,17 @@ describe('McpClient', () => {
         client = new McpClient({
             subscriptions: [],
             extensionUri: { fsPath: '/test/path' }
+        });
+
+        vscodeMock.workspace.workspaceFolders = [{ uri: { fsPath: '/mock/workspace' } }];
+
+        const config = vscodeMock.workspace.getConfiguration();
+        config.get.resetBehavior();
+        config.get.callsFake((key, def) => {
+            if (key === 'requestTimeoutMs') return 1000;
+            if (key === 'runFileWorkingDirectory') return '';
+            if (key === 'autoRevealOutput') return true;
+            return def;
         });
 
         // Mock internal methods to avoid actual process spawning
@@ -151,6 +163,139 @@ describe('McpClient', () => {
             const args = enqueueSpy.firstCall.args;
             assert.equal(args[0], 'run');
             assert.equal(args[5], true); // collectArtifacts flag
+        });
+    });
+
+    describe('runFile', () => {
+        it('should honor resolved cwd when no workspace folders exist', async () => {
+            const originalFolders = vscodeMock.workspace.workspaceFolders;
+            vscodeMock.workspace.workspaceFolders = [];
+
+            const config = vscodeMock.workspace.getConfiguration();
+            config.get.callsFake((key, def) => {
+                if (key === 'runFileWorkingDirectory') return 'relative/run';
+                if (key === 'requestTimeoutMs') return 1000;
+                return def;
+            });
+
+            const callToolStub = client._callTool;
+            callToolStub.resetBehavior();
+            callToolStub.callsFake(async (_client, name, args) => ({ name, args }));
+
+            const enqueueStub = sinon.stub(client, '_enqueue').callsFake(async (label, rest, task, meta, normalize, collect) => {
+                const taskResult = await task({});
+                return { label, rest, meta, normalize, collect, taskResult };
+            });
+
+            const result = await client.runFile('/tmp/project/script.do');
+
+            assert.isTrue(enqueueStub.calledOnce);
+            const [label, rest, , meta, normalizeFlag, collectFlag] = enqueueStub.firstCall.args;
+            assert.equal(label, 'run_file');
+            assert.deepEqual(rest, {});
+            assert.equal(normalizeFlag, false);
+            assert.equal(collectFlag, false);
+
+            const expectedCwd = path.normalize(path.resolve('relative/run'));
+            assert.equal(meta.cwd, expectedCwd);
+            assert.equal(meta.filePath, '/tmp/project/script.do');
+            assert.equal(meta.command, 'do "/tmp/project/script.do"');
+
+            assert.equal(result.taskResult.name, 'run_do_file');
+            assert.equal(result.taskResult.args.cwd, expectedCwd);
+            assert.equal(result.taskResult.args.path, '/tmp/project/script.do');
+
+            enqueueStub.restore();
+            vscodeMock.workspace.workspaceFolders = originalFolders;
+        });
+    });
+
+    describe('_resolveRunFileCwd', () => {
+        it('should default to the file directory when unset', () => {
+            const cwd = client._resolveRunFileCwd('/tmp/project/script.do');
+            assert.equal(cwd, '/tmp/project');
+        });
+
+        it('should expand workspace and fileDir tokens', () => {
+            const config = vscodeMock.workspace.getConfiguration();
+            config.get.callsFake((key, def) => {
+                if (key === 'runFileWorkingDirectory') return '${workspaceFolder}/sub/${fileDir}';
+                if (key === 'requestTimeoutMs') return 1000;
+                return def;
+            });
+
+            const cwd = client._resolveRunFileCwd('/tmp/project/script.do');
+            assert.equal(cwd, path.normalize('/mock/workspace/sub//tmp/project'));
+        });
+
+        it('should honor absolute paths', () => {
+            const config = vscodeMock.workspace.getConfiguration();
+            config.get.callsFake((key, def) => {
+                if (key === 'runFileWorkingDirectory') return '/abs/path';
+                if (key === 'requestTimeoutMs') return 1000;
+                return def;
+            });
+
+            const cwd = client._resolveRunFileCwd('/tmp/project/script.do');
+            assert.equal(cwd, '/abs/path');
+        });
+
+        it('should expand tilde to home directory', () => {
+            const config = vscodeMock.workspace.getConfiguration();
+            const originalHome = process.env.HOME;
+            process.env.HOME = '/home/tester';
+
+            config.get.callsFake((key, def) => {
+                if (key === 'runFileWorkingDirectory') return '~/stata/runs';
+                if (key === 'requestTimeoutMs') return 1000;
+                return def;
+            });
+
+            const cwd = client._resolveRunFileCwd('/tmp/project/script.do');
+            assert.equal(cwd, '/home/tester/stata/runs');
+
+            process.env.HOME = originalHome;
+        });
+
+        it('should fall back to file directory when tokens are unknown', () => {
+            const config = vscodeMock.workspace.getConfiguration();
+            config.get.callsFake((key, def) => {
+                if (key === 'runFileWorkingDirectory') return '${unknownToken}';
+                if (key === 'requestTimeoutMs') return 1000;
+                return def;
+            });
+
+            const cwd = client._resolveRunFileCwd('/tmp/project/script.do');
+            assert.equal(cwd, '/tmp/project');
+        });
+
+        it('should resolve relative paths against workspace root when available', () => {
+            const config = vscodeMock.workspace.getConfiguration();
+            config.get.callsFake((key, def) => {
+                if (key === 'runFileWorkingDirectory') return 'relative/run';
+                if (key === 'requestTimeoutMs') return 1000;
+                return def;
+            });
+
+            const cwd = client._resolveRunFileCwd('/tmp/project/script.do');
+            assert.equal(cwd, path.normalize('/mock/workspace/relative/run'));
+        });
+
+        it('should resolve relative paths against process cwd when workspace is missing', () => {
+            const config = vscodeMock.workspace.getConfiguration();
+            const originalFolders = vscodeMock.workspace.workspaceFolders;
+            vscodeMock.workspace.workspaceFolders = [];
+
+            config.get.callsFake((key, def) => {
+                if (key === 'runFileWorkingDirectory') return 'relative/run';
+                if (key === 'requestTimeoutMs') return 1000;
+                return def;
+            });
+
+            const cwd = client._resolveRunFileCwd('/tmp/project/script.do');
+            assert.equal(cwd, path.normalize(path.resolve('relative/run')));
+
+            vscodeMock.workspace.workspaceFolders = originalFolders;
         });
     });
 

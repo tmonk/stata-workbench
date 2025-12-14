@@ -31,9 +31,10 @@ Offline/VSIX fallback:
 - Auto-manage MCP configs: writes `.vscode/mcp.json` and `.cursor/mcp.json` so agents reuse the same `uvx --from mcp-stata` wiring.
 - Run results surface in the Run panel + `Stata MCP` output channel for durable logs.
 
-## Settings (contributes)
+## Settings
 - `stataMcp.requestTimeoutMs` (default `45000`): timeout for MCP requests.
 - `stataMcp.autoRevealOutput` (default `true`): automatically show the output channel after runs.
+- `stataMcp.runFileWorkingDirectory` (default empty): working directory when running .do files. Supports an absolute path, ~, ${workspaceFolder} or ${fileDir}; empty uses the .do file's folder.
 
 ## Agent MCP configs (optional)
 When uv is available, the extension writes `.vscode/mcp.json` + `.cursor/mcp.json` with the correct `mcp_stata` wiring. If you want to manage the files yourself (or copy them into another repo) use the snippets below.
@@ -69,23 +70,10 @@ Cursor agents (`.cursor/mcp.json`):
 - Unexpected MCP errors: open the output channel for a structured error message.
 - Cancel a stuck run: run `Stata: Cancel Current Request` from the command palette.
 
-## Packaging
-- Build bundle: `npm run bundle` (runs esbuild in production mode).
-- Build VSIX: `npm install && npm run package` (bundles then invokes `vsce`).
-- Publish to VS Code Marketplace: `VSCE_PAT=<token> npm run package && npx vsce publish` (or use your own flow).
-- Publish to Open VSX: `OVSX_TOKEN=<token> npm run publish:ovsx` (see [Open VSX publishing guide](https://github.com/EclipseFdn/open-vsx.org/wiki/Publishing-Extensions)).
-
 ## Uninstall cleanup (optional)
 If you added agent configs and want to remove them:
 - `.vscode/mcp.json` → delete `servers.mcp_stata`
 - `.cursor/mcp.json` → delete `mcpServers.mcp_stata`
-
-## Development
-- Install deps: `npm install`
-- Bundle once for local debugging: `npm run compile`
-- Watch mode while iterating: `npm run watch`
-- Tests: `npm test`
-- Package: `npm run package` (or `npm run package:dist` for output to the dist directory)
 
 ## Acknowledgments
 Portions of this file are derived from [stata-mcp](https://github.com/hanlulong/stata-mcp) (MIT License), [language-stata](https://github.com/kylebarron/language-stata) by Kyle Barron (MIT License), and [vscode-stata](https://github.com/kylebutts/vscode-stata) by Kyle Butts (MIT License). See license_extras for the full license texts. Do check their projects out!
