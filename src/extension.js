@@ -60,7 +60,7 @@ function ensureMcpCliAvailable(context) {
     const found = findUvBinary();
     if (found) {
         uvCommand = found;
-        process.env.STATA_MCP_UVX_CMD = uvCommand;
+        process.env.MCP_STATA_UVX_CMD = uvCommand;
         return true;
     }
 
@@ -78,7 +78,7 @@ function ensureMcpCliAvailable(context) {
     const installed = findUvBinary(installDir);
     if (result.status === 0 && installed) {
         uvCommand = installed;
-        process.env.STATA_MCP_UVX_CMD = uvCommand;
+        process.env.MCP_STATA_UVX_CMD = uvCommand;
         return true;
     }
 

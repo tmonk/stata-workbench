@@ -6,11 +6,11 @@ const proxyquire = require('proxyquire');
 const { spawnSync } = require('child_process');
 
 // Full integration test that exercises runFile against the real mcp-stata server.
-// Requires: uvx + mcp-stata available, Stata licensed, and STATA_MCP_INTEGRATION=1.
+// Requires: uvx + mcp-stata available, Stata licensed, and MCP_STATA_INTEGRATION=1.
 describe('McpClient integration (requires mcp_stata)', function () {
     this.timeout(120000);
 
-    const enabled = process.env.STATA_MCP_INTEGRATION === '1';
+    const enabled = process.env.MCP_STATA_INTEGRATION === '1';
     let tempRoot;
     let workDir;
     let doDir;
@@ -23,13 +23,13 @@ describe('McpClient integration (requires mcp_stata)', function () {
             return;
         }
 
-        const uvxCmd = process.env.STATA_MCP_UVX_CMD || 'uvx';
+        const uvxCmd = process.env.MCP_STATA_UVX_CMD || 'uvx';
         const uvxProbe = spawnSync(uvxCmd, ['--version'], { encoding: 'utf8' });
         if (uvxProbe.status !== 0) {
             this.skip();
             return;
         }
-        process.env.STATA_MCP_UVX_CMD = uvxCmd;
+        process.env.MCP_STATA_UVX_CMD = uvxCmd;
 
         tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'stata-wb-int-'));
         workDir = path.join(tempRoot, 'workdir');

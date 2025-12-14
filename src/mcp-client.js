@@ -152,7 +152,7 @@ class StataMcpClient {
             throw new Error(`MCP SDK not found. Please run \`npm install\` to fetch @modelcontextprotocol/sdk.${detail}`);
         }
 
-        const uvCommand = process.env.STATA_MCP_UVX_CMD || 'uvx';
+        const uvCommand = process.env.MCP_STATA_UVX_CMD || 'uvx';
         const transport = new StdioClientTransport({
             command: uvCommand,
             args: ['--from', MCP_PACKAGE_SPEC, MCP_PACKAGE_NAME],
