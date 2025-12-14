@@ -130,6 +130,53 @@ pre {
  * Components 
  */
 
+/* Context Header */
+.context-header {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: rgba(18, 18, 20, 0.95);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--border-subtle);
+  padding: var(--space-xs) var(--space-md);
+  margin-bottom: var(--space-md);
+}
+
+.context-info {
+  max-width: 900px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12px;
+}
+
+.context-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+}
+
+.context-label {
+  color: var(--text-tertiary);
+  font-weight: 500;
+}
+
+.context-value {
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.context-command {
+  max-width: 500px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+
 /* Chat Stream Layout */
 .chat-stream {
   max-width: 900px;

@@ -152,7 +152,21 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
   </script>
 </head>
 <body>
-  
+
+  <!-- Context Header -->
+  <div class="context-header" id="context-header">
+    <div class="context-info">
+      <div class="context-row">
+        <span class="context-label">File:</span>
+        <span class="context-value" id="context-file">${escapedTitle}</span>
+      </div>
+      <div class="context-row">
+        <span class="context-label">Last command:</span>
+        <span class="context-value context-command" id="last-command">—</span>
+      </div>
+    </div>
+  </div>
+
   <main class="chat-stream" id="chat-stream">
     <!-- Entries injected here -->
   </main>
@@ -217,16 +231,25 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
     // Bind shared artifact events (delegated)
     window.stataUI.bindArtifactEvents(vscode);
 
+    function updateLastCommand(code) {
+        const lastCmd = document.getElementById('last-command');
+        if (lastCmd) {
+            lastCmd.textContent = code;
+            lastCmd.title = code; // Full text on hover
+        }
+    }
+
     function doRun() {
         if (busy) return;
         const code = input.value.trim();
         if (!code) return;
-        
+
+        updateLastCommand(code);
         vscode.postMessage({ type: 'run', code });
-        
+
         // Optimistically append user message
         appendUserMessage(code);
-        
+
         input.value = '';
         input.style.height = 'auto';
         input.focus();
@@ -257,6 +280,9 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
         if (lastGroup && lastGroup.dataset.optimistic) {
             lastGroup.remove();
         }
+
+        // Update last command in header
+        updateLastCommand(entry.code);
 
         // Build HTML
         const userHtml = \`
