@@ -210,36 +210,32 @@ function writeMcpConfig(configPath, isVscodeFormat) {
         }
 
         const resolvedCommand = uvCommand || 'uvx';
+        const expectedArgs = ['--refresh', '--from', MCP_PACKAGE_SPEC, MCP_PACKAGE_NAME];
+
         const expectedCursor = {
             command: resolvedCommand,
-            args: ['--from', MCP_PACKAGE_SPEC, MCP_PACKAGE_NAME]
+            args: expectedArgs
         };
 
         const expectedVscode = {
             type: 'stdio',
             command: resolvedCommand,
-            args: ['--from', MCP_PACKAGE_SPEC, MCP_PACKAGE_NAME]
+            args: expectedArgs
         };
 
         if (isVscodeFormat) {
             json.servers = json.servers || {};
             const existing = json.servers[MCP_SERVER_ID];
-            if (existing) {
-                if (!configsMatch(existing, expectedVscode, true)) {
-                    vscode.window.showErrorMessage(`Existing MCP config at ${configPath} has mcp_stata pointing elsewhere. Please set it to uvx --from ${MCP_PACKAGE_NAME} ${MCP_PACKAGE_NAME}.`);
-                }
-            } else {
+            if (!configsMatch(existing, expectedVscode, true)) {
                 json.servers[MCP_SERVER_ID] = expectedVscode;
+                outputChannel?.appendLine?.(`Updated VS Code MCP config at ${configPath} for ${MCP_SERVER_ID}`);
             }
         } else {
             json.mcpServers = json.mcpServers || {};
             const existing = json.mcpServers[MCP_SERVER_ID];
-            if (existing) {
-                if (!configsMatch(existing, expectedCursor, false)) {
-                    vscode.window.showErrorMessage(`Existing MCP config at ${configPath} has mcp_stata pointing elsewhere. Please set it to uvx --from ${MCP_PACKAGE_NAME} ${MCP_PACKAGE_NAME}.`);
-                }
-            } else {
+            if (!configsMatch(existing, expectedCursor, false)) {
                 json.mcpServers[MCP_SERVER_ID] = expectedCursor;
+                outputChannel?.appendLine?.(`Updated Cursor MCP config at ${configPath} for ${MCP_SERVER_ID}`);
             }
         }
 
@@ -378,6 +374,16 @@ const interactiveRunCommand = async (code) => {
     }
 };
 
+const variableListProvider = async () => {
+    try {
+        const list = await mcpClient.getVariableList();
+        return Array.isArray(list) ? list : [];
+    } catch (error) {
+        outputChannel?.appendLine(`Failed to fetch variable list: ${error?.message || error}`);
+        return [];
+    }
+};
+
 async function showInteractive() {
     const editor = vscode.window.activeTextEditor;
     // We allow opening without an active editor too, but if present we might seed context.
@@ -413,7 +419,8 @@ async function showInteractive() {
         filePath,
         initialCode,
         initialResult,
-        runCommand: interactiveRunCommand
+        runCommand: interactiveRunCommand,
+        variableProvider: variableListProvider
     });
 }
 
@@ -677,7 +684,7 @@ async function presentRunResult(commandText, result, filePath) {
     logRunToOutput(result, commandText);
 
     // Ensure interactive panel is showing the new entry, initializing if needed with the proper runner
-    InteractivePanel.addEntry(commandText, result, filePath, interactiveRunCommand);
+    InteractivePanel.addEntry(commandText, result, filePath, interactiveRunCommand, variableListProvider);
 }
 
 function logRunToOutput(result, contextTitle) {
@@ -737,5 +744,6 @@ async function cancelRequest() {
 module.exports = {
     activate,
     deactivate,
-    refreshMcpPackage
+    refreshMcpPackage,
+    writeMcpConfig
 };

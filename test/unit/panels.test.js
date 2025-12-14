@@ -92,12 +92,14 @@ describe('Panels', () => {
                 InteractivePanel.currentPanel = null;
 
                 const runCmd = async () => { };
-                InteractivePanel.addEntry('code', { stdout: 'res' }, '/path', runCmd);
+                const varProvider = () => [];
+                InteractivePanel.addEntry('code', { stdout: 'res' }, '/path', runCmd, varProvider);
 
                 assert.isTrue(showCalled);
                 assert.equal(capturedOptions.initialCode, 'code');
                 assert.equal(capturedOptions.filePath, '/path');
                 assert.equal(capturedOptions.runCommand, runCmd);
+                assert.equal(capturedOptions.variableProvider, varProvider);
 
                 // Restore
                 InteractivePanel.show = originalShow;

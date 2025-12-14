@@ -166,6 +166,41 @@ describe('McpClient', () => {
         });
     });
 
+    describe('getVariableList', () => {
+        it('enqueues get_variable_list and returns normalized list', async () => {
+            const enqueueStub = sinon.stub(client, '_enqueue').callsFake(async (label, options, task) => {
+                assert.equal(label, 'get_variable_list');
+                assert.deepEqual(options, {});
+                const normalized = await task();
+                return normalized;
+            });
+
+            client._callTool.callsFake(async () => ({ variables: [{ name: 'price', label: 'Price' }, { variable: 'mpg' }] }));
+
+            const result = await client.getVariableList();
+
+            assert.deepEqual(result, [
+                { name: 'price', label: 'Price' },
+                { name: 'mpg', label: '' }
+            ]);
+            enqueueStub.restore();
+        });
+
+        it('_normalizeVariableList handles strings, objects, and nested content', () => {
+            const strings = client._normalizeVariableList(['price', 'mpg']);
+            assert.deepEqual(strings, [
+                { name: 'price', label: '' },
+                { name: 'mpg', label: '' }
+            ]);
+
+            const objects = client._normalizeVariableList({ variables: [{ variable: 'weight', desc: 'Weight' }] });
+            assert.deepEqual(objects, [{ name: 'weight', label: 'Weight' }]);
+
+            const nested = client._normalizeVariableList({ content: [{ text: JSON.stringify({ vars: [{ var: 'turn' }] }) }] });
+            assert.deepEqual(nested, [{ name: 'turn', label: '' }]);
+        });
+    });
+
     describe('runFile', () => {
         it('should honor resolved cwd when no workspace folders exist', async () => {
             const originalFolders = vscodeMock.workspace.workspaceFolders;

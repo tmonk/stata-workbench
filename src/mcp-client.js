@@ -85,6 +85,13 @@ class StataMcpClient {
         });
     }
 
+    async getVariableList(options = {}) {
+        return this._enqueue('get_variable_list', options, async (client) => {
+            const response = await this._callTool(client, 'get_variable_list', {});
+            return this._normalizeVariableList(response);
+        });
+    }
+
     async listGraphs(options = {}) {
         return this._enqueue('list_graphs', options, async (client) => {
             let raw;
@@ -379,6 +386,46 @@ class StataMcpClient {
             }
             return '';
         }
+    }
+
+    _normalizeVariableList(response) {
+        const parsed = this._parseJson(response?.text ?? response);
+        const source = this._firstVarList(parsed) || this._firstVarList(response) || [];
+        return source
+            .map((v) => {
+                if (typeof v === 'string') return { name: v, label: '' };
+                if (!v || typeof v !== 'object') return null;
+                const name = v.name || v.variable || v.var || v.key || v.label;
+                if (!name) return null;
+                const label = v.label || v.desc || v.description || '';
+                return { name, label };
+            })
+            .filter(Boolean);
+    }
+
+    _firstVarList(candidate) {
+        if (!candidate) return null;
+        if (Array.isArray(candidate)) return candidate;
+        if (Array.isArray(candidate?.variables)) return candidate.variables;
+        if (Array.isArray(candidate?.vars)) return candidate.vars;
+        if (Array.isArray(candidate?.data)) return candidate.data;
+        if (Array.isArray(candidate?.list)) return candidate.list;
+        if (Array.isArray(candidate?.content)) {
+            for (const item of candidate.content) {
+                const fromItem = this._firstVarList(item);
+                if (fromItem) return fromItem;
+                if (item?.text) {
+                    const parsed = this._parseJson(item.text);
+                    const fromParsed = this._firstVarList(parsed);
+                    if (fromParsed) return fromParsed;
+                }
+            }
+        }
+        if (typeof candidate === 'string') {
+            const parsed = this._tryParseJson(candidate);
+            if (parsed) return this._firstVarList(parsed);
+        }
+        return null;
     }
 
     _parseJson(maybeJson) {
