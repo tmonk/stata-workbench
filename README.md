@@ -1,5 +1,7 @@
 # Stata Workbench
 
+<img style="margin: auto; text-align: center;" src="https://raw.githubusercontent.com/tmonk/stata-workbench/refs/heads/main/img/icon.png" width="200">
+
 A VS Code / Cursor / Antigravity / Windsurf extension that allows Stata code to be run directly from the editor. Enables AI agents to directly interact with Stata, powered by [mcp-stata](https://github.com/tmonk/mcp-stata).
 
 Built by [Thomas Monk](https://tdmonk.com), London School of Economics.
