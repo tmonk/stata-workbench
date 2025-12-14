@@ -1,6 +1,6 @@
 # Stata Workbench
 
-A VS Code / Cursor extension that allows Stata code to be run directly from the editor. It connects directly to the [mcp-stata](https://github.com/tmonk/mcp-stata) MCP server over stdio.
+A VS Code / Cursor extension that allows Stata code to be run directly from the editor. Enables AI agents to directly interact with Stata, powered by [mcp-stata](https://github.com/tmonk/mcp-stata).
 
 Built by [Thomas Monk](https://tdmonk.com), London School of Economics.
 

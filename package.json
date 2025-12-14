@@ -1,7 +1,7 @@
 {
   "name": "stata-workbench",
   "displayName": "Stata Workbench",
-  "description": "Run and visualize Stata from VS Code with syntax highlighting and graph previews, powered by mcp-stata.",
+  "description": "Allows Stata code to be run directly from the IDE. Enables AI agents to directly interact with Stata, powered by mcp-stata.",
   "author": "Thomas Monk",
   "publisher": "tmonk",
   "license": "AGPL-3.0-or-later",
