@@ -48,7 +48,8 @@ function activate(context) {
     missingCli = !ensureMcpCliAvailable(context);
     if (!missingCli) {
         ensureMcpConfigs(context);
-        mcpPackageVersion = getMcpPackageVersion();
+        const refreshed = refreshMcpPackage();
+        mcpPackageVersion = refreshed || getMcpPackageVersion();
         outputChannel.appendLine(`mcp-stata version: ${mcpPackageVersion}`);
     }
     updateStatusBar(missingCli ? 'missing' : 'idle');
@@ -118,6 +119,37 @@ function getMcpPackageVersion() {
     } catch (_err) {
         return 'unknown';
     }
+}
+
+function refreshMcpPackage() {
+    const cmd = uvCommand || 'uvx';
+    const args = ['--refresh', '--from', MCP_PACKAGE_SPEC, MCP_PACKAGE_NAME, '--version'];
+    try {
+        const result = spawnSync(cmd, args, { encoding: 'utf8', timeout: 10000 });
+        const stdout = result?.stdout?.toString?.().trim() || '';
+        const stderr = result?.stderr?.toString?.().trim() || '';
+        const text = stdout || stderr;
+
+        if (result.status === 0) {
+            if (text) {
+                mcpPackageVersion = text;
+            }
+            if (outputChannel) {
+                outputChannel.appendLine(`Ensured latest mcp-stata via uvx --refresh (${text || 'version not reported'})`);
+            }
+            return mcpPackageVersion;
+        }
+
+        if (outputChannel) {
+            outputChannel.appendLine(`Failed to refresh mcp-stata (exit ${result.status}): ${text}`);
+        }
+    } catch (err) {
+        if (outputChannel) {
+            outputChannel.appendLine(`Error refreshing mcp-stata: ${err.message}`);
+        }
+    }
+
+    return null;
 }
 
 function promptInstallMcpCli() {
@@ -704,5 +736,6 @@ async function cancelRequest() {
 
 module.exports = {
     activate,
-    deactivate
+    deactivate,
+    refreshMcpPackage
 };

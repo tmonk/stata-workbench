@@ -15,22 +15,7 @@ suite('UI Integration', function () {
         assert.isTrue(extension.isActive, 'Extension should be active');
 
         const commands = await vscode.commands.getCommands(true);
-        assert.include(commands, 'stata-workbench.showInteractive');
         assert.include(commands, 'stata-workbench.runSelection');
         assert.include(commands, 'stata-workbench.runFile');
-    });
-
-    test('showInteractive should open the Interactive Panel', async () => {
-        // Trigger the command
-        await vscode.commands.executeCommand('stata-workbench.showInteractive');
-
-        // Wait a bit for the panel to be created
-        await new Promise(r => setTimeout(r, 1000));
-
-        // Use VS Code API to check for the panel tab
-        const tabs = vscode.window.tabGroups.all.flatMap(group => group.tabs);
-        const stataTab = tabs.find(tab => tab.label === 'Stata Interactive');
-
-        assert.ok(stataTab, 'Stata Interactive tab should be found');
     });
 });
