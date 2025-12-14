@@ -1,25 +1,44 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="913" height="913" viewBox="0 0 913 913">
-  <defs>
-    <filter id="a" x="-30%" y="-30%" width="160%" height="160%">
-      <feDropShadow dx="0" dy="4" stdDeviation="4" flood-color="#000" flood-opacity=".18"/>
-    </filter>
-  </defs>
-  <rect width="913" height="913" rx="110" ry="110" fill="#165989"/>
-  <path d="M167.1 203.4 241.5 459m-103.2 81.6L241.5 459m0 0 70.8 249.6m0 0 76.8-199.2m0 0 67.2-177.6m0 0 69.6 184.8m0 0 98.4-204m-98.4 204 73.2 192m0 0 72-249.6m0 0 73.2-255.6M671.1 459l102-63.6" fill="none" stroke="#fff" stroke-width="20" stroke-linecap="round" stroke-linejoin="round"/>
-  <g filter="url(#a)">
-    <g fill="#fff" stroke="#165989" stroke-width="10">
-      <circle cx="525.9" cy="516.6" r="36"/>
-      <circle cx="744.3" cy="203.4" r="36"/>
-      <circle cx="241.5" cy="459" r="36"/>
-      <circle cx="389.1" cy="509.4" r="36"/>
-      <circle cx="599.1" cy="708.6" r="36"/>
-      <circle cx="624.3" cy="312.6" r="36"/>
-      <circle cx="312.3" cy="708.6" r="36"/>
-      <circle cx="167.1" cy="203.4" r="36"/>
-      <circle cx="671.1" cy="459" r="36"/>
-      <circle cx="456.3" cy="331.8" r="36"/>
-      <circle cx="773.1" cy="395.4" r="36"/>
-      <circle cx="138.3" cy="540.6" r="36"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="913" height="913" viewBox="0 0 913 913" role="img" aria-label="W data mark (dark)">
+  <title>W data mark</title>
+
+  <rect x="0" y="0" width="913" height="913" rx="180" ry="180" fill="#0b0b0b"/>
+
+  <!-- Ambient network (subtle, not forming the W) -->
+  <g fill="none" stroke="#505050" stroke-linecap="round" stroke-linejoin="round" opacity="0.45">
+    <path d="M170 360 L290 210 L420 235" stroke-width="10"/>
+    <path d="M740 360 L785 520 L700 720" stroke-width="10"/>
+    <path d="M140 620 L255 760 L540 760" stroke-width="10"/>
+  </g>
+
+  <!-- Ambient points -->
+  <g fill="#6d6d6d" opacity="0.9">
+    <circle cx="170" cy="360" r="10"/>
+    <circle cx="290" cy="210" r="9"/>
+    <circle cx="420" cy="235" r="8"/>
+
+    <circle cx="740" cy="360" r="10"/>
+    <circle cx="785" cy="520" r="9"/>
+    <circle cx="700" cy="720" r="10"/>
+
+    <circle cx="540" cy="760" r="8"/>
+    <circle cx="255" cy="760" r="10"/>
+    <circle cx="140" cy="620" r="9"/>
+
+    <circle cx="610" cy="520" r="8"/>
+    <circle cx="330" cy="520" r="8"/>
+    <circle cx="520" cy="320" r="9"/>
+  </g>
+
+  <!-- Main mark -->
+  <g fill="none" stroke="#ffffff" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M232 270 L350 660 L456 455 L563 660 L681 270" stroke-width="56"/>
+
+    <g stroke-width="14">
+      <circle cx="232" cy="270" r="26" fill="#0b0b0b"/>
+      <circle cx="350" cy="660" r="26" fill="#0b0b0b"/>
+      <circle cx="456" cy="455" r="26" fill="#0b0b0b"/>
+      <circle cx="563" cy="660" r="26" fill="#0b0b0b"/>
+      <circle cx="681" cy="270" r="26" fill="#0b0b0b"/>
     </g>
   </g>
 </svg>

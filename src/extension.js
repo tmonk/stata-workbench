@@ -4,8 +4,8 @@ const vscode = require('vscode');
 const { spawnSync } = require('child_process');
 const pkg = require('../package.json');
 const { client: mcpClient } = require('./mcp-client');
-const { RunPanel } = require('./run-panel');
 const { InteractivePanel } = require('./interactive-panel');
+const { openArtifact } = require('./artifact-utils');
 
 let outputChannel;
 let statusBarItem;
@@ -36,7 +36,6 @@ function activate(context) {
         vscode.commands.registerCommand('stata-workbench.runSelection', runSelection),
         vscode.commands.registerCommand('stata-workbench.runFile', runFile),
         vscode.commands.registerCommand('stata-workbench.testMcpServer', testConnection),
-        vscode.commands.registerCommand('stata-workbench.showInteractive', showInteractive),
         vscode.commands.registerCommand('stata-workbench.showGraphs', showGraphs),
         vscode.commands.registerCommand('stata-workbench.installMcpCli', promptInstallMcpCli),
         vscode.commands.registerCommand('stata-workbench.cancelRequest', cancelRequest),
@@ -45,7 +44,6 @@ function activate(context) {
 
     context.subscriptions.push(...subscriptions, statusBarItem, outputChannel);
     globalExtensionUri = context.extensionUri;
-    RunPanel.setExtensionUri(context.extensionUri);
     InteractivePanel.setExtensionUri(context.extensionUri);
     missingCli = !ensureMcpCliAvailable(context);
     if (!missingCli) {
@@ -54,6 +52,13 @@ function activate(context) {
         outputChannel.appendLine(`mcp-stata version: ${mcpPackageVersion}`);
     }
     updateStatusBar(missingCli ? 'missing' : 'idle');
+
+    // Expose API for testing
+    if (context.extensionMode === vscode.ExtensionMode.Test) {
+        return {
+            InteractivePanel
+        };
+    }
 }
 
 function ensureMcpCliAvailable(context) {
@@ -279,9 +284,12 @@ async function runSelection() {
         return;
     }
 
+    const filePath = editor.document.uri.fsPath;
+
     await withStataProgress('Running selection', async (token) => {
         const result = await mcpClient.runSelection(text, { cancellationToken: token, normalizeResult: true, includeGraphs: true });
-        await presentRunResult('Stata selection', result);
+        // Use Interactive Panel for output
+        await presentRunResult(text, result, filePath);
     }, text);
 }
 
@@ -300,7 +308,8 @@ async function runFile() {
 
     await withStataProgress(`Running ${path.basename(filePath)}`, async (token) => {
         const result = await mcpClient.runFile(filePath, { cancellationToken: token, normalizeResult: true, includeGraphs: true });
-        await presentRunResult(`Stata do-file: ${path.basename(filePath)}`, result);
+        // Use "do filename" as the command text representation
+        await presentRunResult(`do "${path.basename(filePath)}"`, result, filePath);
     });
 }
 
@@ -323,59 +332,56 @@ function showOutput(content) {
     }
 }
 
-async function showInteractive() {
-    const editor = vscode.window.activeTextEditor;
-    if (!editor) {
-        vscode.window.showErrorMessage('No active editor');
-        return;
-    }
-
-    const selection = editor.selection;
-    const codeToRun = !selection.isEmpty
-        ? editor.document.getText(selection)
-        : editor.document.getText();
-
-    if (!codeToRun.trim()) {
-        vscode.window.showErrorMessage('No code to run.');
-        return;
-    }
-
-    const filePath = editor.document.uri.fsPath;
-
-    let initialResult;
+// Defines the standard run command used by the Interactive Panel
+const interactiveRunCommand = async (code) => {
     try {
-        initialResult = await withStataProgress('Running interactive code', async (token) => {
-            return mcpClient.runSelection(codeToRun, { cancellationToken: token, normalizeResult: true, includeGraphs: true });
-        }, codeToRun);
+        return await mcpClient.runSelection(code, { normalizeResult: true, includeGraphs: true });
     } catch (error) {
-        initialResult = {
+        return {
             success: false,
             rc: -1,
             stderr: error?.message || String(error),
             error: { message: error?.message || String(error) }
         };
-        presentStataError('Interactive run failed', initialResult);
+    }
+};
+
+async function showInteractive() {
+    const editor = vscode.window.activeTextEditor;
+    // We allow opening without an active editor too, but if present we might seed context.
+
+    // Check if there is a selection to pre-fill? 
+    // Actually, Interactive Mode usually starts fresh or with specific context.
+    // If called via command palette, just open blank.
+    // If proper selection logic was here before, we can preserve it.
+
+    // Existing logic tried to run selection. Let's make it optional:
+    // If selection exists, run it. If not, just open.
+
+    let initialCode = null;
+    let initialResult = null;
+    let filePath = editor?.document.uri.fsPath;
+
+    if (editor) {
+        const selection = editor.selection;
+        const text = !selection.isEmpty ? editor.document.getText(selection) : null;
+        if (text && text.trim()) {
+            initialCode = text;
+            try {
+                initialResult = await withStataProgress('Running interactive code', async (token) => {
+                    return mcpClient.runSelection(text, { cancellationToken: token, normalizeResult: true, includeGraphs: true });
+                }, text);
+            } catch (error) {
+                initialResult = { success: false, rc: -1, stderr: error?.message || String(error) };
+            }
+        }
     }
 
     InteractivePanel.show({
         filePath,
-        initialCode: codeToRun,
+        initialCode,
         initialResult,
-        runCommand: async (code) => {
-            try {
-                // Just return the result; the interactive panel handles success/failure feedback 
-                // in its own styled UI.
-                return await mcpClient.runSelection(code, { normalizeResult: true, includeGraphs: true });
-            } catch (error) {
-                // Return a synthetic error result so the panel can show it nicely
-                return {
-                    success: false,
-                    rc: -1,
-                    stderr: error?.message || String(error),
-                    error: { message: error?.message || String(error) }
-                };
-            }
-        }
+        runCommand: interactiveRunCommand
     });
 }
 
@@ -488,14 +494,24 @@ function openGraphPanel(graphDetails) {
             }
         );
         graphPanel.onDidDispose(() => { graphPanel = null; });
+
+        // Handle messages from the webview
+        graphPanel.webview.onDidReceiveMessage(async (message) => {
+            if (!message || typeof message !== 'object') return;
+
+            if (message.type === 'openArtifact' && message.path) {
+                openArtifact(message.path, message.baseDir);
+            }
+        });
     }
 
-    const html = renderGraphHtml(graphDetails, graphPanel.webview);
+    const html = renderGraphHtml(graphDetails, graphPanel.webview, globalExtensionUri);
     graphPanel.webview.html = html;
 }
 
-function renderGraphHtml(graphDetails, webview) {
-    const designUri = webview.asWebviewUri(vscode.Uri.joinPath(globalExtensionUri, 'src', 'ui-shared', 'design.css'));
+function renderGraphHtml(graphDetails, webview, extensionUri) {
+    const designUri = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'src', 'ui-shared', 'design.css'));
+    const mainJsUri = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'src', 'ui-shared', 'main.js'));
     const items = Array.isArray(graphDetails) ? graphDetails : [];
 
     // Use artifact-card style for graphs
@@ -509,7 +525,12 @@ function renderGraphHtml(graphDetails, webview) {
                </div>`
             : '<div class="text-muted p-4">No image data</div>';
 
-        return `<div class="artifact-card" style="cursor:default;">
+        // Add data attributes for click handling
+        const path = g.dataUri || g.path || '';
+        const displayPath = escapeHtml(path);
+        const baseDir = g.baseDir || '';
+
+        return `<div class="artifact-card" data-action="open-artifact" data-path="${displayPath}" data-basedir="${escapeHtml(baseDir)}" data-label="${name}" style="cursor:pointer;">
           <div class="flex justify-between items-center" style="margin-bottom:var(--space-sm);">
              <span class="font-medium">${name}</span>
           </div>
@@ -536,6 +557,11 @@ function renderGraphHtml(graphDetails, webview) {
   <div class="artifact-grid">
     ${blocks}
   </div>
+  <script src="${mainJsUri}"></script>
+  <script>
+     const vscode = acquireVsCodeApi();
+     window.stataUI.bindArtifactEvents(vscode);
+  </script>
 </body></html>`;
 }
 
@@ -612,23 +638,14 @@ function presentStataError(context, payload) {
     });
 }
 
-async function presentRunResult(contextTitle, result) {
+// Unified presentation using Interactive Panel
+async function presentRunResult(commandText, result, filePath) {
     const success = isRunSuccess(result);
-    const durationText = formatDuration(result?.durationMs);
-    const statusLabel = success ? 'completed' : 'failed';
-    const baseMessage = durationText ? `${contextTitle} ${statusLabel} (${durationText})` : `${contextTitle} ${statusLabel}`;
-    const action = 'Show run output';
-    const showPanel = () => RunPanel.show({ title: contextTitle, result });
+    // Log to output channel regardless of UI type
+    logRunToOutput(result, commandText);
 
-    logRunToOutput(result, contextTitle);
-    showPanel();
-
-    const toast = success ? vscode.window.showInformationMessage : vscode.window.showErrorMessage;
-    toast(baseMessage, action).then((choice) => {
-        if (choice === action) {
-            showPanel();
-        }
-    });
+    // Ensure interactive panel is showing the new entry, initializing if needed with the proper runner
+    InteractivePanel.addEntry(commandText, result, filePath, interactiveRunCommand);
 }
 
 function logRunToOutput(result, contextTitle) {
@@ -689,4 +706,3 @@ module.exports = {
     activate,
     deactivate
 };
-

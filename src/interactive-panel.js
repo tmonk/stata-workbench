@@ -1,14 +1,16 @@
-const vscode = require('vscode');
+const { openArtifact } = require('./artifact-utils');
 const path = require('path');
-const fs = require('fs');
+const vscode = require('vscode');
 
 class InteractivePanel {
   static currentPanel = null;
   static extensionUri = null;
+  static _testCapture = null;
 
   static setExtensionUri(uri) {
     InteractivePanel.extensionUri = uri;
   }
+
 
   /**
    * Show (or reveal) the interactive panel and seed it with an initial entry.
@@ -40,30 +42,37 @@ class InteractivePanel {
 
       InteractivePanel.currentPanel.webview.onDidReceiveMessage(async (message) => {
         if (!message || typeof message !== 'object') return;
+
+        // Test hook
+        if (InteractivePanel._testCapture) {
+          InteractivePanel._testCapture(message);
+        }
+
         if (message.type === 'run' && typeof message.code === 'string') {
           await InteractivePanel.handleRun(message.code, runCommand);
         }
         if (message.type === 'openArtifact' && message.path) {
           openArtifact(message.path, message.baseDir);
         }
+        if (message.type === 'log') {
+          console.log(`[Client Log] ${message.level || 'info'}: ${message.message}`);
+        }
       });
     }
 
     const webview = InteractivePanel.currentPanel.webview;
     const nonce = getNonce();
-    InteractivePanel.currentPanel.webview.html = renderHtml(webview, InteractivePanel.extensionUri, nonce, filePath);
+
+    // Convert initial data to history entry format for embedding
+    const initialHistory = (initialCode && initialResult)
+      ? [toEntry(initialCode, initialResult)]
+      : [];
+
+    InteractivePanel.currentPanel.webview.html = renderHtml(webview, InteractivePanel.extensionUri, nonce, filePath, initialHistory);
     InteractivePanel.currentPanel.reveal(column);
 
-    const history = [];
-    if (initialCode && initialResult) {
-      history.push(toEntry(initialCode, initialResult));
-    }
 
-    webview.postMessage({
-      type: 'init',
-      filePath: filePath || '',
-      history
-    });
+
   }
 
   static async handleRun(code, runCommand) {
@@ -88,15 +97,47 @@ class InteractivePanel {
       webview.postMessage({ type: 'busy', value: false });
     }
   }
+
+  /**
+   * Appends an entry to the interactive panel, showing it if necessary.
+   * @param {string} code
+   * @param {object} result
+   * @param {string} [filePath] - associated file path to update title if needed
+   * @param {(code: string) => Promise<object>} [runCommand] - command runner if panel needs initialization
+   */
+  static addEntry(code, result, filePath, runCommand) {
+    if (!InteractivePanel.currentPanel) {
+      // If panel not open, open it with this as initial state
+      InteractivePanel.show({
+        filePath,
+        initialCode: code,
+        initialResult: result,
+        runCommand: runCommand || (async () => { throw new Error('Session not fully initialized'); })
+      });
+      return;
+    }
+
+    // Panel exists, just append
+    const webview = InteractivePanel.currentPanel.webview;
+    webview.postMessage({
+      type: 'append',
+      entry: toEntry(code, result)
+    });
+
+    // Explicitly reveal it
+    InteractivePanel.currentPanel.reveal(vscode.ViewColumn.Beside);
+  }
+
 }
 
 module.exports = { InteractivePanel, toEntry, normalizeArtifacts };
 
-function renderHtml(webview, extensionUri, nonce, filePath) {
+function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = []) {
   const designUri = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'src', 'ui-shared', 'design.css'));
   const mainJsUri = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'src', 'ui-shared', 'main.js'));
   const fileName = filePath ? path.basename(filePath) : 'Interactive Session';
   const escapedTitle = escapeHtml(fileName);
+  const initialJson = JSON.stringify(initialEntries).replace(/</g, '\\u003c'); // Safe JSON embedding
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -106,110 +147,78 @@ function renderHtml(webview, extensionUri, nonce, filePath) {
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <link rel="stylesheet" href="${designUri}">
   <title>Stata Interactive</title>
-  <style>
-    /* Panel Specific Overrides */
-    body {
-      padding-bottom: 80px; /* Space for fixed input */
-    }
-    .history-stream {
-      display: flex;
-      flex-direction: column;
-      gap: var(--space-lg);
-      padding: var(--space-md);
-      max-width: 900px;
-      margin: 0 auto;
-      width: 100%;
-    }
-    
-    .entry {
-      opacity: 0;
-      animation: slideUp 0.2s ease-out forwards;
-    }
-
-    .entry-header {
-      display: flex;
-      align-items: center;
-      gap: var(--space-sm);
-      margin-bottom: var(--space-xs);
-    }
-    
-    .input-area {
-      position: fixed;
-      bottom: 0;
-      left: 0;
-      right: 0;
-      background: var(--bg-primary);
-      border-top: 1px solid var(--border-subtle);
-      padding: var(--space-md);
-      z-index: 100;
-      backdrop-filter: blur(10px);
-    }
-    
-    .input-container {
-      max-width: 900px;
-      margin: 0 auto;
-      display: flex;
-      gap: var(--space-sm);
-      position: relative;
-    }
-    
-    #command-input {
-      min-height: 48px;
-      padding-right: 80px; /* Space for run button if we want inside, but here we keep outside */
-      box-shadow: 0 -4px 12px rgba(0,0,0,0.05);
-    }
-
-    .timestamp {
-      font-size: 11px;
-      color: var(--fg-secondary);
-      margin-left: auto;
-    }
-
-    .execution-info {
-        display: flex;
-        gap: 8px;
-        align-items: center;
-        font-size: 11px;
-        color: var(--fg-secondary);
-    }
-  </style>
+  <script nonce="${nonce}">
+    window.initialEntries = ${initialJson};
+  </script>
 </head>
 <body>
-  
-  <main class="history-stream" id="history">
-    <!-- Entries injected here -->
-    <div style="text-align: center; color: var(--fg-secondary); margin-top: 40px; margin-bottom: 20px;">
-        <div style="font-weight: 500; margin-bottom: 8px;">Stata Interactive</div>
-        <div style="font-size: 12px;">Session connected to ${escapedTitle}</div>
+
+  <!-- Context Header -->
+  <div class="context-header" id="context-header">
+    <div class="context-info">
+      <div class="context-row">
+        <span class="context-label">File:</span>
+        <span class="context-value" id="context-file">${escapedTitle}</span>
+      </div>
+      <div class="context-row">
+        <span class="context-label">Last command:</span>
+        <span class="context-value context-command" id="last-command">—</span>
+      </div>
     </div>
+  </div>
+
+  <main class="chat-stream" id="chat-stream">
+    <!-- Entries injected here -->
   </main>
 
+  <!-- Floating Input Area -->
   <footer class="input-area">
     <div class="input-container">
-      <textarea id="command-input" placeholder="Enter Stata command (e.g., summarize price)..." rows="1"></textarea>
-      <button id="run-btn" class="btn">
-        <span>Run</span>
-      </button>
+      <textarea id="command-input" placeholder="Run Stata command..." rows="1" autofocus></textarea>
+      <div class="input-footer">
+        <div class="key-hint">
+          <span class="kbd">Enter</span> <span>to run</span>
+          <span class="kbd" style="margin-left: 6px;">Shift + Enter</span> <span>newline</span>
+        </div>
+        <button id="run-btn" class="btn btn-primary btn-sm">
+          <span>Run</span>
+        </button>
+      </div>
     </div>
   </footer>
 
   <script src="${mainJsUri}"></script>
   <script nonce="${nonce}">
     const vscode = acquireVsCodeApi();
-    const historyContainer = document.getElementById('history');
+    
+    // Global error handler to surface script errors to extension
+    window.onerror = function(message, source, lineno, colno, error) {
+        vscode.postMessage({
+            type: 'log',
+            level: 'error',
+            message: \`Client Error: \${message} (\${source}:\${lineno})\`
+        });
+    };
+
+    const chatStream = document.getElementById('chat-stream');
     const input = document.getElementById('command-input');
     const runBtn = document.getElementById('run-btn');
     
+    // Initial history embedded from server
+    const initialEntries = window.initialEntries || [];
+
     let busy = false;
+
+    // ... (rest of the listeners) ...
 
     // Auto-resize textarea
     input.addEventListener('input', function() {
       this.style.height = 'auto';
-      this.style.height = (this.scrollHeight) + 'px';
+      this.style.height = Math.min(this.scrollHeight, 200) + 'px';
       if (this.value === '') this.style.height = 'auto';
     });
 
-    // Handle Enter to run
+    // Handle keys
     input.addEventListener('keydown', (e) => {
         if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault();
@@ -219,68 +228,77 @@ function renderHtml(webview, extensionUri, nonce, filePath) {
 
     runBtn.addEventListener('click', doRun);
 
-    // Bind shared artifact events
+    // Bind shared artifact events (delegated)
     window.stataUI.bindArtifactEvents(vscode);
+
+    function updateLastCommand(code) {
+        const lastCmd = document.getElementById('last-command');
+        if (lastCmd) {
+            lastCmd.textContent = code;
+            lastCmd.title = code; // Full text on hover
+        }
+    }
 
     function doRun() {
         if (busy) return;
         const code = input.value.trim();
         if (!code) return;
-        
+
+        updateLastCommand(code);
         vscode.postMessage({ type: 'run', code });
+
+        // Optimistically append user message
+        appendUserMessage(code);
+
         input.value = '';
         input.style.height = 'auto';
+        input.focus();
     }
 
     function setBusy(value) {
         busy = value;
         runBtn.disabled = value;
-        runBtn.textContent = value ? 'Running...' : 'Run';
         runBtn.style.opacity = value ? 0.7 : 1;
-        input.disabled = value;
-        if (!value) input.focus();
+        if (!value) setTimeout(() => input.focus(), 50);
+    }
+
+    function appendUserMessage(code) {
+        const div = document.createElement('div');
+        div.className = 'message-group';
+        div.dataset.optimistic = 'true';
+        div.innerHTML = \`
+            <div class="user-bubble">
+                \${window.stataUI.escapeHtml(code)}
+            </div>
+        \`;
+        chatStream.appendChild(div);
+        scrollToBottom();
     }
 
     function appendEntry(entry) {
-        const div = document.createElement('div');
-        div.className = 'entry';
-        
-        const success = entry.success;
-        const badgeClass = success ? 'success' : 'error';
-        const badgeText = success ? 'Success' : 'Error';
-        const rc = entry.rc !== null ? \`RC: \${entry.rc}\` : '';
-        const dur = window.stataUI.formatDuration(entry.durationMs);
+        const lastGroup = chatStream.lastElementChild;
+        if (lastGroup && lastGroup.dataset.optimistic) {
+            lastGroup.remove();
+        }
 
-        // Code block
-        const codeHtml = \`
-            <div class="code-block" style="margin-bottom: var(--space-sm);">
-                <code>\${window.stataUI.escapeHtml(entry.code)}</code>
+        // Update last command in header
+        updateLastCommand(entry.code);
+
+        // Build HTML
+        const userHtml = \`
+            <div class="user-bubble">
+                \${window.stataUI.escapeHtml(entry.code)}
             </div>
         \`;
 
-        // Output block
-        let outputHtml = '';
-        if (entry.stdout) {
-            outputHtml += \`
-                <div style="margin-top: 8px;">
-                     <div class="text-sm text-muted font-medium" style="margin-bottom:4px;">Output</div>
-                     <div class="code-block" style="background:transparent; border:none; padding:0; color: var(--fg-primary);">
-                        <pre style="margin:0; white-space:pre-wrap;">\${window.stataUI.escapeHtml(entry.stdout)}</pre>
-                     </div>
-                </div>
-            \`;
-        }
+        let outputContent = '';
         if (entry.stderr) {
-            outputHtml += \`
-                <div style="margin-top: 8px;">
-                     <div class="text-sm font-medium" style="color:var(--error-color); margin-bottom:4px;">Error</div>
-                     <div class="code-block" style="border-color:var(--error-color); background: rgba(248, 113, 113, 0.05);">
-                        <pre style="margin:0; white-space:pre-wrap; color:var(--error-color);">\${window.stataUI.escapeHtml(entry.stderr)}</pre>
-                     </div>
-                </div>
-            \`;
+            outputContent += \`<div class="output-content error">\${window.stataUI.escapeHtml(entry.stderr)}</div>\`;
         }
-
+        if (entry.stdout) {
+            outputContent += \`<div class="output-content">\${window.stataUI.escapeHtml(entry.stdout)}</div>\`;
+        }
+        
         // Artifacts
         let artifactsHtml = '';
         if (entry.artifacts && entry.artifacts.length > 0) {
@@ -288,12 +306,16 @@ function renderHtml(webview, extensionUri, nonce, filePath) {
                 const label = window.stataUI.escapeHtml(a.label);
                 const isImg = (a.previewDataUri || a.dataUri) && (a.previewDataUri || a.dataUri).startsWith('data:');
                 const imgSrc = a.previewDataUri || a.dataUri;
+                const icon = isImg ? \`<img src="\${imgSrc}" style="width:100%; height:100%; object-fit:cover; border-radius:4px;">\` : '<span style="font-size:16px;">📄</span>';
+                
                 return \`
-                    <div class="artifact-card" data-action="open-artifact" data-path="\${window.stataUI.escapeHtml(a.path)}" data-basedir="\${window.stataUI.escapeHtml(a.baseDir)}" data-label="\${label}" style="cursor:pointer;">
-                        \${isImg ? \`<img src="\${imgSrc}" class="artifact-preview">\` : ''}
-                        <div class="flex items-center gap-sm">
-                            <span class="artifact-name">\${label}</span>
-                            <span class="badge" style="margin-left:auto; font-size:9px;">OPEN</span>
+                    <div class="artifact-card" data-action="open-artifact" data-path="\${window.stataUI.escapeHtml(a.path)}" data-basedir="\${window.stataUI.escapeHtml(a.baseDir)}" data-label="\${label}">
+                        <div class="artifact-icon">
+                            \${icon}
+                        </div>
+                        <div class="artifact-info">
+                            <div class="artifact-name">\${label}</div>
+                            <div class="artifact-meta">Click to open</div>
                         </div>
                     </div>
                 \`;
@@ -301,47 +323,116 @@ function renderHtml(webview, extensionUri, nonce, filePath) {
             artifactsHtml = \`<div class="artifact-grid">\${items}</div>\`;
         }
 
-        div.innerHTML = \`
-            <div class="entry-header">
-                <span class="badge \${badgeClass}"><div class="badge-dot"></div>\${badgeText}</span>
-                <div class="execution-info">
-                    \${rc ? \`<span>\${rc}</span>\` : ''}
-                    \${dur ? \`<span>\${dur}</span>\` : ''}
-                </div>
-                <div class="timestamp">\${window.stataUI.formatTimestamp(entry.timestamp)}</div>
+        // System Bubble (Card)
+        const systemHtml = \`
+            <div class="system-bubble">
+               <div class="output-card">
+                  <div class="output-header">
+                      <div class="flex items-center gap-xs">
+                        <span class="\${entry.success ? 'text-muted' : 'text-error'}" style="color: \${entry.success ? 'var(--accent-success)' : 'var(--accent-error)'}; font-size:16px;">●</span>
+                        <span>Stata Output</span>
+                      </div>
+                      <div class="flex items-center gap-sm">
+                         \${entry.rc !== null ? \`<span>RC \${entry.rc}</span>\` : ''}
+                         \${entry.durationMs ? \`<span>\${window.stataUI.formatDuration(entry.durationMs)}</span>\` : ''}
+                      </div>
+                  </div>
+                  \${outputContent}
+               </div>
+               \${artifactsHtml}
             </div>
-            \${codeHtml}
-            \${outputHtml}
-            \${artifactsHtml}
         \`;
 
-  historyContainer.appendChild(div);
+        const div = document.createElement('div');
+        div.className = 'message-group entry';
+        div.innerHTML = userHtml + systemHtml;
+        chatStream.appendChild(div);
+        scrollToBottom();
+    }
 
-  // Scroll to bottom
-  window.scrollTo(0, document.body.scrollHeight);
-}
+    function scrollToBottom() {
+        window.scrollTo(0, document.body.scrollHeight);
+    }
 
-window.addEventListener('message', event => {
-  const msg = event.data;
-  if (msg.type === 'init') {
-    if (msg.history) msg.history.forEach(appendEntry);
-    if (!msg.history || msg.history.length === 0) input.focus();
-  }
-  if (msg.type === 'append') {
-    appendEntry(msg.entry);
-  }
-  if (msg.type === 'busy') setBusy(msg.value);
+    window.addEventListener('message', event => {
+      const msg = event.data;
+      if (msg.type === 'init') {
+          // Legacy init support if needed, but we prefer embedded
+          if (msg.history) msg.history.forEach(appendEntry);
+      }
+      if (msg.type === 'append') {
+        appendEntry(msg.entry);
+      }
+      if (msg.type === 'busy') setBusy(msg.value);
 
-  if (msg.type === 'error') {
-    const div = document.createElement('div');
-    div.className = 'entry';
-    div.innerHTML = \`<div class="code-block" style="border-color:var(--error-color); color:var(--error-color);">\${window.stataUI.escapeHtml(msg.message)}</div>\`;
-            historyContainer.appendChild(div);
-            setBusy(false);
+      if (msg.type === 'error') {
+        const div = document.createElement('div');
+        div.className = 'message-group';
+        div.innerHTML = \`<div class="system-bubble"><div class="output-content error">\${window.stataUI.escapeHtml(msg.message)}</div></div>\`;
+        chatStream.appendChild(div);
+        setBusy(false);
+        const lastGroup = chatStream.lastElementChild;
+         if (lastGroup && lastGroup.dataset.optimistic) {
+            lastGroup.remove();
         }
+      }
     });
 
-    // Notify ready
+    // Render initial entries if any
+    try {
+        initialEntries.forEach(appendEntry);
+        // Notify ready
+        vscode.postMessage({ type: 'ready' });
+    } catch (err) {
+        console.error('Failed to render initial entries', err);
+        vscode.postMessage({ type: 'log', level: 'error', message: err.message });
+    }
+
+    // Dynamic spacer for fixed input area
+    const inputArea = document.querySelector('.input-area');
+    const spacer = document.createElement('div');
+    spacer.id = 'bottom-spacer';
+    document.body.appendChild(spacer);
+
+    function updateSpacer() {
+        if (inputArea) {
+            const height = inputArea.offsetHeight;
+            // Height + bottom offset (24px) + buffer (30px)
+            spacer.style.height = (height + 15) + 'px';
+            spacer.style.width = '100%';
+        }
+    }
+    
+    // Update on load, resize, and input change
+    updateSpacer();
+    // Force scroll to bottom after initial layout
+    setTimeout(scrollToBottom, 50);
+
+    window.addEventListener('resize', () => {
+        updateSpacer();
+        if (isAtBottom()) scrollToBottom();
+    });
+    
+    input.addEventListener('input', () => {
+        // Allow resize to happen first
+        setTimeout(() => {
+            updateSpacer();
+            scrollToBottom(); // Keep bottom visible when typing
+        }, 0);
+    });
+    
+    // Also update when content changes
+    const observer = new MutationObserver(() => {
+        updateSpacer();
+    });
+    if (inputArea) {
+        observer.observe(inputArea, { attributes: true, childList: true, subtree: true });
+    }
+
+    function isAtBottom() {
+        return (window.innerHeight + window.scrollY) >= document.body.offsetHeight - 50;
+    }
+
     setBusy(false);
   </script>
 </body>
@@ -397,6 +488,7 @@ function escapeHtml(text) {
     .replace(/'/g, '&#039;');
 }
 
+
 function getNonce() {
   let text = '';
   const possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
@@ -404,42 +496,5 @@ function getNonce() {
     text += possible.charAt(Math.floor(Math.random() * possible.length));
   }
   return text;
-}
-
-function openArtifact(raw, baseDir) {
-  try {
-    const uri = resolveArtifactUri(raw, baseDir);
-    if (!uri) {
-      vscode.window.showErrorMessage(`Could not resolve artifact: ${raw}`);
-      return;
-    }
-    if (uri.scheme === 'file') {
-      const exists = fs.existsSync(uri.fsPath);
-      if (!exists) {
-        vscode.window.showErrorMessage(`Artifact not found: ${uri.fsPath}`);
-        return;
-      }
-    }
-    vscode.env.openExternal(uri);
-  } catch (err) {
-    vscode.window.showErrorMessage(`Could not open artifact: ${err.message}`);
-  }
-}
-
-function resolveArtifactUri(raw, baseDir) {
-  if (!raw) return null;
-  const trimmed = raw.trim().replace(/^"+|"+$/g, '');
-  if (/^https?:\/\//i.test(trimmed) || trimmed.startsWith('data:')) {
-    return vscode.Uri.parse(trimmed);
-  }
-  if (path.isAbsolute(trimmed)) {
-    return vscode.Uri.file(trimmed);
-  }
-  const candidates = [];
-  if (baseDir) candidates.push(path.resolve(baseDir, trimmed));
-  const root = vscode.workspace.workspaceFolders?.[0]?.uri?.fsPath;
-  if (root) candidates.push(path.resolve(root, trimmed));
-  const found = candidates.find((c) => c && fs.existsSync(c));
-  return found ? vscode.Uri.file(found) : (candidates[0] ? vscode.Uri.file(candidates[0]) : null);
 }
 
