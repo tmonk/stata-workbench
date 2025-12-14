@@ -73,7 +73,8 @@ Cursor agents (`.cursor/mcp.json`):
 ```
 
 ## Troubleshooting
-- Status bar says “CLI missing”: install uv (includes uvx) with `curl -LsSf https://astral.sh/uv/install.sh | sh`.
+- **Icons not visible in editor title bar**: If the play, run, and graph icons don't appear when you open a `.do` file, click the `...` menu in the editor title bar and enable the Stata Workbench icons to make them visible.
+- Status bar says "CLI missing": install uv (includes uvx) with `curl -LsSf https://astral.sh/uv/install.sh | sh`.
 - Requests time out: raise `stataMcp.requestTimeoutMs`.
 - Unexpected MCP errors: open the output channel for a structured error message.
 - Cancel a stuck run: run `Stata: Cancel Current Request` from the command palette.
