@@ -5,3 +5,6 @@ release/
 dist/
 .vscode-test
 test/integration/fixture/
+.cursor/
+.claude/
+.gemini/
