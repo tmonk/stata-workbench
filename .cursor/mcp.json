@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "mcp_stata": {
+      "command": "uvx",
+      "args": [
+        "--from",
+        "mcp-stata@latest",
+        "mcp-stata"
+      ]
+    }
+  }
+}

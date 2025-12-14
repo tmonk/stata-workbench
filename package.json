@@ -13,7 +13,7 @@
   "bugs": {
     "url": "https://github.com/tmonk/stata-workbench/issues"
   },
-  "version": "0.2.2",
+  "version": "0.2.3",
   "engines": {
     "vscode": "^1.75.0"
   },
@@ -54,12 +54,12 @@
       {
         "command": "stata-workbench.showInteractive",
         "title": "Stata: Interactive Mode",
-        "icon": "$(graph)"
+        "icon": "$(terminal)"
       },
       {
         "command": "stata-workbench.showGraphs",
         "title": "Stata: Show Graphs",
-        "icon": "$(image)"
+        "icon": "$(graph)"
       },
       {
         "command": "stata-workbench.installMcpCli",
@@ -77,19 +77,16 @@
         {
           "when": "resourceExtname == .do || resourceExtname == .ado || resourceExtname == .mata || editorLangId == stata",
           "command": "stata-workbench.runSelection",
-          "icon": "$(play)",
           "group": "navigation@1"
         },
         {
           "when": "resourceExtname == .do || resourceExtname == .ado || resourceExtname == .mata || editorLangId == stata",
           "command": "stata-workbench.runFile",
-          "icon": "$(run-all)",
           "group": "navigation@2"
         },
         {
           "when": "resourceExtname == .do || resourceExtname == .ado || resourceExtname == .mata || editorLangId == stata",
           "command": "stata-workbench.showInteractive",
-          "icon": "$(graph)",
           "group": "navigation@4"
         },
         {
