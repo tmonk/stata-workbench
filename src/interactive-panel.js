@@ -195,9 +195,9 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
       <textarea id="command-input" placeholder="Run Stata command..." rows="1" autofocus></textarea>
       <div class="input-footer">
         <div class="key-hint">
-            <span class="kbd">Enter</span> <span>to run</span>
-            <span class="kbd" style="margin-left: 6px;">PageUp</span> <span>prev command</span>
-            <span class="kbd" style="margin-left: 6px;">PageDown</span> <span>next command</span>
+          <span class="kbd">Enter</span><span>run</span>
+          <span class="kbd">PgUp/Down</span><span>prev/next</span>
+          <span class="kbd">Tab</span><span>complete</span>
         </div>
         <button id="run-btn" class="btn btn-primary btn-sm">
           <span>Run</span>
