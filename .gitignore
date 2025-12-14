@@ -1,6 +1,7 @@
 node_modules/
 .vscode/
 *.DS_Store*
-package-lock.json
 release/
 dist/
+.vscode-test
+test/integration/fixture/
