@@ -6,23 +6,14 @@ A VS Code / Cursor / Antigravity / Windsurf extension that allows Stata code to 
 
 Built by [Thomas Monk](https://tdmonk.com), London School of Economics.
 
-<p>
-  <a href="vscode://tmonk.stata-workbench" title="Install in VS Code">
-    <img alt="VS Code" height="28" src="https://cdn.simpleicons.org/visualstudiocode" />
-  </a>
-  <a href="cursor://tmonk.stata-workbench" title="Install in Cursor">
-    <img alt="Cursor" height="28" src="https://www.cursor.com/favicon.ico" />
-  </a>
-  <a href="antigravity://tmonk.stata-workbench" title="Install in Antigravity">
-    <img alt="Antigravity" height="28" src="https://antigravity.google/favicon.ico" />
-  </a>
-  <a href="windsurf://tmonk.stata-workbench" title="Install in Windsurf">
-    <img alt="Windsurf" height="28" src="https://cdn.simpleicons.org/windsurf" />
-  </a>
-</p>
-
 ## Installation
-Preferred: install from the marketplace listings by searching for **Stata Workbench** in the Extensions view.
+
+[![Add to VSCode](https://img.shields.io/badge/VS%20Code-2C2C2C?style=flat&logo=data:image/svg+xml;base64,PHN2ZyByb2xlPSJpbWciIHZpZXdCb3g9IjAgMCAyNCAyNCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48dGl0bGU+VmlzdWFsIFN0dWRpbyBDb2RlPC90aXRsZT48cGF0aCBmaWxsPSJ3aGl0ZSIgZD0iTTIzLjE1IDIuNTg3TDE4LjIxLjIxYTEuNDk0IDEuNDk0IDAgMCAwLTEuNzA1LjI5bC05LjQ2IDguNjMtNC4xMi0zLjEyOGEuOTk5Ljk5OSAwIDAgMC0xLjI3Ni4wNTdMLjMyNyA3LjI2MUExIDEgMCAwIDAgLjMyNiA4Ljc0TDMuODk5IDEyIC4zMjYgMTUuMjZhMSAxIDAgMCAwIC4wMDEgMS40NzlMMS42NSAxNy45NGEuOTk5Ljk5OSAwIDAgMCAxLjI3Ni4wNTdsNC4xMi0zLjEyOCA5LjQ2IDguNjNhMS40OTIgMS40OTIgMCAwIDAgMS43MDQuMjlsNC45NDItMi4zNzdBMS41IDEuNSAwIDAgMCAyNCAyMC4wNlYzLjkzOWExLjUgMS41IDAgMCAwLS44NS0xLjM1MnptLTUuMTQ2IDE0Ljg2MUwxMC44MjYgMTJsNy4xNzgtNS40NDh2MTAuODk2eiIvPjwvc3ZnPg==&logoColor=white)](vscode:extension/tmonk.stata-workbench)
+[![Add to Cursor](https://img.shields.io/badge/Cursor-2C2C2C?style=flat&logo=cursor&logoColor=white)](cursor:extension/tmonk.stata-workbench)
+[![Add to Antigravity](https://img.shields.io/badge/Antigravity-2C2C2C?style=flat&logo=google&logoColor=white)](antigravity:extension/tmonk.stata-workbench)
+[![Add to Windsurf](https://img.shields.io/badge/Windsurf-2C2C2C?style=flat&logo=windsurf&logoColor=white)](windsurf:extension/tmonk.stata-workbench)
+
+Use the buttons above, or install from the marketplace listings by searching for **Stata Workbench** in the Extensions view.
 
 - VS Code Marketplace: [tmonk.stata-workbench](https://marketplace.visualstudio.com/items?itemName=tmonk.stata-workbench)
 - Open VSX: [tmonk/stata-workbench](https://open-vsx.org/extension/tmonk/stata-workbench)
