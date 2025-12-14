@@ -3,68 +3,16 @@ const proxyquire = require('proxyquire');
 const vscodeMock = require('../mocks/vscode');
 
 describe('Panels', () => {
-    let runPanelModule, interactivePanelModule;
+    let interactivePanelModule;
 
     before(() => {
         // Load modules with mocked vscode
         // Use .noCallThru() to ensure we don't try to load real vscode
-        runPanelModule = proxyquire.noCallThru().load('../../src/run-panel', {
-            'vscode': vscodeMock,
-            'fs': {},
-            'path': require('path')
-        });
         interactivePanelModule = proxyquire.noCallThru().load('../../src/interactive-panel', {
             'vscode': vscodeMock,
             'fs': {},
-            'path': require('path')
-        });
-    });
-
-    describe('RunPanel.renderHtml', () => {
-        it('should generate valid HTML with artifacts', () => {
-            const { renderHtml } = runPanelModule;
-            const webviewMock = {
-                asWebviewUri: (u) => u.toString(),
-                cspSource: 'mock-csp'
-            };
-            const extUri = { toString: () => 'ext' };
-            const result = {
-                command: 'assert_me_command',
-                stdout: 'test output',
-                cwd: '/tmp',
-                artifacts: [
-                    { label: 'graph1', path: '/tmp/graph1.pdf', previewDataUri: 'data:image/png;base64,123' },
-                    { label: 'graph2', path: '/tmp/graph2.pdf' } // No preview
-                ]
-            };
-
-            const html = renderHtml(result, 'Test Title', webviewMock, extUri, {}, 'nonce123');
-
-            // Assertions
-            // Title is not in HTML body, but command is
-            assert.include(html, 'assert_me_command');
-            assert.include(html, 'Run Result');
-            assert.include(html, 'graph1');
-            assert.include(html, 'data:image/png;base64,123'); // Preview image
-            assert.include(html, 'graph2');
-            assert.include(html, 'nonce-nonce123'); // CSP Nonce
-            assert.include(html, 'test output'); // stdout content
-
-            // Check for checkmark/placeholder difference logic
-            // graph1 should have img tag
-            assert.match(html, /<img src="data:image\/png;base64,123"/);
-            // graph2 should have placeholder div
-            assert.include(html, '📄');
-        });
-
-        it('should handle no artifacts gracefully', () => {
-            const { renderHtml } = runPanelModule;
-            const webviewMock = {
-                asWebviewUri: (u) => u.toString(),
-                cspSource: 'mock-csp'
-            };
-            const html = renderHtml({}, 'Title', webviewMock, {}, {}, 'nonce');
-            assert.include(html, 'No artifacts generated');
+            'path': require('path'),
+            './artifact-utils': { openArtifact: () => { } }
         });
     });
 
@@ -73,6 +21,7 @@ describe('Panels', () => {
             const { toEntry } = interactivePanelModule;
             const result = {
                 stdout: 'out',
+                command: 'test cmd',
                 rc: 0,
                 success: true,
                 artifacts: [{ path: '/tmp/g.pdf' }]
@@ -100,6 +49,59 @@ describe('Panels', () => {
             assert.lengthOf(normalized, 1);
             assert.equal(normalized[0].path, '/a.pdf');
             assert.equal(normalized[0].previewDataUri, 'data:...');
+        });
+
+        describe('InteractivePanel.addEntry', () => {
+            it('should append to existing panel', () => {
+                const { InteractivePanel } = interactivePanelModule;
+                let postedMessage = null;
+                let revealedColumn = null;
+
+                // Mock current panel
+                InteractivePanel.currentPanel = {
+                    webview: {
+                        postMessage: (msg) => { postedMessage = msg; }
+                    },
+                    reveal: (col) => { revealedColumn = col; }
+                };
+
+                InteractivePanel.addEntry('code', { stdout: 'result' }, '/path/to/file');
+
+                assert.deepEqual(postedMessage.type, 'append');
+                assert.equal(postedMessage.entry.code, 'code');
+                assert.equal(postedMessage.entry.stdout, 'result');
+                assert.isNotNull(revealedColumn);
+
+                // Cleanup
+                InteractivePanel.currentPanel = null;
+            });
+
+            it('should open new panel if none exists', () => {
+                const { InteractivePanel } = interactivePanelModule;
+                let showCalled = false;
+                let capturedOptions = null;
+
+                // Stub static show method manually for this test
+                const originalShow = InteractivePanel.show;
+                InteractivePanel.show = (opts) => {
+                    showCalled = true;
+                    capturedOptions = opts;
+                };
+
+                // Ensure no current panel
+                InteractivePanel.currentPanel = null;
+
+                const runCmd = async () => { };
+                InteractivePanel.addEntry('code', { stdout: 'res' }, '/path', runCmd);
+
+                assert.isTrue(showCalled);
+                assert.equal(capturedOptions.initialCode, 'code');
+                assert.equal(capturedOptions.filePath, '/path');
+                assert.equal(capturedOptions.runCommand, runCmd);
+
+                // Restore
+                InteractivePanel.show = originalShow;
+            });
         });
     });
 });

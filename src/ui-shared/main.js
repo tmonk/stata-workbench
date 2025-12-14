@@ -37,7 +37,6 @@ window.stataUI = {
                 if (path) {
                     vscode.postMessage({
                         type: 'openArtifact', // unified message type
-                        command: 'openArtifact', // backup for legacy run-panel
                         path,
                         baseDir,
                         label

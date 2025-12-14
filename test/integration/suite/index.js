@@ -3,7 +3,12 @@ const Mocha = require('mocha');
 
 function run() {
     const mocha = new Mocha({ ui: 'tdd', color: true, timeout: 120000 });
-    mocha.addFile(path.resolve(__dirname, './integration.test.js'));
+    const fs = require('fs');
+    const files = fs.readdirSync(__dirname);
+
+    files.filter(f => f.endsWith('.test.js')).forEach(f => {
+        mocha.addFile(path.resolve(__dirname, f));
+    });
 
     return new Promise((resolve, reject) => {
         try {

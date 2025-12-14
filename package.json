@@ -13,7 +13,7 @@
   "bugs": {
     "url": "https://github.com/tmonk/stata-workbench/issues"
   },
-  "version": "0.2.3",
+  "version": "0.3.0",
   "engines": {
     "vscode": "^1.75.0"
   },
@@ -52,11 +52,6 @@
         "title": "Stata: Test MCP Server Connection"
       },
       {
-        "command": "stata-workbench.showInteractive",
-        "title": "Stata: Interactive Mode",
-        "icon": "$(terminal)"
-      },
-      {
         "command": "stata-workbench.showGraphs",
         "title": "Stata: Show Graphs",
         "icon": "$(graph)"
@@ -86,13 +81,8 @@
         },
         {
           "when": "resourceExtname == .do || resourceExtname == .ado || resourceExtname == .mata || editorLangId == stata",
-          "command": "stata-workbench.showInteractive",
-          "group": "navigation@4"
-        },
-        {
-          "when": "resourceExtname == .do || resourceExtname == .ado || resourceExtname == .mata || editorLangId == stata",
           "command": "stata-workbench.showGraphs",
-          "group": "navigation@5"
+          "group": "navigation@3"
         }
       ],
       "editor/context": [

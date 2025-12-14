@@ -28,16 +28,16 @@ Offline/VSIX fallback:
 - uv/uvx on PATH (to run the published mcp-stata tool). If missing, the extension bootstraps uv locally into its storage; otherwise it surfaces a quick action to copy the install command or open the uv install docs.
 
 ## Features & Commands
-- Syntax highlighting for Stata, Dyndoc Markdown, and Dyndoc LaTeX.
-- Run Selection/Current Line (`stata-workbench.runSelection`) → MCP tool `run_command` with normalized output + graphs.
-- Run Current File (`stata-workbench.runFile`) → MCP tool `run_do_file` for `.do` scripts.
-- Interactive panel (`stata-workbench.showInteractive`): rerun snippets inline with the latest stdout/stderr + graph artifacts.
-- Graph viewer (`stata-workbench.showGraphs`): list via `list_graphs`, fetch via `export_graph`, render inline previews.
-- Test MCP Server (`stata-workbench.testMcpServer`) for quick smoke checks.
-- Install MCP CLI helper (`stata-workbench.installMcpCli`): bootstraps uv locally when it is missing.
-- Status bar + cancel (`stata-workbench.cancelRequest`): live request states with one-click cancellation routed through the MCP client.
-- Auto-manage MCP configs: writes `.vscode/mcp.json` and `.cursor/mcp.json` so agents reuse the same `uvx --from mcp-stata` wiring.
-- Run results surface in the Run panel + `Stata MCP` output channel for durable logs.
+- **Syntax highlighting** for Stata, Dyndoc Markdown, and Dyndoc LaTeX.
+- **Run Selection/Current Line** (`stata-workbench.runSelection`) → Executes the selected code or current line via MCP tool `run_command` with normalized output + graphs. Results appear in the interactive panel.
+- **Run Current File** (`stata-workbench.runFile`) → Runs the entire `.do` file via MCP tool `run_do_file`. Results appear in the interactive panel.
+- **Interactive panel**: Automatically opens when running code, displaying results with stdout/stderr, execution time, return codes, and graph artifacts. You can continue running additional Stata commands directly in the panel.
+- **Graph viewer** (`stata-workbench.showGraphs`): View all graphs from the current Stata session via `list_graphs` and `export_graph` MCP tools. Click any graph to open it.
+- **Test MCP Server** (`stata-workbench.testMcpServer`) for quick smoke checks.
+- **Install MCP CLI helper** (`stata-workbench.installMcpCli`): Bootstraps uv locally when it is missing.
+- **Status bar + cancel** (`stata-workbench.cancelRequest`): Live request states with one-click cancellation routed through the MCP client.
+- **Auto-manage MCP configs**: Writes `.vscode/mcp.json` and `.cursor/mcp.json` so AI agents reuse the same `uvx --from mcp-stata` wiring.
+- **Durable logs**: All run results are logged to the `Stata MCP` output channel for reference.
 
 ## Settings
 - `stataMcp.requestTimeoutMs` (default `45000`): timeout for MCP requests.
