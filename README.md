@@ -6,6 +6,21 @@ A VS Code / Cursor / Antigravity / Windsurf extension that allows Stata code to 
 
 Built by [Thomas Monk](https://tdmonk.com), London School of Economics.
 
+<p>
+  <a href="vscode://tmonk.stata-workbench" title="Install in VS Code">
+    <img alt="VS Code" height="28" src="https://cdn.simpleicons.org/visualstudiocode" />
+  </a>
+  <a href="cursor://tmonk.stata-workbench" title="Install in Cursor">
+    <img alt="Cursor" height="28" src="https://www.cursor.com/favicon.ico" />
+  </a>
+  <a href="antigravity://tmonk.stata-workbench" title="Install in Antigravity">
+    <img alt="Antigravity" height="28" src="https://antigravity.google/favicon.ico" />
+  </a>
+  <a href="windsurf://tmonk.stata-workbench" title="Install in Windsurf">
+    <img alt="Windsurf" height="28" src="https://cdn.simpleicons.org/windsurf" />
+  </a>
+</p>
+
 ## Installation
 Preferred: install from the marketplace listings by searching for **Stata Workbench** in the Extensions view.
 
