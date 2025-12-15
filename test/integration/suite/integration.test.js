@@ -21,13 +21,13 @@ suite('McpClient integration (VS Code host)', function () {
             return;
         }
 
-        const uvxCmd = process.env.MCP_STATA_UVX_CMD || process.env.STATA_MCP_UVX_CMD || 'uvx';
+        const uvxCmd = process.env.MCP_STATA_UVX_CMD || process.env.MCP_STATA_UVX_CMD || 'uvx';
         const uvxProbe = spawnSync(uvxCmd, ['--version'], { encoding: 'utf8' });
         if (uvxProbe.status !== 0) {
             this.skip();
             return;
         }
-        process.env.STATA_MCP_UVX_CMD = uvxCmd;
+        process.env.MCP_STATA_UVX_CMD = uvxCmd;
 
         tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'stata-wb-int-'));
         workDir = path.join(tempRoot, 'workdir');

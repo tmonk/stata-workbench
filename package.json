@@ -13,7 +13,7 @@
   "bugs": {
     "url": "https://github.com/tmonk/stata-workbench/issues"
   },
-  "version": "0.4.1",
+  "version": "0.4.2",
   "engines": {
     "vscode": "^1.75.0"
   },
@@ -35,6 +35,9 @@
   },
   "icon": "img/icon.png",
   "main": "./dist/extension.js",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
   "contributes": {
     "commands": [
       {
@@ -122,7 +125,7 @@
       "properties": {
         "stataMcp.requestTimeoutMs": {
           "type": "number",
-          "default": 45000,
+          "default": 10000,
           "description": "Timeout (ms) for MCP requests before showing an error."
         },
         "stataMcp.autoRevealOutput": {
@@ -134,6 +137,11 @@
           "type": "string",
           "default": "",
           "description": "Working directory when running .do files. Supports an absolute path, ~, ${workspaceFolder} or ${fileDir}; empty uses the .do file's folder."
+        },
+        "stataMcp.setupTimeoutSeconds": {
+          "type": "number",
+          "default": 60,
+          "description": "Timeout (seconds) for Stata initialization (stata_setup.config preflight). Passed to STATA_SETUP_TIMEOUT for mcp-stata."
         }
       }
     },

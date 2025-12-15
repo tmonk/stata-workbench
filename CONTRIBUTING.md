@@ -2,7 +2,7 @@
 - Install deps: `npm install`
 - Bundle once for local debugging: `npm run compile`
 - Watch mode while iterating: `npm run watch`
-- Tests: `npm test`, `npm run test:integration` for integration tests.
+- Tests: `npm test`, `npm run test:integration` for integration tests (`$env:MCP_STATA_INTEGRATION="1"; npm run compile; node ./test/integration/runTest.js`)
 - Package: `npm run package` (or `npm run package:dist` for output to the dist directory)
 
 ## Packaging - for internal use

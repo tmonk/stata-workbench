@@ -53,7 +53,7 @@ Offline/VSIX fallback:
    scatter price mpg
    ```
 
-   A **Graph** artifact card appears—click it to open the generated graph.
+   A **Graph** artifact card appears - click it to open the generated graph.
 
 <p align="center">
   <img src="img/screenshot.png" style="width: 70%;" alt="Stata Terminal panel showing Stata output cards and a graph artifact" />
@@ -73,7 +73,7 @@ Offline/VSIX fallback:
 - **Test MCP Server** (`stata-workbench.testMcpServer`) for quick smoke checks.
 - **Install MCP CLI helper** (`stata-workbench.installMcpCli`): Bootstraps uv locally when it is missing.
 - **Status bar + cancel** (`stata-workbench.cancelRequest`): Live request states with one-click cancellation routed through the MCP client.
-- **Auto-manage MCP configs**: Writes `.vscode/mcp.json` and `.cursor/mcp.json` so AI agents reuse the same `uvx --from mcp-stata --refresh mcp-stata` wiring, and auto-corrects older entries missing `--refresh`.
+- **Auto-manage MCP configs**: Writes the user-level `mcp.json` in your editor's user data so AI agents reuse the same `uvx --from mcp-stata --refresh mcp-stata` wiring, and auto-corrects older entries missing `--refresh`.
 - **Durable logs**: All run results are logged to the `Stata MCP` output channel for reference.
 
 ## Settings
@@ -82,26 +82,19 @@ Offline/VSIX fallback:
 - `stataMcp.runFileWorkingDirectory` (default empty): working directory when running .do files. Supports an absolute path, ~, ${workspaceFolder} or ${fileDir}; empty uses the .do file's folder.
 
 ## Agent MCP configs (optional)
-When uv is available, the extension writes `.vscode/mcp.json` + `.cursor/mcp.json` with the correct `mcp_stata` wiring. If you want to manage the files yourself (or copy them into another repo) use the snippets below.
+When uv is available, the extension writes a user-level `mcp.json` inside your editor's user data. Example locations:
+- macOS: VS Code `~/Library/Application Support/Code/User/mcp.json`; VS Code Insiders `~/Library/Application Support/Code - Insiders/User/mcp.json`; Cursor `~/.cursor/mcp.json`; Windsurf `~/.codeium/mcp_config.json`; Antigravity `~/Library/Application Support/Antigravity/User/mcp.json`
+- Windows: VS Code `%APPDATA%/Code/User/mcp.json`; VS Code Insiders `%APPDATA%/Code - Insiders/User/mcp.json`; Cursor `%USERPROFILE%/.cursor/mcp.json`; Windsurf `%USERPROFILE%/.codeium/mcp_config.json`; Antigravity `%APPDATA%/Antigravity/User/mcp.json`
+- Linux: VS Code `~/.config/Code/User/mcp.json`; VS Code Insiders `~/.config/Code - Insiders/User/mcp.json`; Cursor `~/.cursor/mcp.json`; Windsurf `~/.codeium/mcp_config.json`; Antigravity `~/.antigravity/mcp.json`
 
-VS Code agents (`.vscode/mcp.json`):
+If you want to manage the file yourself, use the snippets below.
+
+User-level `mcp.json`:
 ```json
 {
   "servers": {
     "mcp_stata": {
       "type": "stdio",
-      "command": "uvx",
-      "args": ["--from", "mcp-stata", "mcp-stata", "--refresh"]
-    }
-  }
-}
-```
-
-Cursor agents (`.cursor/mcp.json`):
-```json
-{
-  "mcpServers": {
-    "mcp_stata": {
       "command": "uvx",
       "args": ["--from", "mcp-stata", "mcp-stata", "--refresh"]
     }
@@ -117,9 +110,9 @@ Cursor agents (`.cursor/mcp.json`):
 - Cancel a stuck run: run `Stata: Cancel Current Request` from the command palette.
 
 ## Uninstall cleanup (optional)
-If you added agent configs and want to remove them:
-- `.vscode/mcp.json` → delete `servers.mcp_stata`
-- `.cursor/mcp.json` → delete `mcpServers.mcp_stata`
+If you added agent configs and want to remove them, edit your user-level `mcp.json` (same path as above) and delete the relevant entry:
+- VS Code format → delete `servers.mcp_stata`
+- Cursor format → delete `mcpServers.mcp_stata`
 
 ## Acknowledgments
 Portions of this file are derived from [stata-mcp](https://github.com/hanlulong/stata-mcp) (MIT License), [language-stata](https://github.com/kylebarron/language-stata) by Kyle Barron (MIT License), and [vscode-stata](https://github.com/kylebutts/vscode-stata) by Kyle Butts (MIT License). See license_extras for the full license texts. Do check their projects out!
