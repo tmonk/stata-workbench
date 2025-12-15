@@ -35,10 +35,6 @@ Offline/VSIX fallback:
 
 ## Quickstart
 
-That screenshot makes it clear this isn’t a “terminal” so much as a **Stata Terminal panel** (webview) with output cards + a command prompt at the bottom. I’d tweak the Quickstart wording to match what people will literally see:
-
-## Quickstart
-
 1. Install the **Stata Workbench** extension.
 2. Open a `.do` file in VS Code (or a compatible editor).
 3. Run **Stata: Run Selection/Line** (press the play button on the top right). The **Stata Terminal** panel opens automatically the first time you run a command.
