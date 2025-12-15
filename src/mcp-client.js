@@ -36,6 +36,7 @@ class StataMcpClient {
         this._recentStderr = [];
         this._workspaceRoot = null;
         this._clientVersion = pkg?.version || '0.0.0';
+        this._availableTools = new Set();
     }
 
     setLogger(logger) {
@@ -72,10 +73,10 @@ class StataMcpClient {
 
     async run(code, options = {}) {
         const task = (client) => {
-            return this._callTool(client, 'run', { code });
+            return this._callTool(client, 'run_command', { code });
         };
         // Normalize=true to parse standard MCP output, collectArtifacts=true to fetch graphs
-        return this._enqueue('run', options, task, {}, true, true);
+        return this._enqueue('run_command', options, task, { command: code }, true, true);
     }
 
     async viewData(start = 0, count = 50, options = {}) {
@@ -150,6 +151,7 @@ class StataMcpClient {
         if (cursorBridge) {
             this._cursorCommand = cursorBridge;
             this._statusEmitter.emit('status', 'connected');
+            this._availableTools = new Set();
             return { type: 'cursor-bridge' };
         }
 
@@ -159,12 +161,24 @@ class StataMcpClient {
             throw new Error(`MCP SDK not found. Please run \`npm install\` to fetch @modelcontextprotocol/sdk.${detail}`);
         }
 
+        const config = vscode.workspace.getConfiguration('stataMcp');
+        const setupTimeoutSeconds = (() => {
+            if (process.env.STATA_SETUP_TIMEOUT) return process.env.STATA_SETUP_TIMEOUT;
+            const val = Number(config.get('setupTimeoutSeconds', 60));
+            if (Number.isFinite(val) && val > 0) return String(Math.round(val));
+            return '60';
+        })();
+
         const uvCommand = process.env.MCP_STATA_UVX_CMD || 'uvx';
         const transport = new StdioClientTransport({
             command: uvCommand,
             args: ['--from', MCP_PACKAGE_SPEC, MCP_PACKAGE_NAME],
             stderr: 'pipe',
-            cwd: this._resolveWorkspaceRoot()
+            cwd: this._resolveWorkspaceRoot(),
+            env: {
+                ...process.env,
+                STATA_SETUP_TIMEOUT: setupTimeoutSeconds
+            }
         });
 
         // Guard against unhandled transport errors (e.g., spawn ENOENT when uvx is missing).
@@ -211,9 +225,48 @@ class StataMcpClient {
         await client.connect(transport);
         this._log(`mcp-stata connected (pid=${transport.pid ?? 'unknown'})`);
 
+        // Discover available tools so downstream calls choose the right names.
+        await this._refreshToolList(client);
+
         this._transport = transport;
         this._statusEmitter.emit('status', 'connected');
         return client;
+    }
+
+    async _refreshToolList(client) {
+        if (!client || typeof client.listTools !== 'function') {
+            this._availableTools = new Set();
+            return;
+        }
+
+        try {
+            const res = await client.listTools();
+            const names = Array.isArray(res?.tools)
+                ? res.tools.map(t => t?.name).filter(Boolean)
+                : [];
+            this._availableTools = new Set(names);
+            if (names.length) {
+                this._log(`[mcp-stata] available tools: ${names.join(', ')}`);
+            }
+        } catch (err) {
+            this._availableTools = new Set();
+            this._log(`[mcp-stata] listTools failed: ${err?.message || err}`);
+        }
+    }
+
+    _graphListToolOrder() {
+        const preferred = [];
+        // Prefer server-advertised tools first.
+        if (this._availableTools?.has('export_graphs_all')) preferred.push('export_graphs_all');
+        if (this._availableTools?.has('list_graphs')) preferred.push('list_graphs');
+
+        // Default ordering when tool discovery is unavailable.
+        if (!preferred.length) {
+            preferred.push('export_graphs_all', 'list_graphs');
+        }
+
+        // Remove any falsy entries just in case.
+        return preferred.filter(Boolean);
     }
 
     async _callTool(client, name, args) {
@@ -478,7 +531,7 @@ class StataMcpClient {
         const config = vscode.workspace.getConfiguration('stataMcp');
         const rawTemplate = config.get('runFileWorkingDirectory', '');
         const template = typeof rawTemplate === 'string' ? rawTemplate : '';
-        if (!template.trim()) return fileDir;
+        if (!template.trim()) return path.normalize(fileDir);
 
         const workspaceRoot = this._resolveWorkspaceRoot() || '';
         const replacements = {
@@ -494,7 +547,7 @@ class StataMcpClient {
             return '';
         }).trim();
 
-        if (!expanded) return fileDir;
+        if (!expanded) return path.normalize(fileDir);
 
         const homeExpanded = expanded.startsWith('~')
             ? path.join(process.env.HOME || process.env.USERPROFILE || '', expanded.slice(1))
@@ -513,13 +566,26 @@ class StataMcpClient {
 
     async _collectGraphArtifacts(client, meta = {}) {
         try {
-            let response = await this._callTool(client, 'get_graph_list', {});
-            this._log(`[mcp-stata graphs] get_graph_list response: ${this._stringifySafe(response)}`);
-            // Fallback if server only supports list_graphs
-            if (!response || (typeof response === 'object' && !response.graphs)) {
-                response = await this._callTool(client, 'list_graphs', {});
-                this._log(`[mcp-stata graphs] list_graphs response: ${this._stringifySafe(response)}`);
+            const candidates = this._graphListToolOrder();
+            let response;
+            let lastError = null;
+
+            for (const tool of candidates) {
+                try {
+                    response = await this._callTool(client, tool, {});
+                    this._log(`[mcp-stata graphs] ${tool} response: ${this._stringifySafe(response)}`);
+                    break;
+                } catch (err) {
+                    lastError = err;
+                    this._log(`[mcp-stata graphs] ${tool} failed: ${err?.message || err}`);
+                }
             }
+
+            if (!response) {
+                if (lastError) throw lastError;
+                return [];
+            }
+
             const resolved = await this._resolveArtifactsFromList(response, meta?.cwd, client);
             this._log(`[mcp-stata graphs] resolved artifacts: ${this._stringifySafe(resolved)}`);
             return resolved;

@@ -161,7 +161,7 @@ describe('McpClient', () => {
 
             assert.isTrue(enqueueSpy.calledOnce);
             const args = enqueueSpy.firstCall.args;
-            assert.equal(args[0], 'run');
+            assert.equal(args[0], 'run_command');
             assert.equal(args[5], true); // collectArtifacts flag
         });
     });
@@ -248,7 +248,7 @@ describe('McpClient', () => {
     describe('_resolveRunFileCwd', () => {
         it('should default to the file directory when unset', () => {
             const cwd = client._resolveRunFileCwd('/tmp/project/script.do');
-            assert.equal(cwd, '/tmp/project');
+            assert.equal(cwd, path.normalize('/tmp/project'));
         });
 
         it('should expand workspace and fileDir tokens', () => {
@@ -272,7 +272,7 @@ describe('McpClient', () => {
             });
 
             const cwd = client._resolveRunFileCwd('/tmp/project/script.do');
-            assert.equal(cwd, '/abs/path');
+            assert.equal(cwd, path.normalize('/abs/path'));
         });
 
         it('should expand tilde to home directory', () => {
@@ -287,7 +287,7 @@ describe('McpClient', () => {
             });
 
             const cwd = client._resolveRunFileCwd('/tmp/project/script.do');
-            assert.equal(cwd, '/home/tester/stata/runs');
+            assert.equal(cwd, path.normalize('/home/tester/stata/runs'));
 
             process.env.HOME = originalHome;
         });
@@ -301,7 +301,7 @@ describe('McpClient', () => {
             });
 
             const cwd = client._resolveRunFileCwd('/tmp/project/script.do');
-            assert.equal(cwd, '/tmp/project');
+            assert.equal(cwd, path.normalize('/tmp/project'));
         });
 
         it('should resolve relative paths against workspace root when available', () => {

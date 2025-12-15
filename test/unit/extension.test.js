@@ -1,6 +1,7 @@
 const { assert } = require('chai');
 const sinon = require('sinon');
 const proxyquire = require('proxyquire');
+const path = require('path');
 
 describe('extension refreshMcpPackage', () => {
     let spawnSync;
@@ -52,7 +53,6 @@ describe('extension refreshMcpPackage', () => {
         const readFileSync = sinon.stub();
         const existsSync = sinon.stub().returns(true);
 
-        // First call (VS Code format) returns servers shape without --refresh
         readFileSync.onCall(0).returns(JSON.stringify({
             servers: {
                 mcp_stata: {
@@ -60,11 +60,7 @@ describe('extension refreshMcpPackage', () => {
                     command: 'uvx',
                     args: ['--from', 'mcp-stata@latest', 'mcp-stata']
                 }
-            }
-        }));
-
-        // Second call (Cursor format) returns mcpServers shape without --refresh
-        readFileSync.onCall(1).returns(JSON.stringify({
+            },
             mcpServers: {
                 mcp_stata: {
                     command: 'uvx',
@@ -89,18 +85,17 @@ describe('extension refreshMcpPackage', () => {
 
         const { writeMcpConfig } = extensionWithFs;
 
-        // VS Code format
-        writeMcpConfig('/tmp/.vscode/mcp.json', true);
-        // Cursor format
-        writeMcpConfig('/tmp/.cursor/mcp.json', false);
+        writeMcpConfig({
+            configPath: '/tmp/user/globalStorage/mcp.json',
+            writeVscode: true,
+            writeCursor: true
+        });
 
-        // Validate writes
-        const firstWrite = JSON.parse(writeFileSync.firstCall.args[1]);
-        const serverArgs = firstWrite.servers.mcp_stata.args;
+        assert.isTrue(writeFileSync.calledOnce, 'writes once to shared user config');
+        const updated = JSON.parse(writeFileSync.firstCall.args[1]);
+        const serverArgs = updated.servers.mcp_stata.args;
+        const cursorArgs = updated.mcpServers.mcp_stata.args;
         assert.deepEqual(serverArgs.slice(0, 3), ['--refresh', '--from', 'mcp-stata@latest']);
-
-        const secondWrite = JSON.parse(writeFileSync.secondCall.args[1]);
-        const cursorArgs = secondWrite.mcpServers.mcp_stata.args;
         assert.deepEqual(cursorArgs.slice(0, 3), ['--refresh', '--from', 'mcp-stata@latest']);
     });
 
@@ -175,7 +170,8 @@ describe('extension refreshMcpPackage', () => {
                 child_process: { spawnSync: sinon.stub() }
             });
 
-            assert.isTrue(extWithFs.hasExistingMcpConfig('/workspace'));
+            const ctx = { mcpConfigPath: '/tmp/user/mcp.json' };
+            assert.isTrue(extWithFs.hasExistingMcpConfig(ctx));
         });
 
         it('suppresses missing CLI prompt when config already present', async () => {
@@ -210,7 +206,8 @@ describe('extension refreshMcpPackage', () => {
             const context = {
                 subscriptions: [],
                 globalState,
-                globalStoragePath: '/tmp/global',
+                mcpConfigPath: '/tmp/global/mcp.json',
+                globalStoragePath: '/tmp/globalStorage',
                 extensionUri: {},
                 extensionPath: '/workspace'
             };
@@ -221,9 +218,9 @@ describe('extension refreshMcpPackage', () => {
             assert.isTrue(globalState.update.calledWithMatch(sinon.match.string, true));
         });
 
-        it('detects windsurf and antigravity configs', () => {
+        it('detects cursor-format configs in user storage', () => {
             const fsStub = {
-                existsSync: sinon.stub().callsFake((p) => p.includes('.windsurf') || p.includes('.gemini') || p.includes('.antigravity')),
+                existsSync: sinon.stub().returns(true),
                 readFileSync: sinon.stub().returns(JSON.stringify({
                     mcpServers: {
                         mcp_stata: {
@@ -243,7 +240,249 @@ describe('extension refreshMcpPackage', () => {
                 child_process: { spawnSync: sinon.stub() }
             });
 
-            assert.isTrue(extWithFs.hasExistingMcpConfig('/workspace'));
+            const ctx = { mcpConfigPath: '/tmp/user/cursor-mcp.json' };
+            assert.isTrue(extWithFs.hasExistingMcpConfig(ctx));
+        });
+
+        it('resolves VS Code path on windows', () => {
+            const originalAppData = process.env.APPDATA;
+            delete process.env.APPDATA;
+            const extWithFs = proxyquire.noCallThru().load('../../src/extension', {
+                vscode: buildVscodeMock(),
+                './mcp-client': { client: { setLogger: () => { }, onStatusChanged: () => ({ dispose() { } }) } },
+                './terminal-panel': { TerminalPanel: { setExtensionUri: () => { }, addEntry: () => { }, show: () => { } } },
+                './artifact-utils': { openArtifact: () => { } },
+                fs: {
+                    mkdirSync: sinon.stub(),
+                    writeFileSync: sinon.stub(),
+                    existsSync: sinon.stub().returns(false),
+                    readFileSync: sinon.stub().returns('{}')
+                },
+                child_process: { spawnSync: sinon.stub() }
+            });
+
+            const ctx = {
+                mcpPlatformOverride: 'win32',
+                mcpHomeOverride: 'C:\\Users\\Bob'
+            };
+
+            const target = extWithFs.getMcpConfigTarget(ctx);
+            const expected = path.join('C:\\Users\\Bob', 'AppData', 'Roaming', 'Code', 'User', 'mcp.json');
+            assert.equal(target.configPath, expected);
+            assert.isFalse(target.writeCursor);
+            if (originalAppData === undefined) {
+                delete process.env.APPDATA;
+            } else {
+                process.env.APPDATA = originalAppData;
+            }
+        });
+
+        it('resolves Cursor path on windows', () => {
+            const cursorMock = buildVscodeMock();
+            cursorMock.env.appName = 'Cursor';
+
+            const extWithFs = proxyquire.noCallThru().load('../../src/extension', {
+                vscode: cursorMock,
+                './mcp-client': { client: { setLogger: () => { }, onStatusChanged: () => ({ dispose() { } }) } },
+                './terminal-panel': { TerminalPanel: { setExtensionUri: () => { }, addEntry: () => { }, show: () => { } } },
+                './artifact-utils': { openArtifact: () => { } },
+                fs: {
+                    mkdirSync: sinon.stub(),
+                    writeFileSync: sinon.stub(),
+                    existsSync: sinon.stub().returns(false),
+                    readFileSync: sinon.stub().returns('{}')
+                },
+                child_process: { spawnSync: sinon.stub() }
+            });
+
+            const ctx = {
+                mcpPlatformOverride: 'win32',
+                mcpHomeOverride: 'C:\\Users\\Bob'
+            };
+
+            const target = extWithFs.getMcpConfigTarget(ctx);
+            const expected = path.join('C:\\Users\\Bob', '.cursor', 'mcp.json');
+            assert.equal(target.configPath, expected);
+            assert.isTrue(target.writeCursor);
+        });
+
+        it('resolves Windsurf path on linux', () => {
+            const extWithFs = proxyquire.noCallThru().load('../../src/extension', {
+                vscode: buildVscodeMock(),
+                './mcp-client': { client: { setLogger: () => { }, onStatusChanged: () => ({ dispose() { } }) } },
+                './terminal-panel': { TerminalPanel: { setExtensionUri: () => { }, addEntry: () => { }, show: () => { } } },
+                './artifact-utils': { openArtifact: () => { } },
+                fs: {
+                    mkdirSync: sinon.stub(),
+                    writeFileSync: sinon.stub(),
+                    existsSync: sinon.stub().returns(false),
+                    readFileSync: sinon.stub().returns('{}')
+                },
+                child_process: { spawnSync: sinon.stub() }
+            });
+
+            const ctx = {
+                mcpPlatformOverride: 'linux',
+                mcpHomeOverride: '/home/alex',
+                mcpAppNameOverride: 'Windsurf'
+            };
+
+            const target = extWithFs.getMcpConfigTarget(ctx);
+            const expected = path.join('/home/alex', '.codeium', 'mcp_config.json');
+            assert.equal(target.configPath, expected);
+            assert.isTrue(target.writeCursor);
+        });
+
+        it('resolves Antigravity path on windows', () => {
+            const extWithFs = proxyquire.noCallThru().load('../../src/extension', {
+                vscode: buildVscodeMock(),
+                './mcp-client': { client: { setLogger: () => { }, onStatusChanged: () => ({ dispose() { } }) } },
+                './terminal-panel': { TerminalPanel: { setExtensionUri: () => { }, addEntry: () => { }, show: () => { } } },
+                './artifact-utils': { openArtifact: () => { } },
+                fs: {
+                    mkdirSync: sinon.stub(),
+                    writeFileSync: sinon.stub(),
+                    existsSync: sinon.stub().returns(false),
+                    readFileSync: sinon.stub().returns('{}')
+                },
+                child_process: { spawnSync: sinon.stub() }
+            });
+
+            const originalAppData = process.env.APPDATA;
+            process.env.APPDATA = path.join('C\\Users\\Bob', 'AppData', 'Roaming');
+
+            const ctx = {
+                mcpPlatformOverride: 'win32',
+                mcpHomeOverride: 'C\\Users\\Bob',
+                mcpAppNameOverride: 'Antigravity'
+            };
+
+            const target = extWithFs.getMcpConfigTarget(ctx);
+            const expected = path.join('C\\Users\\Bob', 'AppData', 'Roaming', 'Antigravity', 'User', 'mcp.json');
+            assert.equal(target.configPath, expected);
+            assert.isTrue(target.writeCursor);
+
+            process.env.APPDATA = originalAppData;
+        });
+
+        it('resolves VS Code Insiders path on linux', () => {
+            const extWithFs = proxyquire.noCallThru().load('../../src/extension', {
+                vscode: buildVscodeMock(),
+                './mcp-client': { client: { setLogger: () => { }, onStatusChanged: () => ({ dispose() { } }) } },
+                './terminal-panel': { TerminalPanel: { setExtensionUri: () => { }, addEntry: () => { }, show: () => { } } },
+                './artifact-utils': { openArtifact: () => { } },
+                fs: {
+                    mkdirSync: sinon.stub(),
+                    writeFileSync: sinon.stub(),
+                    existsSync: sinon.stub().returns(false),
+                    readFileSync: sinon.stub().returns('{}')
+                },
+                child_process: { spawnSync: sinon.stub() }
+            });
+
+            const ctx = {
+                mcpPlatformOverride: 'linux',
+                mcpHomeOverride: '/home/dev',
+                mcpAppNameOverride: 'Visual Studio Code - Insiders'
+            };
+
+            const target = extWithFs.getMcpConfigTarget(ctx);
+            const expected = path.join('/home/dev', '.config', 'Code - Insiders', 'User', 'mcp.json');
+            assert.equal(target.configPath, expected);
+            assert.isFalse(target.writeCursor);
+        });
+
+        it('honors explicit override path and writes both formats', () => {
+            const extWithFs = proxyquire.noCallThru().load('../../src/extension', {
+                vscode: buildVscodeMock(),
+                './mcp-client': { client: { setLogger: () => { }, onStatusChanged: () => ({ dispose() { } }) } },
+                './terminal-panel': { TerminalPanel: { setExtensionUri: () => { }, addEntry: () => { }, show: () => { } } },
+                './artifact-utils': { openArtifact: () => { } },
+                fs: {
+                    mkdirSync: sinon.stub(),
+                    writeFileSync: sinon.stub(),
+                    existsSync: sinon.stub().returns(false),
+                    readFileSync: sinon.stub().returns('{}')
+                },
+                child_process: { spawnSync: sinon.stub() }
+            });
+
+            const ctx = { mcpConfigPath: '/tmp/override/mcp.json' };
+            const target = extWithFs.getMcpConfigTarget(ctx);
+            assert.equal(target.configPath, '/tmp/override/mcp.json');
+            assert.isTrue(target.writeCursor);
+            assert.isTrue(target.writeVscode);
+        });
+
+        it('falls back to home/AppData/Roaming when APPDATA unset', () => {
+            const extWithFs = proxyquire.noCallThru().load('../../src/extension', {
+                vscode: buildVscodeMock(),
+                './mcp-client': { client: { setLogger: () => { }, onStatusChanged: () => ({ dispose() { } }) } },
+                './terminal-panel': { TerminalPanel: { setExtensionUri: () => { }, addEntry: () => { }, show: () => { } } },
+                './artifact-utils': { openArtifact: () => { } },
+                fs: {
+                    mkdirSync: sinon.stub(),
+                    writeFileSync: sinon.stub(),
+                    existsSync: sinon.stub().returns(false),
+                    readFileSync: sinon.stub().returns('{}')
+                },
+                child_process: { spawnSync: sinon.stub() }
+            });
+
+            const originalAppData = process.env.APPDATA;
+            delete process.env.APPDATA;
+
+            const ctx = {
+                mcpPlatformOverride: 'win32',
+                mcpHomeOverride: 'C\\Users\\Dana',
+                mcpAppNameOverride: 'Visual Studio Code'
+            };
+
+            const target = extWithFs.getMcpConfigTarget(ctx);
+            const expected = path.join('C\\Users\\Dana', 'AppData', 'Roaming', 'Code', 'User', 'mcp.json');
+            assert.equal(target.configPath, expected);
+            assert.isFalse(target.writeCursor);
+
+            process.env.APPDATA = originalAppData;
+        });
+
+        it('returns null and logs when home cannot be resolved', () => {
+            const extWithFs = proxyquire.noCallThru().load('../../src/extension', {
+                vscode: buildVscodeMock(),
+                './mcp-client': { client: { setLogger: () => { }, onStatusChanged: () => ({ dispose() { } }) } },
+                './terminal-panel': { TerminalPanel: { setExtensionUri: () => { }, addEntry: () => { }, show: () => { } } },
+                './artifact-utils': { openArtifact: () => { } },
+                fs: {
+                    mkdirSync: sinon.stub(),
+                    writeFileSync: sinon.stub(),
+                    existsSync: sinon.stub().returns(false),
+                    readFileSync: sinon.stub().returns('{}')
+                },
+                child_process: { spawnSync: sinon.stub() }
+            });
+
+            const target = extWithFs.getMcpConfigTarget({ mcpHomeOverride: null, mcpPlatformOverride: 'linux' });
+            assert.isNull(target);
+        });
+
+        it('skips write when no targets selected', () => {
+            const writeFileSync = sinon.stub();
+            const extWithFs = proxyquire.noCallThru().load('../../src/extension', {
+                vscode: buildVscodeMock(),
+                './mcp-client': { client: { setLogger: () => { }, onStatusChanged: () => ({ dispose() { } }) } },
+                './terminal-panel': { TerminalPanel: { setExtensionUri: () => { }, addEntry: () => { }, show: () => { } } },
+                './artifact-utils': { openArtifact: () => { } },
+                fs: {
+                    mkdirSync: sinon.stub(),
+                    writeFileSync,
+                    existsSync: sinon.stub().returns(false),
+                    readFileSync: sinon.stub().returns('{}')
+                },
+                child_process: { spawnSync: sinon.stub() }
+            });
+
+            extWithFs.writeMcpConfig({ configPath: '/tmp/none.json', writeVscode: false, writeCursor: false });
+            assert.isTrue(writeFileSync.notCalled);
         });
     });
 });
@@ -275,7 +514,8 @@ function buildVscodeMock() {
         },
         env: {
             clipboard: { writeText: sinon.stub().resolves() },
-            openExternal: sinon.stub()
+            openExternal: sinon.stub(),
+            appName: 'Visual Studio Code'
         },
         Uri: {
             parse: sinon.stub().returns({}),
