@@ -47,7 +47,7 @@ function dumpMcpLogs(userDataDir) {
                 const stat = fs.statSync(full);
                 if (stat.isDirectory()) {
                     walk(full);
-                } else if (/Stata MCP\.log$/i.test(entry) || /mcp-stata/i.test(entry)) {
+                } else if (/Stata Workbench\.log$/i.test(entry) || /mcp-stata/i.test(entry)) {
                     candidates.push(full);
                 }
             }

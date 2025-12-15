@@ -74,7 +74,7 @@ Offline/VSIX fallback:
 - **Install MCP CLI helper** (`stata-workbench.installMcpCli`): Bootstraps uv locally when it is missing.
 - **Status bar + cancel** (`stata-workbench.cancelRequest`): Live request states with one-click cancellation routed through the MCP client.
 - **Auto-manage MCP configs**: Writes the user-level `mcp.json` in your editor's user data so AI agents reuse the same `uvx --from mcp-stata --refresh mcp-stata` wiring, and auto-corrects older entries missing `--refresh`.
-- **Durable logs**: All run results are logged to the `Stata MCP` output channel for reference.
+- **Durable logs**: All run results are logged to the `Stata Workbench` output channel for reference.
 
 ## Settings
 - `stataMcp.requestTimeoutMs` (default `45000`): timeout for MCP requests.

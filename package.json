@@ -121,7 +121,7 @@
       }
     ],
     "configuration": {
-      "title": "Stata MCP",
+      "title": "Stata Workbench",
       "properties": {
         "stataMcp.requestTimeoutMs": {
           "type": "number",

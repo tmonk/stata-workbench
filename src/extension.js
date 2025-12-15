@@ -54,9 +54,9 @@ function getUvInstallCommand(platform = process.platform) {
 
 function activate(context) {
     globalContext = context;
-    outputChannel = vscode.window.createOutputChannel('Stata MCP');
+    outputChannel = vscode.window.createOutputChannel('Stata Workbench');
     const version = pkg?.version || 'unknown';
-    outputChannel.appendLine(`Stata MCP ready (extension v${version})`);
+    outputChannel.appendLine(`Stata Workbench ready (extension v${version})`);
     revealOutput();
     missingCliPrompted = !!context.globalState?.get?.(MISSING_CLI_PROMPT_KEY);
     if (!missingCliPrompted && hasExistingMcpConfig(context)) {
@@ -68,8 +68,8 @@ function activate(context) {
     }
 
     statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
-    statusBarItem.text = '$(beaker) Stata MCP: Idle';
-    statusBarItem.tooltip = 'Stata MCP (powered by mcp-stata)';
+    statusBarItem.text = '$(beaker) Stata Workbench: Idle';
+    statusBarItem.tooltip = 'Stata Workbench (powered by mcp-stata)';
     statusBarItem.show();
 
     const subscriptions = [
@@ -436,39 +436,39 @@ function updateStatusBar(status) {
     if (!statusBarItem) return;
     switch (status) {
         case 'queued':
-            statusBarItem.text = '$(clock) Stata MCP: Queued';
+            statusBarItem.text = '$(clock) Stata Workbench: Queued';
             statusBarItem.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');
             statusBarItem.command = undefined;
             break;
         case 'running':
-            statusBarItem.text = '$(sync~spin) Stata MCP: Running';
+            statusBarItem.text = '$(sync~spin) Stata Workbench: Running';
             statusBarItem.backgroundColor = undefined;
             statusBarItem.command = 'stata-workbench.cancelRequest';
             statusBarItem.tooltip = 'Cancel current Stata request';
             break;
         case 'connecting':
-            statusBarItem.text = '$(sync~spin) Stata MCP: Connecting';
+            statusBarItem.text = '$(sync~spin) Stata Workbench: Connecting';
             statusBarItem.backgroundColor = undefined;
             statusBarItem.command = undefined;
             break;
         case 'connected':
-            statusBarItem.text = '$(beaker) Stata MCP: Connected';
+            statusBarItem.text = '$(beaker) Stata Workbench: Connected';
             statusBarItem.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');
             statusBarItem.command = undefined;
             break;
         case 'error':
-            statusBarItem.text = '$(error) Stata MCP: Error';
+            statusBarItem.text = '$(error) Stata Workbench: Error';
             statusBarItem.backgroundColor = new vscode.ThemeColor('statusBarItem.errorBackground');
             statusBarItem.command = undefined;
             break;
         case 'missing':
-            statusBarItem.text = '$(warning) Stata MCP: uvx missing';
+            statusBarItem.text = '$(warning) Stata Workbench: uvx missing';
             statusBarItem.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');
             statusBarItem.tooltip = 'uvx (uv) not found. Click to copy install command.';
             statusBarItem.command = 'stata-workbench.installMcpCli';
             break;
         default:
-            statusBarItem.text = '$(beaker) Stata MCP: Idle';
+            statusBarItem.text = '$(beaker) Stata Workbench: Idle';
             statusBarItem.backgroundColor = undefined;
             statusBarItem.command = undefined;
     }
