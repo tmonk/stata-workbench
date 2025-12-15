@@ -12,12 +12,15 @@ let statusBarItem;
 let dataPanel = null;
 let graphPanel = null;
 let missingCli = false;
+let missingCliPrompted = false;
 const MCP_SERVER_ID = 'mcp_stata';
 const MCP_PACKAGE_NAME = 'mcp-stata';
 const MCP_PACKAGE_SPEC = `${MCP_PACKAGE_NAME}@latest`;
+const MISSING_CLI_PROMPT_KEY = 'stata-workbench.missingCliPrompted';
 let uvCommand = 'uvx';
 let mcpPackageVersion = 'unknown';
 let globalExtensionUri = null;
+let globalContext = null;
 
 function getUvInstallCommand(platform = process.platform) {
     if (platform === 'win32') {
@@ -38,9 +41,16 @@ function getUvInstallCommand(platform = process.platform) {
 }
 
 function activate(context) {
+    globalContext = context;
     outputChannel = vscode.window.createOutputChannel('Stata MCP');
     const version = pkg?.version || 'unknown';
     outputChannel.appendLine(`Stata MCP ready (extension v${version})`);
+    missingCliPrompted = !!context.globalState?.get?.(MISSING_CLI_PROMPT_KEY);
+    const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri?.fsPath || context.extensionPath;
+    if (!missingCliPrompted && hasExistingMcpConfig(workspaceRoot)) {
+        missingCliPrompted = true;
+        context.globalState?.update?.(MISSING_CLI_PROMPT_KEY, true).catch?.(() => { });
+    }
     if (typeof mcpClient.setLogger === 'function') {
         mcpClient.setLogger((msg) => outputChannel.appendLine(msg));
     }
@@ -170,7 +180,17 @@ function refreshMcpPackage() {
     return null;
 }
 
-function promptInstallMcpCli() {
+function promptInstallMcpCli(context) {
+    const ctx = context || globalContext;
+    if (!missingCliPrompted) {
+        missingCliPrompted = !!ctx?.globalState?.get?.(MISSING_CLI_PROMPT_KEY);
+    }
+    if (missingCliPrompted) {
+        missingCli = true;
+        updateStatusBar('missing');
+        return false;
+    }
+
     const installCmd = getUvInstallCommand().display;
     const message = 'uvx (uv) not found on PATH. Install uv to run mcp-stata via uvx.';
     vscode.window.showErrorMessage(
@@ -186,6 +206,8 @@ function promptInstallMcpCli() {
         }
     });
     missingCli = true;
+    missingCliPrompted = true;
+    ctx?.globalState?.update?.(MISSING_CLI_PROMPT_KEY, true).catch?.(() => { });
     updateStatusBar('missing');
     return false;
 }
@@ -212,10 +234,37 @@ function findUvBinary(optionalInstallDir) {
 
 function ensureMcpConfigs(context) {
     const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri?.fsPath || context.extensionPath;
-    const cursorPath = path.join(workspaceRoot, '.cursor', 'mcp.json');
-    const vscodePath = path.join(workspaceRoot, '.vscode', 'mcp.json');
-    writeMcpConfig(cursorPath, false);
-    writeMcpConfig(vscodePath, true);
+    const configPaths = getHostConfigPaths(workspaceRoot);
+    for (const cfg of configPaths) {
+        writeMcpConfig(cfg.path, cfg.isVscode);
+    }
+}
+
+function hasExistingMcpConfig(workspaceRoot) {
+    if (!workspaceRoot) return false;
+    const candidates = [
+        path.join(workspaceRoot, '.vscode', 'mcp.json'),
+        path.join(workspaceRoot, '.cursor', 'mcp.json'),
+        path.join(workspaceRoot, '.windsurf', 'mcp.json'),
+        path.join(workspaceRoot, '.gemini', 'mcp.json'),
+        path.join(workspaceRoot, '.antigravity', 'mcp.json')
+    ];
+
+    for (const candidate of candidates) {
+        try {
+            if (!fs.existsSync(candidate)) continue;
+            const raw = fs.readFileSync(candidate, 'utf8');
+            if (!raw) continue;
+            const json = JSON.parse(raw);
+            if (json?.servers?.[MCP_SERVER_ID] || json?.mcpServers?.[MCP_SERVER_ID]) {
+                return true;
+            }
+        } catch (_err) {
+            // ignore parse or access errors; treat as not present
+        }
+    }
+
+    return false;
 }
 
 function writeMcpConfig(configPath, isVscodeFormat) {
@@ -266,6 +315,23 @@ function writeMcpConfig(configPath, isVscodeFormat) {
     }
 }
 
+function getHostConfigPaths(workspaceRoot) {
+    const configs = new Set();
+    const appName = (vscode.env?.appName || '').toLowerCase();
+
+    const add = (rel, isVscode) => configs.add(JSON.stringify({ path: path.join(workspaceRoot, rel, 'mcp.json'), isVscode }));
+
+    if (appName.includes('cursor')) add('.cursor', false);
+    else if (appName.includes('windsurf')) add('.windsurf', false);
+    else if (appName.includes('antigravity') || appName.includes('gemini')) add('.gemini', false);
+    else add('.vscode', true);
+
+    // Always include VS Code-style config as a friendly fallback if not already present.
+    add('.vscode', true);
+
+    return Array.from(configs).map((s) => JSON.parse(s));
+}
+
 function configsMatch(existing, expected, hasType) {
     if (!existing) return false;
     if (hasType && existing.type !== expected.type) return false;
@@ -279,6 +345,7 @@ function deactivate() {
 }
 
 function updateStatusBar(status) {
+    if (!statusBarItem) return;
     switch (status) {
         case 'queued':
             statusBarItem.text = '$(clock) Stata MCP: Queued';
@@ -767,5 +834,7 @@ module.exports = {
     deactivate,
     refreshMcpPackage,
     writeMcpConfig,
-    getUvInstallCommand
+    getUvInstallCommand,
+    promptInstallMcpCli,
+    hasExistingMcpConfig
 };
