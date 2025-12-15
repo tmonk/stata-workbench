@@ -19,6 +19,24 @@ let uvCommand = 'uvx';
 let mcpPackageVersion = 'unknown';
 let globalExtensionUri = null;
 
+function getUvInstallCommand(platform = process.platform) {
+    if (platform === 'win32') {
+        const display = 'powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -Command "iwr https://astral.sh/uv/install.ps1 -useb | iex"';
+        return {
+            command: 'powershell',
+            args: ['-NoLogo', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', 'iwr https://astral.sh/uv/install.ps1 -useb | iex'],
+            display
+        };
+    }
+
+    const display = 'curl -LsSf https://astral.sh/uv/install.sh | sh';
+    return {
+        command: 'sh',
+        args: ['-c', display],
+        display
+    };
+}
+
 function activate(context) {
     outputChannel = vscode.window.createOutputChannel('Stata MCP');
     const version = pkg?.version || 'unknown';
@@ -77,9 +95,9 @@ function ensureMcpCliAvailable(context) {
         // ignore mkdir failures; fall back to prompt
     }
 
-    const installCmd = 'curl -LsSf https://astral.sh/uv/install.sh | sh';
+    const installCmd = getUvInstallCommand();
     const env = { ...process.env, UV_INSTALL_DIR: installDir };
-    const result = spawnSync('sh', ['-c', installCmd], { env, encoding: 'utf8' });
+    const result = spawnSync(installCmd.command, installCmd.args, { env, encoding: 'utf8' });
 
     const installed = findUvBinary(installDir);
     if (result.status === 0 && installed) {
@@ -153,7 +171,7 @@ function refreshMcpPackage() {
 }
 
 function promptInstallMcpCli() {
-    const installCmd = 'curl -LsSf https://astral.sh/uv/install.sh | sh';
+    const installCmd = getUvInstallCommand().display;
     const message = 'uvx (uv) not found on PATH. Install uv to run mcp-stata via uvx.';
     vscode.window.showErrorMessage(
         message,
@@ -173,11 +191,14 @@ function promptInstallMcpCli() {
 }
 
 function findUvBinary(optionalInstallDir) {
-    const candidates = ['uvx'];
+    const base = ['uvx', 'uvx.exe', 'uv', 'uv.exe'];
+    const candidates = [...base];
 
     if (optionalInstallDir) {
-        candidates.push(path.join(optionalInstallDir, 'bin', 'uvx'));
-        candidates.push(path.join(optionalInstallDir, 'bin', 'uv'));
+        const binDir = path.join(optionalInstallDir, 'bin');
+        for (const name of base) {
+            candidates.push(path.join(binDir, name));
+        }
     }
 
     for (const candidate of candidates) {
@@ -745,5 +766,6 @@ module.exports = {
     activate,
     deactivate,
     refreshMcpPackage,
-    writeMcpConfig
+    writeMcpConfig,
+    getUvInstallCommand
 };

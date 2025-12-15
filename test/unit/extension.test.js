@@ -101,6 +101,33 @@ describe('extension refreshMcpPackage', () => {
         const cursorArgs = secondWrite.mcpServers.mcp_stata.args;
         assert.deepEqual(cursorArgs.slice(0, 3), ['--refresh', '--from', 'mcp-stata@latest']);
     });
+
+    describe('getUvInstallCommand', () => {
+        it('returns curl/sh installer on macOS', () => {
+            const { getUvInstallCommand } = extension;
+            const result = getUvInstallCommand('darwin');
+            assert.equal(result.command, 'sh');
+            assert.deepEqual(result.args, ['-c', 'curl -LsSf https://astral.sh/uv/install.sh | sh']);
+            assert.include(result.display, 'curl -LsSf https://astral.sh/uv/install.sh | sh');
+        });
+
+        it('returns curl/sh installer on Linux', () => {
+            const { getUvInstallCommand } = extension;
+            const result = getUvInstallCommand('linux');
+            assert.equal(result.command, 'sh');
+            assert.deepEqual(result.args, ['-c', 'curl -LsSf https://astral.sh/uv/install.sh | sh']);
+            assert.include(result.display, 'curl -LsSf https://astral.sh/uv/install.sh | sh');
+        });
+
+        it('returns powershell installer on Windows', () => {
+            const { getUvInstallCommand } = extension;
+            const result = getUvInstallCommand('win32');
+            assert.equal(result.command, 'powershell');
+            assert.deepEqual(result.args, ['-NoLogo', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', 'iwr https://astral.sh/uv/install.ps1 -useb | iex']);
+            assert.include(result.display, 'install.ps1');
+            assert.include(result.display, 'powershell');
+        });
+    });
 });
 
 function buildVscodeMock() {
