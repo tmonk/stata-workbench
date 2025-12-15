@@ -125,7 +125,7 @@
       "properties": {
         "stataMcp.requestTimeoutMs": {
           "type": "number",
-          "default": 10000,
+          "default": 100000,
           "description": "Timeout (ms) for MCP requests before showing an error."
         },
         "stataMcp.autoRevealOutput": {
