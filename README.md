@@ -58,17 +58,13 @@ That screenshot makes it clear this isn’t a “terminal” so much as a **Stat
 
    A **Graph** artifact card appears—click it to open the generated graph.
 
-If you want to include the screenshot in the README, a nice GitHub-friendly snippet is:
-
-```html
 <p align="center">
-  <img src="img/stata-interactive.png" width="800" alt="Stata Terminal panel showing Stata output cards and a graph artifact" />
+  <img src="img/screenshot.jpg" width="800" alt="Stata Terminal panel showing Stata output cards and a graph artifact" />
 </p>
-```
 
 
 ## Requirements
-- Stata 17+ on Mac OS or Windows.
+- Stata 17+ on Mac OS, Windows, or Linux.
 - uv/uvx on PATH (to run the published mcp-stata tool). If missing, the extension automatically bootstraps uv locally into its storage.
 
 ## Features & Commands
