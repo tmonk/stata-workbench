@@ -55,7 +55,7 @@ Offline/VSIX fallback:
    A **Graph** artifact card appears—click it to open the generated graph.
 
 <p align="center">
-  <img src="img/screenshot.jpg" width="800" alt="Stata Terminal panel showing Stata output cards and a graph artifact" />
+  <img src="img/screenshot.jpg" style="max-width: 70%; border-radius: 12px;" alt="Stata Terminal panel showing Stata output cards and a graph artifact" />
 </p>
 
 
