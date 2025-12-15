@@ -12,7 +12,7 @@ describe('extension refreshMcpPackage', () => {
         extension = proxyquire.noCallThru().load('../../src/extension', {
             vscode: buildVscodeMock(),
             './mcp-client': { client: { setLogger: () => { }, onStatusChanged: () => ({ dispose() { } }) } },
-            './interactive-panel': { InteractivePanel: { setExtensionUri: () => { }, addEntry: () => { }, show: () => { } } },
+            './terminal-panel': { TerminalPanel: { setExtensionUri: () => { }, addEntry: () => { }, show: () => { } } },
             './artifact-utils': { openArtifact: () => { } },
             fs: {
                 mkdirSync: sinon.stub(),
@@ -74,7 +74,7 @@ describe('extension refreshMcpPackage', () => {
         const extensionWithFs = proxyquire.noCallThru().load('../../src/extension', {
             vscode: buildVscodeMock(),
             './mcp-client': { client: { setLogger: () => { }, onStatusChanged: () => ({ dispose() { } }) } },
-            './interactive-panel': { InteractivePanel: { setExtensionUri: () => { }, addEntry: () => { }, show: () => { } } },
+            './terminal-panel': { TerminalPanel: { setExtensionUri: () => { }, addEntry: () => { }, show: () => { } } },
             './artifact-utils': { openArtifact: () => { } },
             fs: {
                 mkdirSync: sinon.stub(),

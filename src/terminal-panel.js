@@ -2,19 +2,19 @@ const { openArtifact } = require('./artifact-utils');
 const path = require('path');
 const vscode = require('vscode');
 
-class InteractivePanel {
+class TerminalPanel {
   static currentPanel = null;
   static extensionUri = null;
   static _testCapture = null;
   static variableProvider = null;
 
   static setExtensionUri(uri) {
-    InteractivePanel.extensionUri = uri;
+    TerminalPanel.extensionUri = uri;
   }
 
 
   /**
-   * Show (or reveal) the interactive panel and seed it with an initial entry.
+  * Show (or reveal) the terminal panel and seed it with an initial entry.
    * @param {Object} options
    * @param {string} options.filePath
    * @param {string} options.initialCode
@@ -24,42 +24,42 @@ class InteractivePanel {
   static show({ filePath, initialCode, initialResult, runCommand, variableProvider }) {
     const column = vscode.ViewColumn.Beside;
     if (typeof variableProvider === 'function') {
-      InteractivePanel.variableProvider = variableProvider;
+      TerminalPanel.variableProvider = variableProvider;
     }
-    if (!InteractivePanel.currentPanel) {
-      InteractivePanel.currentPanel = vscode.window.createWebviewPanel(
-        'stataInteractive',
-        'Stata Interactive',
+    if (!TerminalPanel.currentPanel) {
+      TerminalPanel.currentPanel = vscode.window.createWebviewPanel(
+        'stataTerminal',
+        'Stata Terminal',
         column,
         {
           enableScripts: true,
           retainContextWhenHidden: true,
           localResourceRoots: [
-            vscode.Uri.joinPath(InteractivePanel.extensionUri, 'src', 'ui-shared')
+            vscode.Uri.joinPath(TerminalPanel.extensionUri, 'src', 'ui-shared')
           ]
         }
       );
 
-      InteractivePanel.currentPanel.onDidDispose(() => {
-        InteractivePanel.currentPanel = null;
+      TerminalPanel.currentPanel.onDidDispose(() => {
+        TerminalPanel.currentPanel = null;
       });
 
-      InteractivePanel.currentPanel.webview.onDidReceiveMessage(async (message) => {
+      TerminalPanel.currentPanel.webview.onDidReceiveMessage(async (message) => {
         if (!message || typeof message !== 'object') return;
 
         // Test hook
-        if (InteractivePanel._testCapture) {
-          InteractivePanel._testCapture(message);
+        if (TerminalPanel._testCapture) {
+          TerminalPanel._testCapture(message);
         }
 
         if (message.type === 'run' && typeof message.code === 'string') {
-          await InteractivePanel.handleRun(message.code, runCommand);
+          await TerminalPanel.handleRun(message.code, runCommand);
         }
         if (message.type === 'openArtifact' && message.path) {
           openArtifact(message.path, message.baseDir);
         }
         if (message.type === 'requestVariables') {
-          const provider = InteractivePanel.variableProvider;
+          const provider = TerminalPanel.variableProvider;
           if (typeof provider === 'function') {
             try {
               const vars = await provider();
@@ -77,7 +77,7 @@ class InteractivePanel {
       });
     }
 
-    const webview = InteractivePanel.currentPanel.webview;
+    const webview = TerminalPanel.currentPanel.webview;
     const nonce = getNonce();
 
     // Convert initial data to history entry format for embedding
@@ -85,16 +85,16 @@ class InteractivePanel {
       ? [toEntry(initialCode, initialResult)]
       : [];
 
-    InteractivePanel.currentPanel.webview.html = renderHtml(webview, InteractivePanel.extensionUri, nonce, filePath, initialHistory);
-    InteractivePanel.currentPanel.reveal(column);
+    TerminalPanel.currentPanel.webview.html = renderHtml(webview, TerminalPanel.extensionUri, nonce, filePath, initialHistory);
+    TerminalPanel.currentPanel.reveal(column);
 
 
 
   }
 
   static async handleRun(code, runCommand) {
-    if (!InteractivePanel.currentPanel) return;
-    const webview = InteractivePanel.currentPanel.webview;
+    if (!TerminalPanel.currentPanel) return;
+    const webview = TerminalPanel.currentPanel.webview;
     const trimmed = (code || '').trim();
     if (!trimmed) return;
 
@@ -116,44 +116,44 @@ class InteractivePanel {
   }
 
   /**
-   * Appends an entry to the interactive panel, showing it if necessary.
+  * Appends an entry to the terminal panel, showing it if necessary.
    * @param {string} code
    * @param {object} result
    * @param {string} [filePath] - associated file path to update title if needed
    * @param {(code: string) => Promise<object>} [runCommand] - command runner if panel needs initialization
    */
   static addEntry(code, result, filePath, runCommand, variableProvider) {
-    if (!InteractivePanel.currentPanel) {
+    if (!TerminalPanel.currentPanel) {
       // If panel not open, open it with this as initial state
-      InteractivePanel.show({
+      TerminalPanel.show({
         filePath,
         initialCode: code,
         initialResult: result,
         runCommand: runCommand || (async () => { throw new Error('Session not fully initialized'); }),
-        variableProvider: variableProvider || InteractivePanel.variableProvider
+        variableProvider: variableProvider || TerminalPanel.variableProvider
       });
       return;
     }
 
     // Panel exists, just append
-    const webview = InteractivePanel.currentPanel.webview;
+    const webview = TerminalPanel.currentPanel.webview;
     webview.postMessage({
       type: 'append',
       entry: toEntry(code, result)
     });
 
     // Explicitly reveal it
-    InteractivePanel.currentPanel.reveal(vscode.ViewColumn.Beside);
+    TerminalPanel.currentPanel.reveal(vscode.ViewColumn.Beside);
   }
 
 }
 
-module.exports = { InteractivePanel, toEntry, normalizeArtifacts };
+module.exports = { TerminalPanel, toEntry, normalizeArtifacts };
 
 function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = []) {
   const designUri = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'src', 'ui-shared', 'design.css'));
   const mainJsUri = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'src', 'ui-shared', 'main.js'));
-  const fileName = filePath ? path.basename(filePath) : 'Interactive Session';
+  const fileName = filePath ? path.basename(filePath) : 'Terminal Session';
   const escapedTitle = escapeHtml(fileName);
   const initialJson = JSON.stringify(initialEntries).replace(/</g, '\\u003c'); // Safe JSON embedding
 
@@ -164,7 +164,7 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${webview.cspSource} https: data:; script-src 'nonce-${nonce}' ${webview.cspSource}; style-src 'unsafe-inline' ${webview.cspSource};">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <link rel="stylesheet" href="${designUri}">
-  <title>Stata Interactive</title>
+  <title>Stata Terminal</title>
   <script nonce="${nonce}">
     window.initialEntries = ${initialJson};
   </script>

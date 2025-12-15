@@ -31,15 +31,15 @@ suite('Tab Completion Integration', function () {
         }
 
         const api = extension.exports;
-        assert.ok(api && api.InteractivePanel, 'InteractivePanel API should be exposed');
+        assert.ok(api && api.TerminalPanel, 'TerminalPanel API should be exposed');
 
         let requestSeen = false;
         let variablesSent = false;
 
-        api.InteractivePanel._testCapture = (msg) => {
+        api.TerminalPanel._testCapture = (msg) => {
             if (msg.type === 'requestVariables') {
                 requestSeen = true;
-                const panel = api.InteractivePanel.currentPanel;
+                const panel = api.TerminalPanel.currentPanel;
                 if (panel?.webview?.postMessage) {
                     panel.webview.postMessage({
                         type: 'variables',

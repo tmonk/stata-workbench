@@ -3,12 +3,12 @@ const proxyquire = require('proxyquire');
 const vscodeMock = require('../mocks/vscode');
 
 describe('Panels', () => {
-    let interactivePanelModule;
+    let terminalPanelModule;
 
     before(() => {
         // Load modules with mocked vscode
         // Use .noCallThru() to ensure we don't try to load real vscode
-        interactivePanelModule = proxyquire.noCallThru().load('../../src/interactive-panel', {
+        terminalPanelModule = proxyquire.noCallThru().load('../../src/terminal-panel', {
             'vscode': vscodeMock,
             'fs': {},
             'path': require('path'),
@@ -16,9 +16,9 @@ describe('Panels', () => {
         });
     });
 
-    describe('InteractivePanel helpers', () => {
+    describe('TerminalPanel helpers', () => {
         it('toEntry should structure data correctly', () => {
-            const { toEntry } = interactivePanelModule;
+            const { toEntry } = terminalPanelModule;
             const result = {
                 stdout: 'out',
                 command: 'test cmd',
@@ -37,7 +37,7 @@ describe('Panels', () => {
         });
 
         it('normalizeArtifacts should filter nulls and handle formatting', () => {
-            const { normalizeArtifacts } = interactivePanelModule;
+            const { normalizeArtifacts } = terminalPanelModule;
             const input = {
                 artifacts: [
                     null,
@@ -51,21 +51,21 @@ describe('Panels', () => {
             assert.equal(normalized[0].previewDataUri, 'data:...');
         });
 
-        describe('InteractivePanel.addEntry', () => {
+        describe('TerminalPanel.addEntry', () => {
             it('should append to existing panel', () => {
-                const { InteractivePanel } = interactivePanelModule;
+                const { TerminalPanel } = terminalPanelModule;
                 let postedMessage = null;
                 let revealedColumn = null;
 
                 // Mock current panel
-                InteractivePanel.currentPanel = {
+                TerminalPanel.currentPanel = {
                     webview: {
                         postMessage: (msg) => { postedMessage = msg; }
                     },
                     reveal: (col) => { revealedColumn = col; }
                 };
 
-                InteractivePanel.addEntry('code', { stdout: 'result' }, '/path/to/file');
+                TerminalPanel.addEntry('code', { stdout: 'result' }, '/path/to/file');
 
                 assert.deepEqual(postedMessage.type, 'append');
                 assert.equal(postedMessage.entry.code, 'code');
@@ -73,27 +73,27 @@ describe('Panels', () => {
                 assert.isNotNull(revealedColumn);
 
                 // Cleanup
-                InteractivePanel.currentPanel = null;
+                TerminalPanel.currentPanel = null;
             });
 
             it('should open new panel if none exists', () => {
-                const { InteractivePanel } = interactivePanelModule;
+                const { TerminalPanel } = terminalPanelModule;
                 let showCalled = false;
                 let capturedOptions = null;
 
                 // Stub static show method manually for this test
-                const originalShow = InteractivePanel.show;
-                InteractivePanel.show = (opts) => {
+                const originalShow = TerminalPanel.show;
+                TerminalPanel.show = (opts) => {
                     showCalled = true;
                     capturedOptions = opts;
                 };
 
                 // Ensure no current panel
-                InteractivePanel.currentPanel = null;
+                TerminalPanel.currentPanel = null;
 
                 const runCmd = async () => { };
                 const varProvider = () => [];
-                InteractivePanel.addEntry('code', { stdout: 'res' }, '/path', runCmd, varProvider);
+                TerminalPanel.addEntry('code', { stdout: 'res' }, '/path', runCmd, varProvider);
 
                 assert.isTrue(showCalled);
                 assert.equal(capturedOptions.initialCode, 'code');
@@ -102,7 +102,7 @@ describe('Panels', () => {
                 assert.equal(capturedOptions.variableProvider, varProvider);
 
                 // Restore
-                InteractivePanel.show = originalShow;
+                TerminalPanel.show = originalShow;
             });
         });
     });

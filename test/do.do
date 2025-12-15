@@ -1,2 +1,1 @@
-clear all
-reg y x
+sysuse auto, clear

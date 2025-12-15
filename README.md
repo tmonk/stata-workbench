@@ -2,9 +2,19 @@
 
 <img style="margin: auto; text-align: center;" src="https://raw.githubusercontent.com/tmonk/stata-workbench/refs/heads/main/img/icon.png" width="200">
 
-A VS Code / Cursor / Antigravity / Windsurf extension that allows Stata code to be run directly from the editor. Enables AI agents to directly interact with Stata, powered by [mcp-stata](https://github.com/tmonk/mcp-stata).
+A VS Code compatible extension (Cursor, Windsurf, Antigravity etc.) that runs Stata directly from your editor that allows Stata code to be run directly from the editor. Enables AI agents to directly interact with Stata, powered by [mcp-stata](https://github.com/tmonk/mcp-stata).
 
 Built by [Thomas Monk](https://tdmonk.com), London School of Economics.
+
+## Why use this?
+
+**Run Stata without leaving your editor.** Execute code, see output, and view graphs - all within VS Code. No switching windows, no copying and pasting between your do-file editor and an AI chat.
+
+**For solo work**: A modern IDE for Stata—autocomplete, syntax highlighting, multiple cursors, and an AI assistant that can run commands, inspect your variables, and debug errors directly.
+
+**For collaboration**: Co-authors work in the same environment they use for other code. Shared editor settings, consistent formatting, and AI assistants that understand your project structure.
+
+**For teaching**: Students learn Stata with the same tools they'll use for everything else - inline errors, an integrated terminal, and an AI that can explain what went wrong.
 
 ## Installation
 
@@ -23,15 +33,49 @@ Offline/VSIX fallback:
 2. In your VS Code/Cursor/Antigravity/Windsurf IDE, open the command palette (`Ctrl+Shift+P` or `Cmd+Shift+P` on Mac) and select `Extensions: Install from VSIX...`.
 3. Select the downloaded .vsix file and install.
 
+## Quickstart
+
+That screenshot makes it clear this isn’t a “terminal” so much as a **Stata Terminal panel** (webview) with output cards + a command prompt at the bottom. I’d tweak the Quickstart wording to match what people will literally see:
+
+## Quickstart
+
+1. Install the **Stata Workbench** extension.
+2. Open a `.do` file in VS Code (or a compatible editor).
+3. Run **Stata: Run Selection/Line** (press the play button on the top right). The **Stata Terminal** panel opens automatically the first time you run a command.
+4. Run:
+
+   ```stata
+   sysuse auto, clear
+   summarize
+   ```
+
+   Output appears as “Stata Output” cards (with return code + timing) in the panel.
+5. Run:
+
+   ```stata
+   scatter price mpg
+   ```
+
+   A **Graph** artifact card appears—click it to open the generated graph.
+
+If you want to include the screenshot in the README, a nice GitHub-friendly snippet is:
+
+```html
+<p align="center">
+  <img src="img/stata-interactive.png" width="800" alt="Stata Terminal panel showing Stata output cards and a graph artifact" />
+</p>
+```
+
+
 ## Requirements
-- Stata 17+
-- uv/uvx on PATH (to run the published mcp-stata tool). If missing, the extension bootstraps uv locally into its storage; otherwise it surfaces a quick action to copy the install command or open the uv install docs.
+- Stata 17+ on Mac OS or Windows.
+- uv/uvx on PATH (to run the published mcp-stata tool). If missing, the extension automatically bootstraps uv locally into its storage.
 
 ## Features & Commands
 - **Syntax highlighting** for Stata, Dyndoc Markdown, and Dyndoc LaTeX.
-- **Run Selection/Current Line** (`stata-workbench.runSelection`) → Executes the selected code or current line via MCP tool `run_command` with normalized output + graphs. Results appear in the interactive panel.
-- **Run Current File** (`stata-workbench.runFile`) → Runs the entire `.do` file via MCP tool `run_do_file`. Results appear in the interactive panel.
-- **Interactive panel**: Automatically opens when running code, displaying results with stdout/stderr, execution time, return codes, and graph artifacts. You can continue running additional Stata commands directly in the panel. Supports quick history navigation (PageUp/PageDown) and Tab-based variable name completion sourced from the active Stata dataset.
+- **Run Selection/Current Line** (`stata-workbench.runSelection`) → Executes the selected code or current line via MCP tool `run_command` with normalized output + graphs. Results appear in the terminal panel.
+- **Run Current File** (`stata-workbench.runFile`) → Runs the entire `.do` file via MCP tool `run_do_file`. Results appear in the terminal panel.
+- **Terminal panel**: Automatically opens when running code, displaying results with stdout/stderr, execution time, return codes, and graph artifacts. You can continue running additional Stata commands directly in the panel. Supports quick history navigation (PageUp/PageDown) and Tab-based variable name completion sourced from the active Stata dataset.
 - **Graph viewer** (`stata-workbench.showGraphs`): View all graphs from the current Stata session via `list_graphs` and `export_graph` MCP tools. Click any graph to open it.
 - **Test MCP Server** (`stata-workbench.testMcpServer`) for quick smoke checks.
 - **Install MCP CLI helper** (`stata-workbench.installMcpCli`): Bootstraps uv locally when it is missing.

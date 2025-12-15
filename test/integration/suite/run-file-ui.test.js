@@ -36,7 +36,7 @@ suite('Run File UI Integration', function () {
         }
         const api = extension.exports;
         assert.ok(api, 'Extension exports should be available in test mode');
-        assert.ok(api.InteractivePanel, 'InteractivePanel should be exported');
+        assert.ok(api.TerminalPanel, 'TerminalPanel should be exported');
 
         // Close all editors to ensure a clean state for the panel
         await vscode.commands.executeCommand('workbench.action.closeAllEditors');
@@ -44,7 +44,7 @@ suite('Run File UI Integration', function () {
         // Setup listener for client messages
         let receivedReady = false;
         let receivedError = null;
-        api.InteractivePanel._testCapture = (msg) => {
+        api.TerminalPanel._testCapture = (msg) => {
             if (msg.type === 'ready') receivedReady = true;
             if (msg.type === 'log' && msg.level === 'error') receivedError = msg.message;
         };
@@ -64,8 +64,8 @@ suite('Run File UI Integration', function () {
         assert.isTrue(receivedReady, 'Client script should send "ready" signal');
 
         // Additional check: HTML content
-        const panel = api.InteractivePanel.currentPanel;
-        assert.ok(panel, 'Interactive Panel should be open');
-        assert.include(panel.webview.html, 'UI-INTEGRATION-SUCCESS', 'Interactive Panel HTML should contain "UI-INTEGRATION-SUCCESS"');
+        const panel = api.TerminalPanel.currentPanel;
+        assert.ok(panel, 'Terminal Panel should be open');
+        assert.include(panel.webview.html, 'UI-INTEGRATION-SUCCESS', 'Terminal Panel HTML should contain "UI-INTEGRATION-SUCCESS"');
     });
 });

@@ -4,7 +4,7 @@ const vscode = require('vscode');
 const { spawnSync } = require('child_process');
 const pkg = require('../package.json');
 const { client: mcpClient } = require('./mcp-client');
-const { InteractivePanel } = require('./interactive-panel');
+const { TerminalPanel } = require('./terminal-panel');
 const { openArtifact } = require('./artifact-utils');
 
 let outputChannel;
@@ -44,7 +44,7 @@ function activate(context) {
 
     context.subscriptions.push(...subscriptions, statusBarItem, outputChannel);
     globalExtensionUri = context.extensionUri;
-    InteractivePanel.setExtensionUri(context.extensionUri);
+    TerminalPanel.setExtensionUri(context.extensionUri);
     missingCli = !ensureMcpCliAvailable(context);
     if (!missingCli) {
         ensureMcpConfigs(context);
@@ -57,7 +57,7 @@ function activate(context) {
     // Expose API for testing
     if (context.extensionMode === vscode.ExtensionMode.Test) {
         return {
-            InteractivePanel
+            TerminalPanel
         };
     }
 }
@@ -316,7 +316,7 @@ async function runSelection() {
 
     await withStataProgress('Running selection', async (token) => {
         const result = await mcpClient.runSelection(text, { cancellationToken: token, normalizeResult: true, includeGraphs: true });
-        // Use Interactive Panel for output
+        // Use Terminal Panel for output
         await presentRunResult(text, result, filePath);
     }, text);
 }
@@ -360,8 +360,8 @@ function showOutput(content) {
     }
 }
 
-// Defines the standard run command used by the Interactive Panel
-const interactiveRunCommand = async (code) => {
+// Defines the standard run command used by the Terminal Panel
+const terminalRunCommand = async (code) => {
     try {
         return await mcpClient.runSelection(code, { normalizeResult: true, includeGraphs: true });
     } catch (error) {
@@ -384,12 +384,12 @@ const variableListProvider = async () => {
     }
 };
 
-async function showInteractive() {
+async function showTerminal() {
     const editor = vscode.window.activeTextEditor;
     // We allow opening without an active editor too, but if present we might seed context.
 
     // Check if there is a selection to pre-fill? 
-    // Actually, Interactive Mode usually starts fresh or with specific context.
+    // Actually, Terminal Mode usually starts fresh or with specific context.
     // If called via command palette, just open blank.
     // If proper selection logic was here before, we can preserve it.
 
@@ -406,7 +406,7 @@ async function showInteractive() {
         if (text && text.trim()) {
             initialCode = text;
             try {
-                initialResult = await withStataProgress('Running interactive code', async (token) => {
+                initialResult = await withStataProgress('Running terminal code', async (token) => {
                     return mcpClient.runSelection(text, { cancellationToken: token, normalizeResult: true, includeGraphs: true });
                 }, text);
             } catch (error) {
@@ -415,11 +415,11 @@ async function showInteractive() {
         }
     }
 
-    InteractivePanel.show({
+    TerminalPanel.show({
         filePath,
         initialCode,
         initialResult,
-        runCommand: interactiveRunCommand,
+        runCommand: terminalRunCommand,
         variableProvider: variableListProvider
     });
 }
@@ -677,14 +677,14 @@ function presentStataError(context, payload) {
     });
 }
 
-// Unified presentation using Interactive Panel
+// Unified presentation using Terminal Panel
 async function presentRunResult(commandText, result, filePath) {
     const success = isRunSuccess(result);
     // Log to output channel regardless of UI type
     logRunToOutput(result, commandText);
 
-    // Ensure interactive panel is showing the new entry, initializing if needed with the proper runner
-    InteractivePanel.addEntry(commandText, result, filePath, interactiveRunCommand, variableListProvider);
+    // Ensure terminal panel is showing the new entry, initializing if needed with the proper runner
+    TerminalPanel.addEntry(commandText, result, filePath, terminalRunCommand, variableListProvider);
 }
 
 function logRunToOutput(result, contextTitle) {
