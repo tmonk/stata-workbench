@@ -5,14 +5,16 @@ const proxyquire = require('proxyquire');
 describe('extension refreshMcpPackage', () => {
     let spawnSync;
     let extension;
+    let vscodeMock;
 
     beforeEach(() => {
         spawnSync = sinon.stub();
+        vscodeMock = buildVscodeMock();
 
         extension = proxyquire.noCallThru().load('../../src/extension', {
-            vscode: buildVscodeMock(),
+            vscode: vscodeMock,
             './mcp-client': { client: { setLogger: () => { }, onStatusChanged: () => ({ dispose() { } }) } },
-            './interactive-panel': { InteractivePanel: { setExtensionUri: () => { }, addEntry: () => { }, show: () => { } } },
+            './terminal-panel': { TerminalPanel: { setExtensionUri: () => { }, addEntry: () => { }, show: () => { } } },
             './artifact-utils': { openArtifact: () => { } },
             fs: {
                 mkdirSync: sinon.stub(),
@@ -74,7 +76,7 @@ describe('extension refreshMcpPackage', () => {
         const extensionWithFs = proxyquire.noCallThru().load('../../src/extension', {
             vscode: buildVscodeMock(),
             './mcp-client': { client: { setLogger: () => { }, onStatusChanged: () => ({ dispose() { } }) } },
-            './interactive-panel': { InteractivePanel: { setExtensionUri: () => { }, addEntry: () => { }, show: () => { } } },
+            './terminal-panel': { TerminalPanel: { setExtensionUri: () => { }, addEntry: () => { }, show: () => { } } },
             './artifact-utils': { openArtifact: () => { } },
             fs: {
                 mkdirSync: sinon.stub(),
@@ -101,6 +103,149 @@ describe('extension refreshMcpPackage', () => {
         const cursorArgs = secondWrite.mcpServers.mcp_stata.args;
         assert.deepEqual(cursorArgs.slice(0, 3), ['--refresh', '--from', 'mcp-stata@latest']);
     });
+
+    describe('getUvInstallCommand', () => {
+        it('returns curl/sh installer on macOS', () => {
+            const { getUvInstallCommand } = extension;
+            const result = getUvInstallCommand('darwin');
+            assert.equal(result.command, 'sh');
+            assert.deepEqual(result.args, ['-c', 'curl -LsSf https://astral.sh/uv/install.sh | sh']);
+            assert.include(result.display, 'curl -LsSf https://astral.sh/uv/install.sh | sh');
+        });
+
+        it('returns curl/sh installer on Linux', () => {
+            const { getUvInstallCommand } = extension;
+            const result = getUvInstallCommand('linux');
+            assert.equal(result.command, 'sh');
+            assert.deepEqual(result.args, ['-c', 'curl -LsSf https://astral.sh/uv/install.sh | sh']);
+            assert.include(result.display, 'curl -LsSf https://astral.sh/uv/install.sh | sh');
+        });
+
+        it('returns powershell installer on Windows', () => {
+            const { getUvInstallCommand } = extension;
+            const result = getUvInstallCommand('win32');
+            assert.equal(result.command, 'powershell');
+            assert.deepEqual(result.args, ['-NoLogo', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', 'iwr https://astral.sh/uv/install.ps1 -useb | iex']);
+            assert.include(result.display, 'install.ps1');
+            assert.include(result.display, 'powershell');
+        });
+    });
+
+    describe('promptInstallMcpCli', () => {
+        it('shows missing CLI prompt only on first invocation', async () => {
+            const { promptInstallMcpCli } = extension;
+            const globalState = { get: sinon.stub().returns(false), update: sinon.stub().resolves() };
+            const context = { globalState };
+
+            await promptInstallMcpCli(context);
+            assert.isTrue(vscodeMock.window.showErrorMessage.calledOnce);
+            assert.isTrue(globalState.update.calledWithMatch(sinon.match.string, true));
+
+            await promptInstallMcpCli(context);
+            assert.isTrue(vscodeMock.window.showErrorMessage.calledOnce, 'should not prompt a second time');
+        });
+
+        it('skips prompt when already recorded', async () => {
+            const { promptInstallMcpCli } = extension;
+            const globalState = { get: sinon.stub().returns(true), update: sinon.stub().resolves() };
+            const context = { globalState };
+
+            await promptInstallMcpCli(context);
+            assert.isTrue(vscodeMock.window.showErrorMessage.notCalled);
+            assert.isTrue(globalState.update.notCalled);
+        });
+    });
+
+    describe('existing mcp config', () => {
+        it('detects existing servers in config files', () => {
+            const { hasExistingMcpConfig } = extension;
+            const fsStub = {
+                existsSync: sinon.stub().returns(true),
+                readFileSync: sinon.stub().returns(JSON.stringify({
+                    servers: { mcp_stata: { command: 'uvx', args: [] } }
+                }))
+            };
+
+            const extWithFs = proxyquire.noCallThru().load('../../src/extension', {
+                vscode: vscodeMock,
+                './mcp-client': { client: { setLogger: () => { }, onStatusChanged: () => ({ dispose() { } }) } },
+                './terminal-panel': { TerminalPanel: { setExtensionUri: () => { }, addEntry: () => { }, show: () => { } } },
+                './artifact-utils': { openArtifact: () => { } },
+                fs: fsStub,
+                child_process: { spawnSync: sinon.stub() }
+            });
+
+            assert.isTrue(extWithFs.hasExistingMcpConfig('/workspace'));
+        });
+
+        it('suppresses missing CLI prompt when config already present', async () => {
+            const fsStub = {
+                mkdirSync: sinon.stub(),
+                writeFileSync: sinon.stub(),
+                existsSync: sinon.stub().callsFake((p) => p.includes('mcp.json')),
+                readFileSync: sinon.stub().returns(JSON.stringify({
+                    servers: {
+                        mcp_stata: {
+                            type: 'stdio',
+                            command: 'uvx',
+                            args: ['--from', 'mcp-stata@latest', 'mcp-stata']
+                        }
+                    }
+                }))
+            };
+
+            const spawnSyncStub = sinon.stub().returns({ status: 1, error: new Error('missing') });
+
+            const extWithFs = proxyquire.noCallThru().load('../../src/extension', {
+                vscode: vscodeMock,
+                './mcp-client': { client: { setLogger: () => { }, onStatusChanged: () => ({ dispose() { } }) } },
+                './terminal-panel': { TerminalPanel: { setExtensionUri: () => { }, addEntry: () => { }, show: () => { } } },
+                './artifact-utils': { openArtifact: () => { } },
+                fs: fsStub,
+                child_process: { spawnSync: spawnSyncStub }
+            });
+
+            vscodeMock.workspace.workspaceFolders = [{ uri: { fsPath: '/workspace' } }];
+            const globalState = { get: sinon.stub().returns(false), update: sinon.stub().resolves() };
+            const context = {
+                subscriptions: [],
+                globalState,
+                globalStoragePath: '/tmp/global',
+                extensionUri: {},
+                extensionPath: '/workspace'
+            };
+
+            await extWithFs.activate(context);
+
+            assert.isTrue(vscodeMock.window.showErrorMessage.notCalled, 'should not prompt when config already present');
+            assert.isTrue(globalState.update.calledWithMatch(sinon.match.string, true));
+        });
+
+        it('detects windsurf and antigravity configs', () => {
+            const fsStub = {
+                existsSync: sinon.stub().callsFake((p) => p.includes('.windsurf') || p.includes('.gemini') || p.includes('.antigravity')),
+                readFileSync: sinon.stub().returns(JSON.stringify({
+                    mcpServers: {
+                        mcp_stata: {
+                            command: 'uvx',
+                            args: ['--from', 'mcp-stata@latest', 'mcp-stata']
+                        }
+                    }
+                }))
+            };
+
+            const extWithFs = proxyquire.noCallThru().load('../../src/extension', {
+                vscode: vscodeMock,
+                './mcp-client': { client: { setLogger: () => { }, onStatusChanged: () => ({ dispose() { } }) } },
+                './terminal-panel': { TerminalPanel: { setExtensionUri: () => { }, addEntry: () => { }, show: () => { } } },
+                './artifact-utils': { openArtifact: () => { } },
+                fs: fsStub,
+                child_process: { spawnSync: sinon.stub() }
+            });
+
+            assert.isTrue(extWithFs.hasExistingMcpConfig('/workspace'));
+        });
+    });
 });
 
 function buildVscodeMock() {
@@ -118,6 +263,7 @@ function buildVscodeMock() {
         StatusBarAlignment: { Right: 1 },
         ProgressLocation: { Notification: 1 },
         ThemeColor: function () { },
+        ExtensionMode: { Test: 2 },
         commands: {
             registerCommand: sinon.stub(),
             getCommands: sinon.stub().resolves([]),

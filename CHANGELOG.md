@@ -12,12 +12,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.3.0] - 2025-12-14
 
 ### Added
-- Interactive panel with context header showing last command executed
+- Terminal panel with context header showing last command executed
 - Artifact utilities for improved file handling
 - New test commands in README
 
 ### Changed
-- Refactored interactive panel functionality
+- Refactored terminal panel functionality
 - Updated icon assets
 - Enhanced contribution guidelines
 - Improved UI elements

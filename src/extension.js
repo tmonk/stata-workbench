@@ -4,7 +4,7 @@ const vscode = require('vscode');
 const { spawnSync } = require('child_process');
 const pkg = require('../package.json');
 const { client: mcpClient } = require('./mcp-client');
-const { InteractivePanel } = require('./interactive-panel');
+const { TerminalPanel } = require('./terminal-panel');
 const { openArtifact } = require('./artifact-utils');
 
 let outputChannel;
@@ -12,17 +12,45 @@ let statusBarItem;
 let dataPanel = null;
 let graphPanel = null;
 let missingCli = false;
+let missingCliPrompted = false;
 const MCP_SERVER_ID = 'mcp_stata';
 const MCP_PACKAGE_NAME = 'mcp-stata';
 const MCP_PACKAGE_SPEC = `${MCP_PACKAGE_NAME}@latest`;
+const MISSING_CLI_PROMPT_KEY = 'stata-workbench.missingCliPrompted';
 let uvCommand = 'uvx';
 let mcpPackageVersion = 'unknown';
 let globalExtensionUri = null;
+let globalContext = null;
+
+function getUvInstallCommand(platform = process.platform) {
+    if (platform === 'win32') {
+        const display = 'powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -Command "iwr https://astral.sh/uv/install.ps1 -useb | iex"';
+        return {
+            command: 'powershell',
+            args: ['-NoLogo', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', 'iwr https://astral.sh/uv/install.ps1 -useb | iex'],
+            display
+        };
+    }
+
+    const display = 'curl -LsSf https://astral.sh/uv/install.sh | sh';
+    return {
+        command: 'sh',
+        args: ['-c', display],
+        display
+    };
+}
 
 function activate(context) {
+    globalContext = context;
     outputChannel = vscode.window.createOutputChannel('Stata MCP');
     const version = pkg?.version || 'unknown';
     outputChannel.appendLine(`Stata MCP ready (extension v${version})`);
+    missingCliPrompted = !!context.globalState?.get?.(MISSING_CLI_PROMPT_KEY);
+    const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri?.fsPath || context.extensionPath;
+    if (!missingCliPrompted && hasExistingMcpConfig(workspaceRoot)) {
+        missingCliPrompted = true;
+        context.globalState?.update?.(MISSING_CLI_PROMPT_KEY, true).catch?.(() => { });
+    }
     if (typeof mcpClient.setLogger === 'function') {
         mcpClient.setLogger((msg) => outputChannel.appendLine(msg));
     }
@@ -44,7 +72,7 @@ function activate(context) {
 
     context.subscriptions.push(...subscriptions, statusBarItem, outputChannel);
     globalExtensionUri = context.extensionUri;
-    InteractivePanel.setExtensionUri(context.extensionUri);
+    TerminalPanel.setExtensionUri(context.extensionUri);
     missingCli = !ensureMcpCliAvailable(context);
     if (!missingCli) {
         ensureMcpConfigs(context);
@@ -57,7 +85,7 @@ function activate(context) {
     // Expose API for testing
     if (context.extensionMode === vscode.ExtensionMode.Test) {
         return {
-            InteractivePanel
+            TerminalPanel
         };
     }
 }
@@ -77,9 +105,9 @@ function ensureMcpCliAvailable(context) {
         // ignore mkdir failures; fall back to prompt
     }
 
-    const installCmd = 'curl -LsSf https://astral.sh/uv/install.sh | sh';
+    const installCmd = getUvInstallCommand();
     const env = { ...process.env, UV_INSTALL_DIR: installDir };
-    const result = spawnSync('sh', ['-c', installCmd], { env, encoding: 'utf8' });
+    const result = spawnSync(installCmd.command, installCmd.args, { env, encoding: 'utf8' });
 
     const installed = findUvBinary(installDir);
     if (result.status === 0 && installed) {
@@ -152,8 +180,18 @@ function refreshMcpPackage() {
     return null;
 }
 
-function promptInstallMcpCli() {
-    const installCmd = 'curl -LsSf https://astral.sh/uv/install.sh | sh';
+function promptInstallMcpCli(context) {
+    const ctx = context || globalContext;
+    if (!missingCliPrompted) {
+        missingCliPrompted = !!ctx?.globalState?.get?.(MISSING_CLI_PROMPT_KEY);
+    }
+    if (missingCliPrompted) {
+        missingCli = true;
+        updateStatusBar('missing');
+        return false;
+    }
+
+    const installCmd = getUvInstallCommand().display;
     const message = 'uvx (uv) not found on PATH. Install uv to run mcp-stata via uvx.';
     vscode.window.showErrorMessage(
         message,
@@ -168,16 +206,21 @@ function promptInstallMcpCli() {
         }
     });
     missingCli = true;
+    missingCliPrompted = true;
+    ctx?.globalState?.update?.(MISSING_CLI_PROMPT_KEY, true).catch?.(() => { });
     updateStatusBar('missing');
     return false;
 }
 
 function findUvBinary(optionalInstallDir) {
-    const candidates = ['uvx'];
+    const base = ['uvx', 'uvx.exe', 'uv', 'uv.exe'];
+    const candidates = [...base];
 
     if (optionalInstallDir) {
-        candidates.push(path.join(optionalInstallDir, 'bin', 'uvx'));
-        candidates.push(path.join(optionalInstallDir, 'bin', 'uv'));
+        const binDir = path.join(optionalInstallDir, 'bin');
+        for (const name of base) {
+            candidates.push(path.join(binDir, name));
+        }
     }
 
     for (const candidate of candidates) {
@@ -191,10 +234,37 @@ function findUvBinary(optionalInstallDir) {
 
 function ensureMcpConfigs(context) {
     const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri?.fsPath || context.extensionPath;
-    const cursorPath = path.join(workspaceRoot, '.cursor', 'mcp.json');
-    const vscodePath = path.join(workspaceRoot, '.vscode', 'mcp.json');
-    writeMcpConfig(cursorPath, false);
-    writeMcpConfig(vscodePath, true);
+    const configPaths = getHostConfigPaths(workspaceRoot);
+    for (const cfg of configPaths) {
+        writeMcpConfig(cfg.path, cfg.isVscode);
+    }
+}
+
+function hasExistingMcpConfig(workspaceRoot) {
+    if (!workspaceRoot) return false;
+    const candidates = [
+        path.join(workspaceRoot, '.vscode', 'mcp.json'),
+        path.join(workspaceRoot, '.cursor', 'mcp.json'),
+        path.join(workspaceRoot, '.windsurf', 'mcp.json'),
+        path.join(workspaceRoot, '.gemini', 'mcp.json'),
+        path.join(workspaceRoot, '.antigravity', 'mcp.json')
+    ];
+
+    for (const candidate of candidates) {
+        try {
+            if (!fs.existsSync(candidate)) continue;
+            const raw = fs.readFileSync(candidate, 'utf8');
+            if (!raw) continue;
+            const json = JSON.parse(raw);
+            if (json?.servers?.[MCP_SERVER_ID] || json?.mcpServers?.[MCP_SERVER_ID]) {
+                return true;
+            }
+        } catch (_err) {
+            // ignore parse or access errors; treat as not present
+        }
+    }
+
+    return false;
 }
 
 function writeMcpConfig(configPath, isVscodeFormat) {
@@ -245,6 +315,23 @@ function writeMcpConfig(configPath, isVscodeFormat) {
     }
 }
 
+function getHostConfigPaths(workspaceRoot) {
+    const configs = new Set();
+    const appName = (vscode.env?.appName || '').toLowerCase();
+
+    const add = (rel, isVscode) => configs.add(JSON.stringify({ path: path.join(workspaceRoot, rel, 'mcp.json'), isVscode }));
+
+    if (appName.includes('cursor')) add('.cursor', false);
+    else if (appName.includes('windsurf')) add('.windsurf', false);
+    else if (appName.includes('antigravity') || appName.includes('gemini')) add('.gemini', false);
+    else add('.vscode', true);
+
+    // Always include VS Code-style config as a friendly fallback if not already present.
+    add('.vscode', true);
+
+    return Array.from(configs).map((s) => JSON.parse(s));
+}
+
 function configsMatch(existing, expected, hasType) {
     if (!existing) return false;
     if (hasType && existing.type !== expected.type) return false;
@@ -258,6 +345,7 @@ function deactivate() {
 }
 
 function updateStatusBar(status) {
+    if (!statusBarItem) return;
     switch (status) {
         case 'queued':
             statusBarItem.text = '$(clock) Stata MCP: Queued';
@@ -316,7 +404,7 @@ async function runSelection() {
 
     await withStataProgress('Running selection', async (token) => {
         const result = await mcpClient.runSelection(text, { cancellationToken: token, normalizeResult: true, includeGraphs: true });
-        // Use Interactive Panel for output
+        // Use Terminal Panel for output
         await presentRunResult(text, result, filePath);
     }, text);
 }
@@ -360,8 +448,8 @@ function showOutput(content) {
     }
 }
 
-// Defines the standard run command used by the Interactive Panel
-const interactiveRunCommand = async (code) => {
+// Defines the standard run command used by the Terminal Panel
+const terminalRunCommand = async (code) => {
     try {
         return await mcpClient.runSelection(code, { normalizeResult: true, includeGraphs: true });
     } catch (error) {
@@ -384,12 +472,12 @@ const variableListProvider = async () => {
     }
 };
 
-async function showInteractive() {
+async function showTerminal() {
     const editor = vscode.window.activeTextEditor;
     // We allow opening without an active editor too, but if present we might seed context.
 
     // Check if there is a selection to pre-fill? 
-    // Actually, Interactive Mode usually starts fresh or with specific context.
+    // Actually, Terminal Mode usually starts fresh or with specific context.
     // If called via command palette, just open blank.
     // If proper selection logic was here before, we can preserve it.
 
@@ -406,7 +494,7 @@ async function showInteractive() {
         if (text && text.trim()) {
             initialCode = text;
             try {
-                initialResult = await withStataProgress('Running interactive code', async (token) => {
+                initialResult = await withStataProgress('Running terminal code', async (token) => {
                     return mcpClient.runSelection(text, { cancellationToken: token, normalizeResult: true, includeGraphs: true });
                 }, text);
             } catch (error) {
@@ -415,11 +503,11 @@ async function showInteractive() {
         }
     }
 
-    InteractivePanel.show({
+    TerminalPanel.show({
         filePath,
         initialCode,
         initialResult,
-        runCommand: interactiveRunCommand,
+        runCommand: terminalRunCommand,
         variableProvider: variableListProvider
     });
 }
@@ -677,14 +765,14 @@ function presentStataError(context, payload) {
     });
 }
 
-// Unified presentation using Interactive Panel
+// Unified presentation using Terminal Panel
 async function presentRunResult(commandText, result, filePath) {
     const success = isRunSuccess(result);
     // Log to output channel regardless of UI type
     logRunToOutput(result, commandText);
 
-    // Ensure interactive panel is showing the new entry, initializing if needed with the proper runner
-    InteractivePanel.addEntry(commandText, result, filePath, interactiveRunCommand, variableListProvider);
+    // Ensure terminal panel is showing the new entry, initializing if needed with the proper runner
+    TerminalPanel.addEntry(commandText, result, filePath, terminalRunCommand, variableListProvider);
 }
 
 function logRunToOutput(result, contextTitle) {
@@ -745,5 +833,8 @@ module.exports = {
     activate,
     deactivate,
     refreshMcpPackage,
-    writeMcpConfig
+    writeMcpConfig,
+    getUvInstallCommand,
+    promptInstallMcpCli,
+    hasExistingMcpConfig
 };
