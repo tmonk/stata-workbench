@@ -50,8 +50,16 @@ class StataMcpClient {
 
     async runSelection(selection, options = {}) {
         const { normalizeResult, includeGraphs, ...rest } = options || {};
+        const config = vscode.workspace.getConfiguration('stataMcp');
+        const maxOutputLines = rest.max_output_lines ??
+            (config.get('maxOutputLines', 0) || undefined);
+
         return this._enqueue('run_selection', rest, async (client) => {
-            const response = await this._callTool(client, 'run_command', { code: selection });
+            const args = { code: selection };
+            if (maxOutputLines && maxOutputLines > 0) {
+                args.max_output_lines = maxOutputLines;
+            }
+            const response = await this._callTool(client, 'run_command', args);
             return response;
         }, { command: selection }, normalizeResult === true, includeGraphs === true);
     }
@@ -60,20 +68,36 @@ class StataMcpClient {
         const { normalizeResult, includeGraphs, ...rest } = options || {};
         // Resolve working directory (configurable, defaults to the .do file folder).
         const cwd = this._resolveRunFileCwd(filePath);
+        const config = vscode.workspace.getConfiguration('stataMcp');
+        const maxOutputLines = rest.max_output_lines ??
+            (config.get('maxOutputLines', 0) || undefined);
+
         return this._enqueue('run_file', rest, async (client) => {
-            const response = await this._callTool(client, 'run_do_file', {
+            const args = {
                 // Use absolute path so the server can locate the file, but also
                 // pass cwd so any relative includes resolve.
                 path: filePath,
                 cwd
-            });
+            };
+            if (maxOutputLines && maxOutputLines > 0) {
+                args.max_output_lines = maxOutputLines;
+            }
+            const response = await this._callTool(client, 'run_do_file', args);
             return response;
         }, { command: `do "${filePath}"`, filePath, cwd }, normalizeResult === true, includeGraphs === true);
     }
 
     async run(code, options = {}) {
+        const config = vscode.workspace.getConfiguration('stataMcp');
+        const maxOutputLines = options.max_output_lines ??
+            (config.get('maxOutputLines', 0) || undefined);
+
         const task = (client) => {
-            return this._callTool(client, 'run_command', { code });
+            const args = { code };
+            if (maxOutputLines && maxOutputLines > 0) {
+                args.max_output_lines = maxOutputLines;
+            }
+            return this._callTool(client, 'run_command', args);
         };
         // Normalize=true to parse standard MCP output, collectArtifacts=true to fetch graphs
         return this._enqueue('run_command', options, task, { command: code }, true, true);
@@ -569,10 +593,16 @@ class StataMcpClient {
             const candidates = this._graphListToolOrder();
             let response;
             let lastError = null;
+            const config = vscode.workspace.getConfiguration('stataMcp');
+            const useBase64 = config.get('useBase64Graphs', false);
 
             for (const tool of candidates) {
                 try {
-                    response = await this._callTool(client, tool, {});
+                    const args = tool === 'export_graphs_all'
+                        ? { use_base64: useBase64 }
+                        : {};
+
+                    response = await this._callTool(client, tool, args);
                     this._log(`[mcp-stata graphs] ${tool} response: ${this._stringifySafe(response)}`);
                     break;
                 } catch (err) {
@@ -695,7 +725,7 @@ class StataMcpClient {
 
         const label = graph.name || graph.label || graph.graph_name || 'graph';
         const base = graph.baseDir || graph.base_dir || baseDir || response?.baseDir || response?.base_dir || null;
-        const href = graph.url || graph.href || graph.link || graph.path || graph.file || graph.filename || null;
+        const href = graph.file_path || graph.url || graph.href || graph.link || graph.path || graph.file || graph.filename || null;
         const dataUri = this._toDataUri(graph) || (href && href.startsWith('data:') ? href : null);
         const pathOrData = href || dataUri;
         if (!pathOrData) return null;

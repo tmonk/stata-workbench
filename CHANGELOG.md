@@ -3,6 +3,16 @@
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+- Updated graph export to use file paths by default (more token-efficient)
+- Added support for `max_output_lines` parameter to limit verbose output
+
+### Added
+- Configuration option: `stataMcp.maxOutputLines`
+- Configuration option: `stataMcp.useBase64Graphs`
+
 ## [0.3.1] - 2025-12-14
 
 ### Changed

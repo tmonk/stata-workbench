@@ -73,13 +73,15 @@ Offline/VSIX fallback:
 - **Test MCP Server** (`stata-workbench.testMcpServer`) for quick smoke checks.
 - **Install MCP CLI helper** (`stata-workbench.installMcpCli`): Bootstraps uv locally when it is missing.
 - **Status bar + cancel** (`stata-workbench.cancelRequest`): Live request states with one-click cancellation routed through the MCP client.
-- **Auto-manage MCP configs**: Writes the user-level `mcp.json` in your editor's user data so AI agents reuse the same `uvx --from mcp-stata --refresh mcp-stata` wiring, and auto-corrects older entries missing `--refresh`.
+- **Auto-manage MCP configs**: Writes the user-level `mcp.json` in your editor's user data so AI agents reuse the same `uvx --from mcp-stata@latest --refresh mcp-stata` wiring, and auto-corrects older entries missing `--refresh`.
 - **Durable logs**: All run results are logged to the `Stata Workbench` output channel for reference.
 
 ## Settings
 - `stataMcp.requestTimeoutMs` (default `45000`): timeout for MCP requests.
 - `stataMcp.autoRevealOutput` (default `true`): automatically show the output channel after runs.
 - `stataMcp.runFileWorkingDirectory` (default empty): working directory when running .do files. Supports an absolute path, ~, ${workspaceFolder} or ${fileDir}; empty uses the .do file's folder.
+- `stataMcp.maxOutputLines` (default `0`): limit Stata output to N lines (0 = unlimited). Useful for reducing token usage with AI agents.
+- `stataMcp.useBase64Graphs` (default `false`): if true, export graphs as base64 strings; otherwise use file paths. NOT RECOMMENDED: Base64 consumes many more tokens but may be more robust in some remote environments.
 
 ## Agent MCP configs (optional)
 When uv is available, the extension writes a user-level `mcp.json` inside your editor's user data. Example locations:
