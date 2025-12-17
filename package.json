@@ -13,7 +13,7 @@
   "bugs": {
     "url": "https://github.com/tmonk/stata-workbench/issues"
   },
-  "version": "0.4.3",
+  "version": "0.4.4",
   "engines": {
     "vscode": "^1.75.0"
   },
@@ -142,6 +142,16 @@
           "type": "number",
           "default": 60,
           "description": "Timeout (seconds) for Stata initialization (stata_setup.config preflight). Passed to STATA_SETUP_TIMEOUT for mcp-stata."
+        },
+        "stataMcp.maxOutputLines": {
+          "type": "number",
+          "default": 0,
+          "description": "Maximum lines of output to return from Stata commands (0 = unlimited). Useful for limiting token usage with verbose commands like regress or codebook."
+        },
+        "stataMcp.useBase64Graphs": {
+          "type": "boolean",
+          "default": false,
+          "description": "Export graphs as base64-encoded data instead of file paths. Base64 is more token-intensive but works better for some workflows."
         }
       }
     },
