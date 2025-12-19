@@ -66,12 +66,16 @@ class StataMcpClient {
         const config = vscode.workspace.getConfiguration('stataMcp');
         const maxOutputLines = rest.max_output_lines ??
             (config.get('maxOutputLines', 0) || undefined);
-        const meta = { command: selection };
+        const cwd = typeof rest.cwd === 'string' ? rest.cwd : null;
+        const meta = { command: selection, cwd };
 
         return this._enqueue('run_selection', rest, async (client) => {
             const args = { code: selection };
             if (maxOutputLines && maxOutputLines > 0) {
                 args.max_output_lines = maxOutputLines;
+            }
+            if (cwd && cwd.trim()) {
+                args.cwd = cwd;
             }
 
             const progressToken = (typeof onProgress === 'function')
@@ -82,6 +86,9 @@ class StataMcpClient {
             const result = await this._withActiveRun(runState, async () => {
                 return this._callTool(client, 'run_command', args, { progressToken });
             });
+            if (!runState.logPath) {
+                runState.logPath = this._extractLogPathFromResponse(result);
+            }
             await this._drainActiveRunLog(client, runState);
             meta.logText = runState._logBuffer || '';
             meta.logPath = runState.logPath || null;
@@ -117,6 +124,9 @@ class StataMcpClient {
             const result = await this._withActiveRun(runState, async () => {
                 return this._callTool(client, 'run_do_file', args, { progressToken });
             });
+            if (!runState.logPath) {
+                runState.logPath = this._extractLogPathFromResponse(result);
+            }
             await this._drainActiveRunLog(client, runState);
             meta.logText = runState._logBuffer || '';
             meta.logPath = runState.logPath || null;
@@ -130,11 +140,15 @@ class StataMcpClient {
         const maxOutputLines = options.max_output_lines ??
             (config.get('maxOutputLines', 0) || undefined);
 
-        const meta = { command: code };
+        const cwd = typeof rest.cwd === 'string' ? rest.cwd : null;
+        const meta = { command: code, cwd };
         const task = async (client) => {
             const args = { code };
             if (maxOutputLines && maxOutputLines > 0) {
                 args.max_output_lines = maxOutputLines;
+            }
+            if (cwd && cwd.trim()) {
+                args.cwd = cwd;
             }
 
             const progressToken = (typeof onProgress === 'function')
@@ -145,6 +159,9 @@ class StataMcpClient {
             const result = await this._withActiveRun(runState, async () => {
                 return this._callTool(client, 'run_command', args, { progressToken });
             });
+            if (!runState.logPath) {
+                runState.logPath = this._extractLogPathFromResponse(result);
+            }
             await this._drainActiveRunLog(client, runState);
             meta.logText = runState._logBuffer || '';
             meta.logPath = runState.logPath || null;
@@ -525,11 +542,25 @@ class StataMcpClient {
     _extractText(response) {
         if (typeof response === 'string') return response;
         if (response?.text && typeof response.text === 'string') return response.text;
-        if (Array.isArray(response?.content)) return this._flattenContent(response.content);
+        if (Array.isArray(response?.content)) {
+            const flattened = this._flattenContent(response.content);
+            if (typeof flattened === 'string' && flattened.trim()) return flattened;
+        }
         if (response?.structuredContent?.result && typeof response.structuredContent.result === 'string') {
             return response.structuredContent.result;
         }
         return '';
+    }
+
+    _extractLogPathFromResponse(response) {
+        if (!response) return null;
+        const direct = response?.log_path || response?.logPath || response?.structuredContent?.log_path;
+        if (typeof direct === 'string' && direct.trim()) return direct;
+        const text = this._extractText(response);
+        const parsed = this._tryParseJson(text);
+        const lp = parsed?.log_path || parsed?.logPath || parsed?.error?.log_path || parsed?.error?.logPath;
+        if (typeof lp === 'string' && lp.trim()) return lp;
+        return null;
     }
 
     _delay(ms) {
@@ -659,9 +690,9 @@ class StataMcpClient {
         if (payload.success === false || parsed.success === false) normalized.success = false;
         if (typeof normalized.rc === 'number' && normalized.rc !== 0) normalized.success = false;
 
-        if (typeof parsed.stdout === 'string') {
+        if (typeof parsed.stdout === 'string' && parsed.stdout.trim()) {
             normalized.stdout = parsed.stdout;
-        } else if (typeof payload.stdout === 'string') {
+        } else if (typeof payload.stdout === 'string' && payload.stdout.trim()) {
             normalized.stdout = payload.stdout;
         } else {
             const stdoutCandidate = firstText([safeContentText, typeof response === 'string' && !hasStructuredContent ? response : null, payload.result, parsed.result]);

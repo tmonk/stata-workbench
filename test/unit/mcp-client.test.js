@@ -272,6 +272,134 @@ describe('McpClient', () => {
         });
     });
 
+    describe('cwd propagation', () => {
+        it('runSelection should pass cwd through to run_command when provided', async () => {
+            const callToolStub = client._callTool;
+            callToolStub.resetBehavior();
+            callToolStub.callsFake(async (_client, name, args) => ({ name, args }));
+
+            const enqueueStub = sinon.stub(client, '_enqueue').callsFake(async (label, rest, task, meta, normalize, collect) => {
+                const taskResult = await task({});
+                return { label, rest, meta, normalize, collect, taskResult };
+            });
+
+            const result = await client.runSelection('display "hi"', { cwd: '/tmp/project', normalizeResult: false, includeGraphs: false });
+
+            assert.isTrue(enqueueStub.calledOnce);
+            assert.equal(result.label, 'run_selection');
+            assert.equal(result.meta.cwd, '/tmp/project');
+            assert.equal(result.taskResult.name, 'run_command');
+            assert.equal(result.taskResult.args.cwd, '/tmp/project');
+            assert.equal(result.taskResult.args.code, 'display "hi"');
+
+            enqueueStub.restore();
+        });
+    });
+
+    describe('log tailing', () => {
+        it('_drainActiveRunLog should append remaining log data to buffer', async () => {
+            client._delay = sinon.stub().resolves();
+            client._readLogSlice = sinon.stub();
+            client._readLogSlice.onCall(0).resolves({ path: '/tmp/x.log', offset: 0, next_offset: 3, data: 'abc' });
+            client._readLogSlice.onCall(1).resolves({ path: '/tmp/x.log', offset: 3, next_offset: 3, data: '' });
+            client._readLogSlice.onCall(2).resolves({ path: '/tmp/x.log', offset: 3, next_offset: 3, data: '' });
+
+            const run = {
+                logPath: '/tmp/x.log',
+                logOffset: 0,
+                _tailCancelled: false,
+                _tailPromise: null,
+                _logBuffer: '',
+                _appendLog: (t) => { run._logBuffer += String(t || ''); }
+            };
+
+            await client._drainActiveRunLog({}, run);
+
+            assert.equal(run._logBuffer, 'abc');
+            assert.equal(run.logOffset, 3);
+            assert.isTrue(client._readLogSlice.called);
+        });
+
+        it('_tailLogLoop should forward read_log data to onLog until cancelled', async () => {
+            client._delay = sinon.stub().resolves();
+            client._readLogSlice = sinon.stub().resolves({ path: '/tmp/x.log', offset: 0, next_offset: 2, data: 'hi' });
+
+            const run = {
+                logPath: '/tmp/x.log',
+                logOffset: 0,
+                _tailCancelled: false,
+                _logBuffer: '',
+                _appendLog: (t) => { run._logBuffer += String(t || ''); }
+            };
+            run.onLog = sinon.spy((data) => {
+                // Stop after first chunk
+                run._tailCancelled = true;
+            });
+
+            await client._tailLogLoop({}, run);
+
+            assert.isTrue(run.onLog.calledOnce);
+            assert.equal(run._logBuffer, 'hi');
+            assert.equal(run.logOffset, 2);
+        });
+
+        it('runSelection should drain read_log when log_path is only present in tool response', async () => {
+            client._delay = sinon.stub().resolves();
+
+            // Let the real _enqueue run (so normalization happens).
+            // Ensure the MCP client exists.
+            client._ensureClient = sinon.stub().resolves({});
+
+            // Stub _callTool for both run_command and read_log.
+            client._callTool = sinon.stub().callsFake(async (_client, name, args) => {
+                if (name === 'run_command') {
+                    return {
+                        structuredContent: {
+                            result: JSON.stringify({
+                                command: args.code,
+                                rc: 0,
+                                stdout: '',
+                                stderr: null,
+                                log_path: '/tmp/mcp_stata_test.log',
+                                success: true,
+                                error: null
+                            })
+                        },
+                        content: [{ type: 'text', text: '' }]
+                    };
+                }
+                if (name === 'read_log') {
+                    // Return one chunk then empty.
+                    const nextOffset = (args.offset || 0) === 0 ? 3 : 3;
+                    const data = (args.offset || 0) === 0 ? 'abc' : '';
+                    return {
+                        content: [{
+                            type: 'text',
+                            text: JSON.stringify({
+                                path: args.path,
+                                offset: args.offset || 0,
+                                next_offset: nextOffset,
+                                data
+                            })
+                        }]
+                    };
+                }
+                return {};
+            });
+
+            const result = await client.runSelection('display "HI"', {
+                normalizeResult: true,
+                includeGraphs: false
+            });
+
+            // Critical behavior: stdout comes from drained log, not the empty stdout from structured content.
+            assert.isTrue(result.success);
+            assert.equal(result.rc, 0);
+            assert.equal(result.logPath, '/tmp/mcp_stata_test.log');
+            assert.equal(result.stdout, 'abc');
+        });
+    });
+
     describe('_resolveRunFileCwd', () => {
         it('should default to the file directory when unset', () => {
             const cwd = client._resolveRunFileCwd('/tmp/project/script.do');

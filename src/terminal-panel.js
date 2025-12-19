@@ -9,6 +9,7 @@ class TerminalPanel {
   static _testOutgoingCapture = null;
   static variableProvider = null;
   static _defaultRunCommand = null;
+  static _activeFilePath = null;
 
   static setExtensionUri(uri) {
     TerminalPanel.extensionUri = uri;
@@ -25,6 +26,7 @@ class TerminalPanel {
    */
   static show({ filePath, initialCode, initialResult, runCommand, variableProvider }) {
     const column = vscode.ViewColumn.Beside;
+    TerminalPanel._activeFilePath = filePath || null;
     if (typeof variableProvider === 'function') {
       TerminalPanel.variableProvider = variableProvider;
     }
@@ -122,6 +124,7 @@ class TerminalPanel {
     webview.postMessage({ type: 'busy', value: true });
     webview.postMessage({ type: 'runStarted', runId, code: trimmed });
     try {
+      const cwd = TerminalPanel._activeFilePath ? path.dirname(TerminalPanel._activeFilePath) : null;
       const hooks = {
         onLog: (text) => {
           if (!text) return;
@@ -129,7 +132,8 @@ class TerminalPanel {
         },
         onProgress: (progress, total, message) => {
           webview.postMessage({ type: 'runProgress', runId, progress, total, message });
-        }
+        },
+        cwd
       };
       const result = await runCommand(trimmed, hooks);
       const success = isRunSuccess(result);
@@ -154,6 +158,8 @@ class TerminalPanel {
   static startStreamingEntry(code, filePath, runCommand, variableProvider) {
     const trimmed = (code || '').trim();
     if (!trimmed) return null;
+
+    TerminalPanel._activeFilePath = filePath || TerminalPanel._activeFilePath || null;
 
     if (!TerminalPanel.currentPanel) {
       TerminalPanel.show({
@@ -232,6 +238,8 @@ class TerminalPanel {
       });
       return;
     }
+
+    TerminalPanel._activeFilePath = filePath || TerminalPanel._activeFilePath || null;
 
     // Panel exists, just append
     const webview = TerminalPanel.currentPanel.webview;

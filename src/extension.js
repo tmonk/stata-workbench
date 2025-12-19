@@ -489,6 +489,7 @@ async function runSelection() {
     }
 
     const filePath = editor.document.uri.fsPath;
+    const cwd = filePath ? path.dirname(filePath) : null;
 
     await withStataProgress('Running selection', async (token) => {
         const runId = TerminalPanel.startStreamingEntry(text, filePath, terminalRunCommand, variableListProvider);
@@ -497,6 +498,7 @@ async function runSelection() {
                 cancellationToken: token,
                 normalizeResult: true,
                 includeGraphs: true,
+                cwd,
                 onLog: (chunk) => {
                     if (runId) TerminalPanel.appendStreamingLog(runId, chunk);
                 },
@@ -587,6 +589,7 @@ const terminalRunCommand = async (code, hooks) => {
         return await mcpClient.runSelection(code, {
             normalizeResult: true,
             includeGraphs: true,
+            cwd: hooks?.cwd,
             onLog: hooks?.onLog,
             onProgress: hooks?.onProgress
         });
