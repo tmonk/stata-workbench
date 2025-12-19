@@ -491,9 +491,31 @@ async function runSelection() {
     const filePath = editor.document.uri.fsPath;
 
     await withStataProgress('Running selection', async (token) => {
-        const result = await mcpClient.runSelection(text, { cancellationToken: token, normalizeResult: true, includeGraphs: true });
-        // Use Terminal Panel for output
-        await presentRunResult(text, result, filePath);
+        const runId = TerminalPanel.startStreamingEntry(text, filePath, terminalRunCommand, variableListProvider);
+        try {
+            const result = await mcpClient.runSelection(text, {
+                cancellationToken: token,
+                normalizeResult: true,
+                includeGraphs: true,
+                onLog: (chunk) => {
+                    if (runId) TerminalPanel.appendStreamingLog(runId, chunk);
+                },
+                onProgress: (progress, total, message) => {
+                    if (runId) TerminalPanel.updateStreamingProgress(runId, progress, total, message);
+                }
+            });
+            if (runId) {
+                logRunToOutput(result, text);
+                TerminalPanel.finishStreamingEntry(runId, result);
+            } else {
+                await presentRunResult(text, result, filePath);
+            }
+        } catch (error) {
+            if (runId) {
+                TerminalPanel.failStreamingEntry(runId, error?.message || String(error));
+            }
+            throw error;
+        }
     }, text);
 }
 
@@ -511,9 +533,32 @@ async function runFile() {
     }
 
     await withStataProgress(`Running ${path.basename(filePath)}`, async (token) => {
-        const result = await mcpClient.runFile(filePath, { cancellationToken: token, normalizeResult: true, includeGraphs: true });
-        // Use "do filename" as the command text representation
-        await presentRunResult(`do "${path.basename(filePath)}"`, result, filePath);
+        const commandText = `do "${path.basename(filePath)}"`;
+        const runId = TerminalPanel.startStreamingEntry(commandText, filePath, terminalRunCommand, variableListProvider);
+        try {
+            const result = await mcpClient.runFile(filePath, {
+                cancellationToken: token,
+                normalizeResult: true,
+                includeGraphs: true,
+                onLog: (chunk) => {
+                    if (runId) TerminalPanel.appendStreamingLog(runId, chunk);
+                },
+                onProgress: (progress, total, message) => {
+                    if (runId) TerminalPanel.updateStreamingProgress(runId, progress, total, message);
+                }
+            });
+            if (runId) {
+                logRunToOutput(result, commandText);
+                TerminalPanel.finishStreamingEntry(runId, result);
+            } else {
+                await presentRunResult(commandText, result, filePath);
+            }
+        } catch (error) {
+            if (runId) {
+                TerminalPanel.failStreamingEntry(runId, error?.message || String(error));
+            }
+            throw error;
+        }
     });
 }
 
@@ -537,9 +582,14 @@ function showOutput(content) {
 }
 
 // Defines the standard run command used by the Terminal Panel
-const terminalRunCommand = async (code) => {
+const terminalRunCommand = async (code, hooks) => {
     try {
-        return await mcpClient.runSelection(code, { normalizeResult: true, includeGraphs: true });
+        return await mcpClient.runSelection(code, {
+            normalizeResult: true,
+            includeGraphs: true,
+            onLog: hooks?.onLog,
+            onProgress: hooks?.onProgress
+        });
     } catch (error) {
         return {
             success: false,

@@ -11,6 +11,15 @@ async function main() {
         const extensionTestsPath = path.resolve(__dirname, './suite/index');
         const workspacePath = path.resolve(__dirname, './fixture');
 
+        // Optional: run uvx against a local mcp-stata repo instead of PyPI.
+        // This is intended for integration tests in this mono-workspace.
+        if (!process.env.MCP_STATA_PACKAGE_SPEC) {
+            const localRepo = process.env.MCP_STATA_LOCAL_REPO || path.resolve(__dirname, '../../../mcp-stata');
+            if (fs.existsSync(localRepo)) {
+                process.env.MCP_STATA_PACKAGE_SPEC = localRepo;
+            }
+        }
+
         // Use fresh temp dirs per run to avoid mutex/file-lock issues on Windows between runs.
         userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vscode-test-user-'));
         extDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vscode-test-exts-'));

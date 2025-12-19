@@ -128,6 +128,11 @@
           "default": 100000,
           "description": "Timeout (ms) for MCP requests before showing an error."
         },
+        "stataMcp.enableStreaming": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show live Stata output while tools are running (via MCP notifications/message). Disable to only display the final result after completion."
+        },
         "stataMcp.autoRevealOutput": {
           "type": "boolean",
           "default": true,

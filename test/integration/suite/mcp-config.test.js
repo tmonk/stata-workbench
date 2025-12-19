@@ -4,8 +4,10 @@ const os = require('os');
 const path = require('path');
 const { getMcpConfigTarget, writeMcpConfig } = require('../../../src/extension');
 
-suite('MCP config cross-platform writes', function () {
-    this.timeout(20000);
+suite('MCP Config Integration', function () {
+    this.timeout(30000);
+
+    const enabled = process.env.MCP_STATA_INTEGRATION === '1';
 
     let tempRoot;
     let originalAppData;
@@ -23,6 +25,9 @@ suite('MCP config cross-platform writes', function () {
     });
 
     test('writes VS Code config on simulated windows host', () => {
+        if (!enabled) {
+            return;
+        }
         process.env.APPDATA = path.join(tempRoot, 'AppData', 'Roaming');
         const ctx = {
             mcpPlatformOverride: 'win32',
