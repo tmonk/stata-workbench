@@ -131,6 +131,33 @@ describe('McpClient', () => {
         });
     });
 
+    describe('_normalizeResponse', () => {
+        it('should not treat structured JSON content as stdout/contentText and should prefer error fields', () => {
+            const response = {
+                content: [{
+                    type: 'text',
+                    text: JSON.stringify({
+                        command: 'reg y x',
+                        success: false,
+                        error: {
+                            message: '. reg y x\nvariable y not found\nr(111);',
+                            rc: 111,
+                            snippet: '. reg y x\nvariable y not found\nr(111);'
+                        }
+                    })
+                }]
+            };
+
+            const normalized = client._normalizeResponse(response, { command: 'reg y x' });
+
+            assert.isFalse(normalized.success);
+            assert.equal(normalized.rc, 111);
+            assert.equal(normalized.stdout, '');
+            assert.equal(normalized.contentText, '');
+            assert.include(normalized.stderr, 'variable y not found');
+        });
+    });
+
     describe('Artifact Parsing', () => {
         it('_parseArtifactLikeJson should handle graph objects', () => {
             const input = JSON.stringify({ graph: { name: 'g1', path: 'p1.png' } });

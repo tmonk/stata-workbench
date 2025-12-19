@@ -506,9 +506,12 @@ class StataMcpClient {
         const payload = typeof response === 'object' && !Array.isArray(response) ? response : {};
         const parsed = parsedFromString || parsedFromContent || {};
 
+        const hasStructuredContent = !!(parsedFromContent || parsedFromString);
+        const safeContentText = hasStructuredContent ? '' : flattenedContent;
+
         const normalized = {
             success: true,
-            rc: firstNumber([payload.rc, parsed.rc]),
+            rc: firstNumber([payload?.error?.rc, parsed?.error?.rc, payload.rc, parsed.rc]),
             command: meta.command || payload.command || parsed.command || meta.label,
             stdout: '',
             stderr: '',
@@ -518,7 +521,7 @@ class StataMcpClient {
             label: meta.label,
             cwd: meta.cwd || (meta.filePath ? path.dirname(meta.filePath) : null),
             filePath: meta.filePath,
-            contentText: flattenedContent || parsed.stdout || '',
+            contentText: safeContentText || parsed.stdout || '',
             raw: response
         };
 
@@ -530,7 +533,7 @@ class StataMcpClient {
         } else if (typeof payload.stdout === 'string') {
             normalized.stdout = payload.stdout;
         } else {
-            const stdoutCandidate = firstText([flattenedContent, typeof response === 'string' ? response : null, payload.result, parsed.result]);
+            const stdoutCandidate = firstText([safeContentText, typeof response === 'string' && !hasStructuredContent ? response : null, payload.result, parsed.result]);
             if (stdoutCandidate) normalized.stdout = stdoutCandidate;
         }
 
@@ -617,7 +620,11 @@ class StataMcpClient {
     _flattenContent(contentArray) {
         if (!Array.isArray(contentArray)) return String(contentArray);
         return contentArray
-            .map(item => (typeof item === 'string' ? item : item.text || JSON.stringify(item)))
+            .map(item => {
+                if (typeof item === 'string') return item;
+                if (item && typeof item === 'object' && typeof item.text === 'string') return item.text;
+                return '';
+            })
             .join('\n');
     }
 

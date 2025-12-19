@@ -132,13 +132,14 @@ class TerminalPanel {
         }
       };
       const result = await runCommand(trimmed, hooks);
+      const success = isRunSuccess(result);
       webview.postMessage({
         type: 'runFinished',
         runId,
         rc: typeof result?.rc === 'number' ? result.rc : null,
-        success: isRunSuccess(result),
+        success,
         durationMs: result?.durationMs ?? null,
-        stdout: result?.stdout || result?.contentText || '',
+        stdout: success ? (result?.stdout || result?.contentText || '') : (result?.stdout || ''),
         stderr: result?.stderr || '',
         artifacts: normalizeArtifacts(result),
         baseDir: result?.cwd || ''
@@ -187,13 +188,14 @@ class TerminalPanel {
 
   static finishStreamingEntry(runId, result) {
     if (!TerminalPanel.currentPanel || !runId) return;
+    const success = isRunSuccess(result);
     TerminalPanel.currentPanel.webview.postMessage({
       type: 'runFinished',
       runId,
       rc: typeof result?.rc === 'number' ? result.rc : null,
-      success: isRunSuccess(result),
+      success,
       durationMs: result?.durationMs ?? null,
-      stdout: result?.stdout || result?.contentText || '',
+      stdout: success ? (result?.stdout || result?.contentText || '') : (result?.stdout || ''),
       stderr: result?.stderr || '',
       artifacts: normalizeArtifacts(result),
       baseDir: result?.cwd || ''
@@ -411,8 +413,12 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
       updateLastCommand(code);
       vscode.postMessage({ type: 'run', code });
 
+      autoScrollPinned = true;
+
       // Optimistically append user message
       appendUserMessage(code);
+
+      scrollToBottomSmooth();
 
       clearInput();
       historyIndex = -1; // reset traversal once we run a new command
@@ -452,7 +458,7 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
             </div>
         \`;
         chatStream.appendChild(div);
-        scrollToBottom();
+        if (autoScrollPinned) scrollToBottom();
     }
 
     function appendEntry(entry) {
@@ -532,11 +538,55 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
         div.className = 'message-group entry';
         div.innerHTML = userHtml + systemHtml;
         chatStream.appendChild(div);
-        scrollToBottom();
+        if (autoScrollPinned) scrollToBottom();
     }
 
     function scrollToBottom() {
-        window.scrollTo(0, document.body.scrollHeight);
+        const top = document.body.scrollHeight;
+        try {
+            window.scrollTo({ top, left: 0, behavior: 'auto' });
+        } catch (_err) {
+            window.scrollTo(0, top);
+        }
+    }
+
+    function scrollToBottomSmooth() {
+        const durationMs = 180;
+        const startY = window.scrollY || 0;
+        const startTime = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+
+        const easeOutCubic = (t) => 1 - Math.pow(1 - t, 3);
+
+        const step = (now) => {
+            const tNow = now ?? ((typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now());
+            const elapsed = tNow - startTime;
+            const t = Math.max(0, Math.min(1, elapsed / durationMs));
+            const eased = easeOutCubic(t);
+
+            const targetY = document.body.scrollHeight;
+            const nextY = startY + (targetY - startY) * eased;
+            window.scrollTo(0, nextY);
+
+            if (t < 1) {
+                requestAnimationFrame(step);
+            } else {
+                scrollToBottom();
+            }
+        };
+
+        requestAnimationFrame(step);
+    }
+
+    let autoScrollPinned = true;
+    let scrollScheduled = false;
+
+    function scheduleScrollToBottom() {
+        if (scrollScheduled) return;
+        scrollScheduled = true;
+        requestAnimationFrame(() => {
+            scrollScheduled = false;
+            scrollToBottom();
+        });
     }
 
     const runs = Object.create(null);
@@ -594,7 +644,7 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
         div.dataset.runId = runId;
         div.innerHTML = userHtml + systemHtml;
         chatStream.appendChild(div);
-        scrollToBottom();
+        if (autoScrollPinned) scrollToBottom();
 
         runs[runId] = {
             group: div,
@@ -613,7 +663,6 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
 
         return runs[runId];
     }
-
     function renderArtifacts(artifacts) {
         if (!artifacts || !Array.isArray(artifacts) || artifacts.length === 0) return '';
         const items = artifacts.map(a => {
@@ -657,10 +706,11 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
         const runId = msg.runId;
         const run = runs[runId];
         if (!run || !run.stdoutEl) return;
+        const shouldStick = autoScrollPinned;
         const chunk = String(msg.text ?? '');
         if (!chunk) return;
         run.stdoutEl.textContent += chunk;
-        if (isAtBottom()) scrollToBottom();
+        if (shouldStick) scheduleScrollToBottom();
       }
 
       if (msg.type === 'runProgress') {
@@ -728,6 +778,8 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
         if (run.artifactsEl) {
             run.artifactsEl.innerHTML = artifactsHtml;
         }
+
+        if (autoScrollPinned) scrollToBottomSmooth();
       }
 
       if (msg.type === 'runFailed') {
@@ -740,6 +792,8 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
             run.stderrEl.style.display = 'block';
             run.stderrEl.textContent = String(msg.message || 'Unknown error');
         }
+
+        if (autoScrollPinned) scrollToBottomSmooth();
       }
 
       if (msg.type === 'variables') {
@@ -800,18 +854,25 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
     // Update on load, resize, and input change
     updateSpacer();
     // Force scroll to bottom after initial layout
-    setTimeout(scrollToBottom, 50);
+    setTimeout(() => {
+        autoScrollPinned = true;
+        scrollToBottom();
+    }, 50);
+
+    window.addEventListener('scroll', () => {
+        autoScrollPinned = isAtBottom();
+    }, { passive: true });
 
     window.addEventListener('resize', () => {
         updateSpacer();
-        if (isAtBottom()) scrollToBottom();
+        if (autoScrollPinned) scrollToBottom();
     });
     
     input.addEventListener('input', () => {
         // Allow resize to happen first
         setTimeout(() => {
             updateSpacer();
-            scrollToBottom(); // Keep bottom visible when typing
+            if (autoScrollPinned) scrollToBottom(); // Keep bottom visible when typing
         }, 0);
     });
     
@@ -883,12 +944,13 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
 }
 
 function toEntry(code, result) {
+  const success = isRunSuccess(result);
   return {
     code,
-    stdout: (typeof result?.stdout === 'string') ? result.stdout : (result?.contentText || ''),
+    stdout: (typeof result?.stdout === 'string') ? result.stdout : (success ? (result?.contentText || '') : ''),
     stderr: result?.stderr || '',
     rc: typeof result?.rc === 'number' ? result.rc : null,
-    success: isRunSuccess(result),
+    success,
     durationMs: result?.durationMs ?? null,
     timestamp: Date.now(),
     artifacts: normalizeArtifacts(result),

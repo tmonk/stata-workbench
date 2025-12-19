@@ -929,6 +929,12 @@ function logRunToOutput(result, contextTitle) {
     }
     if (result.stdout) {
         outputChannel.appendLine(result.stdout);
+    } else if (result.stderr) {
+        outputChannel.appendLine(result.stderr);
+    } else if (result?.error?.snippet) {
+        outputChannel.appendLine(result.error.snippet);
+    } else if (result?.error?.message) {
+        outputChannel.appendLine(result.error.message);
     } else if (typeof result === 'string') {
         outputChannel.appendLine(result);
     } else {
