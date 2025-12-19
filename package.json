@@ -13,7 +13,7 @@
   "bugs": {
     "url": "https://github.com/tmonk/stata-workbench/issues"
   },
-  "version": "0.5.0",
+  "version": "0.6.0",
   "engines": {
     "vscode": "^1.75.0"
   },
@@ -127,11 +127,6 @@
           "type": "number",
           "default": 100000,
           "description": "Timeout (ms) for MCP requests before showing an error."
-        },
-        "stataMcp.enableStreaming": {
-          "type": "boolean",
-          "default": true,
-          "description": "Show live Stata output while tools are running (via MCP notifications/message). Disable to only display the final result after completion."
         },
         "stataMcp.autoRevealOutput": {
           "type": "boolean",

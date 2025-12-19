@@ -36,6 +36,23 @@ describe('Panels', () => {
             assert.equal(entry.artifacts[0].path, '/tmp/g.pdf');
         });
 
+        it('toEntry should not fall back to contentText on failure', () => {
+            const { toEntry } = terminalPanelModule;
+            const result = {
+                contentText: '{"command":"reg y x"}',
+                stderr: '. reg y x\nvariable y not found\nr(111);',
+                rc: 111,
+                success: false
+            };
+
+            const entry = toEntry('reg y x', result);
+
+            assert.equal(entry.code, 'reg y x');
+            assert.equal(entry.stdout, '');
+            assert.equal(entry.stderr, '. reg y x\nvariable y not found\nr(111);');
+            assert.isFalse(entry.success);
+        });
+
         it('normalizeArtifacts should filter nulls and handle formatting', () => {
             const { normalizeArtifacts } = terminalPanelModule;
             const input = {

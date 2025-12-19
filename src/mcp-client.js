@@ -49,6 +49,7 @@ class StataMcpClient {
         this._clientVersion = pkg?.version || '0.0.0';
         this._availableTools = new Set();
         this._activeRun = null;
+        this._maxLogBufferChars = 500_000;
     }
 
     setLogger(logger) {
@@ -65,25 +66,34 @@ class StataMcpClient {
         const config = vscode.workspace.getConfiguration('stataMcp');
         const maxOutputLines = rest.max_output_lines ??
             (config.get('maxOutputLines', 0) || undefined);
-        const enableStreaming = rest.enableStreaming ?? config.get('enableStreaming', true);
+        const cwd = typeof rest.cwd === 'string' ? rest.cwd : null;
+        const meta = { command: selection, cwd };
 
         return this._enqueue('run_selection', rest, async (client) => {
             const args = { code: selection };
             if (maxOutputLines && maxOutputLines > 0) {
                 args.max_output_lines = maxOutputLines;
             }
-            if (enableStreaming === false && args.streaming === undefined) {
-                args.streaming = false;
+            if (cwd && cwd.trim()) {
+                args.cwd = cwd;
             }
 
-            const progressToken = (enableStreaming !== false && typeof onProgress === 'function')
+            const progressToken = (typeof onProgress === 'function')
                 ? this._generateProgressToken()
                 : null;
 
-            return this._withActiveRun({ onLog, onProgress, progressToken }, async () => {
+            const runState = { onLog, onProgress, progressToken };
+            const result = await this._withActiveRun(runState, async () => {
                 return this._callTool(client, 'run_command', args, { progressToken });
             });
-        }, { command: selection }, normalizeResult === true, includeGraphs === true);
+            if (!runState.logPath) {
+                runState.logPath = this._extractLogPathFromResponse(result);
+            }
+            await this._drainActiveRunLog(client, runState);
+            meta.logText = runState._logBuffer || '';
+            meta.logPath = runState.logPath || null;
+            return result;
+        }, meta, normalizeResult === true, includeGraphs === true);
     }
 
     async runFile(filePath, options = {}) {
@@ -93,7 +103,7 @@ class StataMcpClient {
         const config = vscode.workspace.getConfiguration('stataMcp');
         const maxOutputLines = rest.max_output_lines ??
             (config.get('maxOutputLines', 0) || undefined);
-        const enableStreaming = rest.enableStreaming ?? config.get('enableStreaming', true);
+        const meta = { command: `do "${filePath}"`, filePath, cwd };
 
         return this._enqueue('run_file', rest, async (client) => {
             const args = {
@@ -105,18 +115,23 @@ class StataMcpClient {
             if (maxOutputLines && maxOutputLines > 0) {
                 args.max_output_lines = maxOutputLines;
             }
-            if (enableStreaming === false && args.streaming === undefined) {
-                args.streaming = false;
-            }
 
-            const progressToken = (enableStreaming !== false && typeof onProgress === 'function')
+            const progressToken = (typeof onProgress === 'function')
                 ? this._generateProgressToken()
                 : null;
 
-            return this._withActiveRun({ onLog, onProgress, progressToken }, async () => {
+            const runState = { onLog, onProgress, progressToken };
+            const result = await this._withActiveRun(runState, async () => {
                 return this._callTool(client, 'run_do_file', args, { progressToken });
             });
-        }, { command: `do "${filePath}"`, filePath, cwd }, normalizeResult === true, includeGraphs === true);
+            if (!runState.logPath) {
+                runState.logPath = this._extractLogPathFromResponse(result);
+            }
+            await this._drainActiveRunLog(client, runState);
+            meta.logText = runState._logBuffer || '';
+            meta.logPath = runState.logPath || null;
+            return result;
+        }, meta, normalizeResult === true, includeGraphs === true);
     }
 
     async run(code, options = {}) {
@@ -124,27 +139,36 @@ class StataMcpClient {
         const config = vscode.workspace.getConfiguration('stataMcp');
         const maxOutputLines = options.max_output_lines ??
             (config.get('maxOutputLines', 0) || undefined);
-        const enableStreaming = rest.enableStreaming ?? config.get('enableStreaming', true);
 
-        const task = (client) => {
+        const cwd = typeof rest.cwd === 'string' ? rest.cwd : null;
+        const meta = { command: code, cwd };
+        const task = async (client) => {
             const args = { code };
             if (maxOutputLines && maxOutputLines > 0) {
                 args.max_output_lines = maxOutputLines;
             }
-            if (enableStreaming === false && args.streaming === undefined) {
-                args.streaming = false;
+            if (cwd && cwd.trim()) {
+                args.cwd = cwd;
             }
 
-            const progressToken = (enableStreaming !== false && typeof onProgress === 'function')
+            const progressToken = (typeof onProgress === 'function')
                 ? this._generateProgressToken()
                 : null;
 
-            return this._withActiveRun({ onLog, onProgress, progressToken }, async () => {
+            const runState = { onLog, onProgress, progressToken };
+            const result = await this._withActiveRun(runState, async () => {
                 return this._callTool(client, 'run_command', args, { progressToken });
             });
+            if (!runState.logPath) {
+                runState.logPath = this._extractLogPathFromResponse(result);
+            }
+            await this._drainActiveRunLog(client, runState);
+            meta.logText = runState._logBuffer || '';
+            meta.logPath = runState.logPath || null;
+            return result;
         };
         // Normalize=true to parse standard MCP output, collectArtifacts=true to fetch graphs
-        return this._enqueue('run_command', rest, task, { command: code }, true, true);
+        return this._enqueue('run_command', rest, task, meta, true, true);
     }
 
     async viewData(start = 0, count = 50, options = {}) {
@@ -295,9 +319,19 @@ class StataMcpClient {
             if (LoggingMessageNotificationSchema) {
                 client.setNotificationHandler(LoggingMessageNotificationSchema, (notification) => {
                     const run = this._activeRun;
-                    if (!run || typeof run.onLog !== 'function') return;
+                    if (!run) return;
                     const text = String(notification?.params?.data ?? '');
-                    if (text) run.onLog(text);
+                    if (!text) return;
+                    const parsed = this._tryParseJson(text);
+                    const event = parsed?.event;
+                    if (event === 'log_path' && parsed?.path) {
+                        this._ensureLogTail(client, run, String(parsed.path)).catch(() => { });
+                        return;
+                    }
+                    run._appendLog?.(text);
+                    if (typeof run.onLog === 'function') {
+                        run.onLog(text);
+                    }
                 });
             }
 
@@ -397,6 +431,18 @@ class StataMcpClient {
 
     async _withActiveRun(run, fn) {
         const prev = this._activeRun;
+        if (run && typeof run === 'object') {
+            run.logPath = run.logPath || null;
+            run.logOffset = typeof run.logOffset === 'number' ? run.logOffset : 0;
+            run._tailCancelled = false;
+            run._tailPromise = null;
+            run._logBuffer = '';
+            run._appendLog = (text) => {
+                const chunk = String(text ?? '');
+                if (!chunk) return;
+                run._logBuffer = this._appendBounded(run._logBuffer, chunk, this._maxLogBufferChars);
+            };
+        }
         this._activeRun = run;
         try {
             return await fn();
@@ -404,6 +450,121 @@ class StataMcpClient {
             // Restore previous run (defensive) rather than always clearing.
             this._activeRun = prev;
         }
+    }
+
+    _appendBounded(existing, chunk, maxChars) {
+        const next = `${existing || ''}${chunk || ''}`;
+        if (maxChars && next.length > maxChars) {
+            return next.slice(next.length - maxChars);
+        }
+        return next;
+    }
+
+    async _drainActiveRunLog(client, run) {
+        if (!run || !run.logPath) return;
+        run._tailCancelled = true;
+        if (run._tailPromise) {
+            try {
+                await run._tailPromise;
+            } catch (_err) {
+            }
+        }
+
+        let emptyReads = 0;
+        for (let i = 0; i < 200; i++) {
+            const slice = await this._readLogSlice(client, run.logPath, run.logOffset, 65536);
+            if (!slice) break;
+            if (typeof slice.next_offset === 'number') {
+                run.logOffset = slice.next_offset;
+            }
+            const data = String(slice.data ?? '');
+            if (data) {
+                run._appendLog?.(data);
+                emptyReads = 0;
+            } else {
+                emptyReads += 1;
+                if (emptyReads >= 2) break;
+                await this._delay(50);
+            }
+        }
+    }
+
+    async _ensureLogTail(client, run, logPath) {
+        if (!run || !logPath) return;
+        if (run.logPath && run.logPath === logPath && run._tailPromise) return;
+        run.logPath = logPath;
+        run.logOffset = typeof run.logOffset === 'number' ? run.logOffset : 0;
+        run._tailCancelled = false;
+        run._tailPromise = this._tailLogLoop(client, run).catch((err) => {
+            this._log(`[mcp-stata] log tail error: ${err?.message || err}`);
+        });
+    }
+
+    async _tailLogLoop(client, run) {
+        while (run && !run._tailCancelled) {
+            const slice = await this._readLogSlice(client, run.logPath, run.logOffset, 65536);
+            if (!slice) {
+                await this._delay(200);
+                continue;
+            }
+
+            if (typeof slice.next_offset === 'number') {
+                run.logOffset = slice.next_offset;
+            }
+            const data = String(slice.data ?? '');
+            if (data) {
+                run._appendLog?.(data);
+                if (typeof run.onLog === 'function') {
+                    try {
+                        run.onLog(data);
+                    } catch (_err) {
+                    }
+                }
+            } else {
+                await this._delay(200);
+            }
+        }
+    }
+
+    async _readLogSlice(client, path, offset, maxBytes) {
+        try {
+            const resp = await this._callTool(client, 'read_log', { path, offset, max_bytes: maxBytes });
+            const text = this._extractText(resp);
+            const parsed = this._tryParseJson(text);
+            if (!parsed || typeof parsed !== 'object') return null;
+            return parsed;
+        } catch (err) {
+            this._log(`[mcp-stata] read_log failed: ${err?.message || err}`);
+            return null;
+        }
+    }
+
+    _extractText(response) {
+        if (typeof response === 'string') return response;
+        if (response?.text && typeof response.text === 'string') return response.text;
+        if (Array.isArray(response?.content)) {
+            const flattened = this._flattenContent(response.content);
+            if (typeof flattened === 'string' && flattened.trim()) return flattened;
+        }
+        if (response?.structuredContent?.result && typeof response.structuredContent.result === 'string') {
+            return response.structuredContent.result;
+        }
+        return '';
+    }
+
+    _extractLogPathFromResponse(response) {
+        if (!response) return null;
+        const direct = response?.log_path || response?.logPath || response?.structuredContent?.log_path;
+        if (typeof direct === 'string' && direct.trim()) return direct;
+        const text = this._extractText(response);
+        const parsed = this._tryParseJson(text);
+        const lp = parsed?.log_path || parsed?.logPath || parsed?.error?.log_path || parsed?.error?.logPath;
+        if (typeof lp === 'string' && lp.trim()) return lp;
+        return null;
+    }
+
+    _delay(ms) {
+        return new Promise(resolve => setTimeout(resolve, ms));
     }
 
     _generateProgressToken() {
@@ -506,11 +667,14 @@ class StataMcpClient {
         const payload = typeof response === 'object' && !Array.isArray(response) ? response : {};
         const parsed = parsedFromString || parsedFromContent || {};
 
+        const hasStructuredContent = !!(parsedFromContent || parsedFromString);
+        const safeContentText = hasStructuredContent ? '' : flattenedContent;
+
         const normalized = {
             success: true,
-            rc: firstNumber([payload.rc, parsed.rc]),
+            rc: firstNumber([payload?.error?.rc, parsed?.error?.rc, payload.rc, parsed.rc]),
             command: meta.command || payload.command || parsed.command || meta.label,
-            stdout: '',
+            stdout: typeof meta.logText === 'string' ? meta.logText : '',
             stderr: '',
             startedAt,
             endedAt,
@@ -518,19 +682,20 @@ class StataMcpClient {
             label: meta.label,
             cwd: meta.cwd || (meta.filePath ? path.dirname(meta.filePath) : null),
             filePath: meta.filePath,
-            contentText: flattenedContent || parsed.stdout || '',
+            contentText: safeContentText || parsed.stdout || '',
+            logPath: meta.logPath || parsed.log_path || payload.log_path || payload?.error?.log_path || parsed?.error?.log_path || null,
             raw: response
         };
 
         if (payload.success === false || parsed.success === false) normalized.success = false;
         if (typeof normalized.rc === 'number' && normalized.rc !== 0) normalized.success = false;
 
-        if (typeof parsed.stdout === 'string') {
+        if (typeof parsed.stdout === 'string' && parsed.stdout.trim()) {
             normalized.stdout = parsed.stdout;
-        } else if (typeof payload.stdout === 'string') {
+        } else if (typeof payload.stdout === 'string' && payload.stdout.trim()) {
             normalized.stdout = payload.stdout;
         } else {
-            const stdoutCandidate = firstText([flattenedContent, typeof response === 'string' ? response : null, payload.result, parsed.result]);
+            const stdoutCandidate = firstText([safeContentText, typeof response === 'string' && !hasStructuredContent ? response : null, payload.result, parsed.result]);
             if (stdoutCandidate) normalized.stdout = stdoutCandidate;
         }
 
@@ -617,7 +782,11 @@ class StataMcpClient {
     _flattenContent(contentArray) {
         if (!Array.isArray(contentArray)) return String(contentArray);
         return contentArray
-            .map(item => (typeof item === 'string' ? item : item.text || JSON.stringify(item)))
+            .map(item => {
+                if (typeof item === 'string') return item;
+                if (item && typeof item === 'object' && typeof item.text === 'string') return item.text;
+                return '';
+            })
             .join('\n');
     }
 
@@ -882,42 +1051,78 @@ class StataMcpClient {
 
     _firstGraphs(candidate) {
         if (!candidate) return [];
-        if (Array.isArray(candidate)) return candidate;
-        if (candidate.graphs && Array.isArray(candidate.graphs)) return candidate.graphs;
-        // Check direct text property on candidate (common MCP single-text-content pattern)
-        if (candidate.text && typeof candidate.text === 'string') {
-            const parsed = this._tryParseJson(candidate.text);
-            if (parsed) {
-                const fromParsed = this._firstGraphs(parsed);
-                if (fromParsed.length) return fromParsed;
-            }
-        }
 
-        if (candidate.content && Array.isArray(candidate.content)) {
-            for (const item of candidate.content) {
-                const nested = this._firstGraphs(item);
-                if (nested.length) return nested;
-                if (item?.text) {
-                    const parsed = this._tryParseJson(item.text);
-                    if (parsed) {
-                        const fromParsed = this._firstGraphs(parsed);
-                        if (fromParsed.length) return fromParsed;
-                    }
-                }
-                if (typeof item === 'string') {
-                    const parsed = this._tryParseJson(item);
-                    if (parsed) {
-                        const fromString = this._firstGraphs(parsed);
-                        if (fromString.length) return fromString;
-                    }
+        const collected = [];
+        const pushAll = (arr) => {
+            if (!Array.isArray(arr) || arr.length === 0) return;
+            collected.push(...arr);
+        };
+
+        const visit = (node) => {
+            if (!node) return;
+            if (Array.isArray(node)) {
+                pushAll(node);
+                return;
+            }
+
+            if (typeof node === 'string') {
+                const parsed = this._tryParseJson(node);
+                if (parsed) visit(parsed);
+                return;
+            }
+
+            if (typeof node !== 'object') return;
+
+            if (Array.isArray(node.graphs)) {
+                pushAll(node.graphs);
+            }
+
+            // Some MCP servers put the primary JSON payload in structuredContent.result
+            if (typeof node?.structuredContent?.result === 'string') {
+                const parsed = this._tryParseJson(node.structuredContent.result);
+                if (parsed) visit(parsed);
+            }
+
+            // Common MCP single-text-content pattern
+            if (typeof node.text === 'string') {
+                const parsed = this._tryParseJson(node.text);
+                if (parsed) visit(parsed);
+            }
+
+            if (Array.isArray(node.content)) {
+                for (const item of node.content) {
+                    visit(item);
                 }
             }
+        };
+
+        // Prefer explicit top-level graphs first, then walk for chunked content.
+        if (Array.isArray(candidate.graphs)) {
+            pushAll(candidate.graphs);
         }
-        if (typeof candidate === 'string') {
-            const parsed = this._tryParseJson(candidate);
-            if (parsed) return this._firstGraphs(parsed);
+        visit(candidate);
+
+        if (!collected.length) return [];
+
+        // Dedupe while preserving order.
+        const seen = new Set();
+        const out = [];
+        for (const g of collected) {
+            let key;
+            if (typeof g === 'string') {
+                key = `s:${g}`;
+            } else {
+                try {
+                    key = `j:${JSON.stringify(g)}`;
+                } catch (_err) {
+                    key = `o:${String(g)}`;
+                }
+            }
+            if (seen.has(key)) continue;
+            seen.add(key);
+            out.push(g);
         }
-        return [];
+        return out;
     }
 
     _toDataUri(graph) {
