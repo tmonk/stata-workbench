@@ -27,6 +27,34 @@ function openArtifact(raw, baseDir) {
     }
 }
 
+async function revealArtifact(raw, baseDir) {
+    try {
+        const uri = resolveArtifactUri(raw, baseDir);
+        if (!uri) {
+            vscode.window.showErrorMessage(`Could not resolve artifact: ${raw}`);
+            return;
+        }
+        if (uri.scheme === 'file') {
+            const exists = fs.existsSync(uri.fsPath);
+            if (!exists) {
+                vscode.window.showErrorMessage(`Artifact not found: ${uri.fsPath}`);
+                return;
+            }
+        }
+        await vscode.commands.executeCommand('revealFileInOS', uri);
+    } catch (err) {
+        vscode.window.showErrorMessage(`Could not reveal artifact: ${err.message}`);
+    }
+}
+
+async function copyToClipboard(text) {
+    try {
+        await vscode.env.clipboard.writeText(String(text ?? ''));
+    } catch (err) {
+        vscode.window.showErrorMessage(`Could not copy to clipboard: ${err.message}`);
+    }
+}
+
 function resolveArtifactUri(raw, baseDir) {
     if (!raw) return null;
     const trimmed = raw.trim().replace(/^"+|"+$/g, '');
@@ -46,5 +74,7 @@ function resolveArtifactUri(raw, baseDir) {
 
 module.exports = {
     openArtifact,
+    revealArtifact,
+    copyToClipboard,
     resolveArtifactUri
 };

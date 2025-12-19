@@ -1,4 +1,4 @@
-const { openArtifact } = require('./artifact-utils');
+const { openArtifact, revealArtifact, copyToClipboard, resolveArtifactUri } = require('./artifact-utils');
 const path = require('path');
 const vscode = require('vscode');
 
@@ -10,6 +10,8 @@ class TerminalPanel {
   static variableProvider = null;
   static _defaultRunCommand = null;
   static _activeFilePath = null;
+  static _webviewReady = true;
+  static _pendingWebviewMessages = [];
 
   static setExtensionUri(uri) {
     TerminalPanel.extensionUri = uri;
@@ -46,6 +48,8 @@ class TerminalPanel {
 
       TerminalPanel.currentPanel.onDidDispose(() => {
         TerminalPanel.currentPanel = null;
+        TerminalPanel._webviewReady = true;
+        TerminalPanel._pendingWebviewMessages = [];
       });
 
       TerminalPanel.currentPanel.webview.onDidReceiveMessage(async (message) => {
@@ -56,11 +60,30 @@ class TerminalPanel {
           TerminalPanel._testCapture(message);
         }
 
+        if (message.type === 'ready') {
+          TerminalPanel._webviewReady = true;
+          TerminalPanel._flushPendingMessages();
+          return;
+        }
+
         if (message.type === 'run' && typeof message.code === 'string') {
           await TerminalPanel.handleRun(message.code, runCommand);
         }
         if (message.type === 'openArtifact' && message.path) {
           openArtifact(message.path, message.baseDir);
+        }
+        if (message.type === 'revealArtifact' && message.path) {
+          await revealArtifact(message.path, message.baseDir);
+        }
+        if (message.type === 'copyArtifactPath' && message.path) {
+          const uri = resolveArtifactUri(message.path, message.baseDir);
+          if (uri?.scheme === 'file') {
+            await copyToClipboard(uri.fsPath);
+          } else if (uri) {
+            await copyToClipboard(uri.toString());
+          } else {
+            await copyToClipboard(message.path);
+          }
         }
         if (message.type === 'requestVariables') {
           const provider = TerminalPanel.variableProvider;
@@ -108,36 +131,60 @@ class TerminalPanel {
       : [];
 
     TerminalPanel.currentPanel.webview.html = renderHtml(webview, TerminalPanel.extensionUri, nonce, filePath, initialHistory);
+    TerminalPanel._webviewReady = false;
+    TerminalPanel._pendingWebviewMessages = [];
     TerminalPanel.currentPanel.reveal(column);
 
 
 
   }
 
-  static async handleRun(code, runCommand) {
+  static _postMessage(msg) {
     if (!TerminalPanel.currentPanel) return;
     const webview = TerminalPanel.currentPanel.webview;
+    if (!webview || typeof webview.postMessage !== 'function') return;
+    if (!TerminalPanel._webviewReady) {
+      TerminalPanel._pendingWebviewMessages.push(msg);
+      return;
+    }
+    webview.postMessage(msg);
+  }
+
+  static _flushPendingMessages() {
+    if (!TerminalPanel.currentPanel) return;
+    if (!TerminalPanel._webviewReady) return;
+    const pending = Array.isArray(TerminalPanel._pendingWebviewMessages)
+      ? TerminalPanel._pendingWebviewMessages
+      : [];
+    TerminalPanel._pendingWebviewMessages = [];
+    for (const msg of pending) {
+      TerminalPanel._postMessage(msg);
+    }
+  }
+
+  static async handleRun(code, runCommand) {
+    if (!TerminalPanel.currentPanel) return;
     const trimmed = (code || '').trim();
     if (!trimmed) return;
 
     const runId = TerminalPanel._generateRunId();
-    webview.postMessage({ type: 'busy', value: true });
-    webview.postMessage({ type: 'runStarted', runId, code: trimmed });
+    TerminalPanel._postMessage({ type: 'busy', value: true });
+    TerminalPanel._postMessage({ type: 'runStarted', runId, code: trimmed });
     try {
       const cwd = TerminalPanel._activeFilePath ? path.dirname(TerminalPanel._activeFilePath) : null;
       const hooks = {
         onLog: (text) => {
           if (!text) return;
-          webview.postMessage({ type: 'runLogAppend', runId, text: String(text) });
+          TerminalPanel._postMessage({ type: 'runLogAppend', runId, text: String(text) });
         },
         onProgress: (progress, total, message) => {
-          webview.postMessage({ type: 'runProgress', runId, progress, total, message });
+          TerminalPanel._postMessage({ type: 'runProgress', runId, progress, total, message });
         },
         cwd
       };
       const result = await runCommand(trimmed, hooks);
       const success = isRunSuccess(result);
-      webview.postMessage({
+      TerminalPanel._postMessage({
         type: 'runFinished',
         runId,
         rc: typeof result?.rc === 'number' ? result.rc : null,
@@ -149,9 +196,9 @@ class TerminalPanel {
         baseDir: result?.cwd || ''
       });
     } catch (error) {
-      webview.postMessage({ type: 'runFailed', runId, message: error?.message || String(error) });
+      TerminalPanel._postMessage({ type: 'runFailed', runId, message: error?.message || String(error) });
     } finally {
-      webview.postMessage({ type: 'busy', value: false });
+      TerminalPanel._postMessage({ type: 'busy', value: false });
     }
   }
 
@@ -172,10 +219,9 @@ class TerminalPanel {
     }
 
     if (!TerminalPanel.currentPanel) return null;
-    const webview = TerminalPanel.currentPanel.webview;
     const runId = TerminalPanel._generateRunId();
-    webview.postMessage({ type: 'busy', value: true });
-    webview.postMessage({ type: 'runStarted', runId, code: trimmed });
+    TerminalPanel._postMessage({ type: 'busy', value: true });
+    TerminalPanel._postMessage({ type: 'runStarted', runId, code: trimmed });
     TerminalPanel.currentPanel.reveal(vscode.ViewColumn.Beside);
     return runId;
   }
@@ -184,18 +230,18 @@ class TerminalPanel {
     if (!TerminalPanel.currentPanel || !runId) return;
     const chunk = String(text ?? '');
     if (!chunk) return;
-    TerminalPanel.currentPanel.webview.postMessage({ type: 'runLogAppend', runId, text: chunk });
+    TerminalPanel._postMessage({ type: 'runLogAppend', runId, text: chunk });
   }
 
   static updateStreamingProgress(runId, progress, total, message) {
     if (!TerminalPanel.currentPanel || !runId) return;
-    TerminalPanel.currentPanel.webview.postMessage({ type: 'runProgress', runId, progress, total, message });
+    TerminalPanel._postMessage({ type: 'runProgress', runId, progress, total, message });
   }
 
   static finishStreamingEntry(runId, result) {
     if (!TerminalPanel.currentPanel || !runId) return;
     const success = isRunSuccess(result);
-    TerminalPanel.currentPanel.webview.postMessage({
+    TerminalPanel._postMessage({
       type: 'runFinished',
       runId,
       rc: typeof result?.rc === 'number' ? result.rc : null,
@@ -206,13 +252,13 @@ class TerminalPanel {
       artifacts: normalizeArtifacts(result),
       baseDir: result?.cwd || ''
     });
-    TerminalPanel.currentPanel.webview.postMessage({ type: 'busy', value: false });
+    TerminalPanel._postMessage({ type: 'busy', value: false });
   }
 
   static failStreamingEntry(runId, errorMessage) {
     if (!TerminalPanel.currentPanel || !runId) return;
-    TerminalPanel.currentPanel.webview.postMessage({ type: 'runFailed', runId, message: errorMessage });
-    TerminalPanel.currentPanel.webview.postMessage({ type: 'busy', value: false });
+    TerminalPanel._postMessage({ type: 'runFailed', runId, message: errorMessage });
+    TerminalPanel._postMessage({ type: 'busy', value: false });
   }
 
   static _generateRunId() {
@@ -242,8 +288,7 @@ class TerminalPanel {
     TerminalPanel._activeFilePath = filePath || TerminalPanel._activeFilePath || null;
 
     // Panel exists, just append
-    const webview = TerminalPanel.currentPanel.webview;
-    webview.postMessage({
+    TerminalPanel._postMessage({
       type: 'append',
       entry: toEntry(code, result)
     });
@@ -295,6 +340,26 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
     <!-- Entries injected here -->
   </main>
 
+  <div class="artifact-modal hidden" id="artifact-modal" role="dialog" aria-modal="true" aria-hidden="true">
+    <div class="artifact-modal-overlay" data-action="close-artifact-modal"></div>
+    <div class="artifact-modal-panel">
+      <div class="artifact-modal-header">
+        <div class="artifact-modal-title" id="artifact-modal-title"></div>
+        <button class="btn btn-sm" data-action="close-artifact-modal" type="button">Close</button>
+      </div>
+      <div class="artifact-modal-body">
+        <img class="artifact-modal-img" id="artifact-modal-img" alt="" />
+        <div class="artifact-modal-meta" id="artifact-modal-meta"></div>
+      </div>
+      <div class="artifact-modal-actions">
+        <button class="btn btn-sm" id="artifact-modal-open" type="button">Open</button>
+        <button class="btn btn-sm" id="artifact-modal-reveal" type="button">Reveal</button>
+        <button class="btn btn-sm" id="artifact-modal-copy" type="button">Copy path</button>
+        <button class="btn btn-sm btn-primary" id="artifact-modal-download" type="button">Download PNG</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Floating Input Area -->
   <footer class="input-area">
     <div class="input-container">
@@ -315,6 +380,32 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
   <script src="${mainJsUri}"></script>
   <script nonce="${nonce}">
     const vscode = acquireVsCodeApi();
+
+    vscode.postMessage({ type: 'log', level: 'info', message: 'Terminal webview booted' });
+
+    // Defensive: if shared UI script fails to load, provide minimal helpers so the terminal still works.
+    if (!window.stataUI) {
+        window.stataUI = {
+            escapeHtml: function (text) {
+                return (text || '')
+                    .replace(/&/g, '&amp;')
+                    .replace(/</g, '&lt;')
+                    .replace(/>/g, '&gt;')
+                    .replace(/"/g, '&quot;')
+                    .replace(/'/g, '&#039;');
+            },
+            formatDuration: function (ms) {
+                if (ms === null || ms === undefined) return '';
+                if (ms < 1000) return ms + ' ms';
+                const s = ms / 1000;
+                if (s < 60) return s.toFixed(1) + ' s';
+                const m = Math.floor(s / 60);
+                const rem = s - m * 60;
+                return m + 'm ' + rem.toFixed(0) + 's';
+            },
+            bindArtifactEvents: function () { }
+        };
+    }
     
     // Global error handler to surface script errors to extension
     window.onerror = function(message, source, lineno, colno, error) {
@@ -337,7 +428,57 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
     let variablesPending = false;
     let lastCompletion = null;
 
+    const runs = Object.create(null);
+
     let busy = false;
+
+    function scrollToBottom() {
+        const top = document.body.scrollHeight;
+        try {
+            window.scrollTo({ top, left: 0, behavior: 'auto' });
+        } catch (_err) {
+            window.scrollTo(0, top);
+        }
+    }
+
+    function scrollToBottomSmooth() {
+        const durationMs = 180;
+        const startY = window.scrollY || 0;
+        const startTime = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+
+        const easeOutCubic = (t) => 1 - Math.pow(1 - t, 3);
+
+        const step = (now) => {
+            const tNow = now ?? ((typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now());
+            const elapsed = tNow - startTime;
+            const t = Math.max(0, Math.min(1, elapsed / durationMs));
+            const eased = easeOutCubic(t);
+
+            const targetY = document.body.scrollHeight;
+            const nextY = startY + (targetY - startY) * eased;
+            window.scrollTo(0, nextY);
+
+            if (t < 1) {
+                requestAnimationFrame(step);
+            } else {
+                scrollToBottom();
+            }
+        };
+
+        requestAnimationFrame(step);
+    }
+
+    let autoScrollPinned = true;
+    let scrollScheduled = false;
+
+    function scheduleScrollToBottom() {
+        if (scrollScheduled) return;
+        scrollScheduled = true;
+        requestAnimationFrame(() => {
+            scrollScheduled = false;
+            scrollToBottom();
+        });
+    }
 
     // ... (rest of the listeners) ...
 
@@ -397,7 +538,9 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
     runBtn.addEventListener('click', doRun);
 
     // Bind shared artifact events (delegated)
-    window.stataUI.bindArtifactEvents(vscode);
+    if (window.stataUI && typeof window.stataUI.bindArtifactEvents === 'function') {
+        window.stataUI.bindArtifactEvents(vscode);
+    }
 
     function requestVariables() {
       if (variablesPending) return;
@@ -469,6 +612,78 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
         if (autoScrollPinned) scrollToBottom();
     }
 
+    function ensureRunGroup(runId, code) {
+        if (runs[runId]) return runs[runId];
+
+        const lastGroup = chatStream.lastElementChild;
+        if (lastGroup && lastGroup.dataset.optimistic) {
+            lastGroup.remove();
+        }
+
+        if (code) {
+          history.push(code);
+          historyIndex = -1;
+        }
+
+        updateLastCommand(code || '');
+
+        const userHtml = code ? (
+            '<div class="user-bubble">'
+            + window.stataUI.escapeHtml(code)
+            + '</div>'
+        ) : '';
+
+        const systemHtml =
+            '<div class="system-bubble">'
+            +  '<div class="output-card">'
+            +    '<div class="output-header">'
+            +      '<div class="flex items-center gap-xs">'
+            +        '<span class="text-muted" id="run-status-dot-' + runId + '" style="color: var(--accent-warning); font-size:16px;">●</span>'
+            +        '<span id="run-status-title-' + runId + '">Stata Output (running…)</span>'
+            +      '</div>'
+            +      '<div class="flex items-center gap-sm">'
+            +        '<span id="run-rc-' + runId + '"></span>'
+            +        '<span id="run-duration-' + runId + '"></span>'
+            +      '</div>'
+            +    '</div>'
+            +    '<div class="output-progress" id="run-progress-wrap-' + runId + '" style="display:none;">'
+            +      '<div class="progress-row">'
+            +        '<span class="progress-text" id="run-progress-text-' + runId + '"></span>'
+            +        '<span class="progress-meta" id="run-progress-meta-' + runId + '"></span>'
+            +      '</div>'
+            +      '<div class="progress-bar"><div class="progress-fill" id="run-progress-fill-' + runId + '" style="width:0%;"></div></div>'
+            +    '</div>'
+            +    '<div class="output-content error" id="run-stderr-' + runId + '" style="display:none;"></div>'
+            +    '<div class="output-content" id="run-stdout-' + runId + '"></div>'
+            +  '</div>'
+            +  '<div id="run-artifacts-' + runId + '"></div>'
+            + '</div>';
+
+        const div = document.createElement('div');
+        div.className = 'message-group entry';
+        div.dataset.runId = runId;
+        div.innerHTML = userHtml + systemHtml;
+        chatStream.appendChild(div);
+        if (autoScrollPinned) scrollToBottom();
+
+        runs[runId] = {
+            group: div,
+            stdoutEl: document.getElementById('run-stdout-' + runId),
+            stderrEl: document.getElementById('run-stderr-' + runId),
+            progressWrap: document.getElementById('run-progress-wrap-' + runId),
+            progressText: document.getElementById('run-progress-text-' + runId),
+            progressMeta: document.getElementById('run-progress-meta-' + runId),
+            progressFill: document.getElementById('run-progress-fill-' + runId),
+            statusDot: document.getElementById('run-status-dot-' + runId),
+            statusTitle: document.getElementById('run-status-title-' + runId),
+            rcEl: document.getElementById('run-rc-' + runId),
+            durationEl: document.getElementById('run-duration-' + runId),
+            artifactsEl: document.getElementById('run-artifacts-' + runId)
+        };
+
+        return runs[runId];
+    }
+
     function appendEntry(entry) {
         const lastGroup = chatStream.lastElementChild;
         if (lastGroup && lastGroup.dataset.optimistic) {
@@ -495,52 +710,29 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
             outputContent += \`<div class="output-content error">\${window.stataUI.escapeHtml(entry.stderr)}</div>\`;
         }
         if (entry.stdout) {
-            outputContent += \`<div class="output-content">\${window.stataUI.escapeHtml(entry.stdout)}</div>\`;
+            outputContent += '<div class="output-content">' + window.stataUI.escapeHtml(entry.stdout) + '</div>';
         }
         
-        // Artifacts
-        let artifactsHtml = '';
-        if (entry.artifacts && entry.artifacts.length > 0) {
-            const items = entry.artifacts.map(a => {
-                const label = window.stataUI.escapeHtml(a.label);
-                const isImg = (a.previewDataUri || a.dataUri) && (a.previewDataUri || a.dataUri).startsWith('data:');
-                const imgSrc = a.previewDataUri || a.dataUri;
-                const icon = isImg ? \`<img src="\${imgSrc}" style="width:100%; height:100%; object-fit:cover; border-radius:4px;">\` : '<span style="font-size:16px;">📄</span>';
-                
-                return \`
-                    <div class="artifact-card" data-action="open-artifact" data-path="\${window.stataUI.escapeHtml(a.path)}" data-basedir="\${window.stataUI.escapeHtml(a.baseDir)}" data-label="\${label}">
-                        <div class="artifact-icon">
-                            \${icon}
-                        </div>
-                        <div class="artifact-info">
-                            <div class="artifact-name">\${label}</div>
-                            <div class="artifact-meta">Click to open</div>
-                        </div>
-                    </div>
-                \`;
-            }).join('');
-            artifactsHtml = \`<div class="artifact-grid">\${items}</div>\`;
-        }
+        const artifactsHtml = renderArtifacts(entry.artifacts, entry.timestamp);
 
         // System Bubble (Card)
-        const systemHtml = \`
-            <div class="system-bubble">
-               <div class="output-card">
-                  <div class="output-header">
-                      <div class="flex items-center gap-xs">
-                        <span class="\${entry.success ? 'text-muted' : 'text-error'}" style="color: \${entry.success ? 'var(--accent-success)' : 'var(--accent-error)'}; font-size:16px;">●</span>
-                        <span>Stata Output</span>
-                      </div>
-                      <div class="flex items-center gap-sm">
-                         \${entry.rc !== null ? \`<span>RC \${entry.rc}</span>\` : ''}
-                         \${entry.durationMs ? \`<span>\${window.stataUI.formatDuration(entry.durationMs)}</span>\` : ''}
-                      </div>
-                  </div>
-                  \${outputContent}
-               </div>
-               \${artifactsHtml}
-            </div>
-        \`;
+        const systemHtml =
+            '<div class="system-bubble">'
+            +   '<div class="output-card">'
+            +     '<div class="output-header">'
+            +       '<div class="flex items-center gap-xs">'
+            +         '<span class="' + (entry.success ? 'text-muted' : 'text-error') + '" style="color: ' + (entry.success ? 'var(--accent-success)' : 'var(--accent-error)') + '; font-size:16px;">●</span>'
+            +         '<span>Stata Output</span>'
+            +       '</div>'
+            +       '<div class="flex items-center gap-sm">'
+            +         (entry.rc !== null ? ('<span>RC ' + entry.rc + '</span>') : '')
+            +         (entry.durationMs ? ('<span>' + window.stataUI.formatDuration(entry.durationMs) + '</span>') : '')
+            +       '</div>'
+            +     '</div>'
+            +     outputContent
+            +   '</div>'
+            +   artifactsHtml
+            + '</div>';
 
         const div = document.createElement('div');
         div.className = 'message-group entry';
@@ -549,148 +741,98 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
         if (autoScrollPinned) scrollToBottom();
     }
 
-    function scrollToBottom() {
-        const top = document.body.scrollHeight;
-        try {
-            window.scrollTo({ top, left: 0, behavior: 'auto' });
-        } catch (_err) {
-            window.scrollTo(0, top);
-        }
-    }
-
-    function scrollToBottomSmooth() {
-        const durationMs = 180;
-        const startY = window.scrollY || 0;
-        const startTime = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
-
-        const easeOutCubic = (t) => 1 - Math.pow(1 - t, 3);
-
-        const step = (now) => {
-            const tNow = now ?? ((typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now());
-            const elapsed = tNow - startTime;
-            const t = Math.max(0, Math.min(1, elapsed / durationMs));
-            const eased = easeOutCubic(t);
-
-            const targetY = document.body.scrollHeight;
-            const nextY = startY + (targetY - startY) * eased;
-            window.scrollTo(0, nextY);
-
-            if (t < 1) {
-                requestAnimationFrame(step);
-            } else {
-                scrollToBottom();
-            }
-        };
-
-        requestAnimationFrame(step);
-    }
-
-    let autoScrollPinned = true;
-    let scrollScheduled = false;
-
-    function scheduleScrollToBottom() {
-        if (scrollScheduled) return;
-        scrollScheduled = true;
-        requestAnimationFrame(() => {
-            scrollScheduled = false;
-            scrollToBottom();
-        });
-    }
-
-    const runs = Object.create(null);
-
-    function ensureRunGroup(runId, code) {
-        if (runs[runId]) return runs[runId];
-
-        const lastGroup = chatStream.lastElementChild;
-        if (lastGroup && lastGroup.dataset.optimistic) {
-            lastGroup.remove();
-        }
-
-        if (code) {
-          history.push(code);
-          historyIndex = -1;
-        }
-
-        updateLastCommand(code || '');
-
-        const userHtml = code ? \`
-            <div class="user-bubble">
-                \${window.stataUI.escapeHtml(code)}
-            </div>
-        \` : '';
-
-        const systemHtml = \`
-            <div class="system-bubble">
-               <div class="output-card">
-                  <div class="output-header">
-                      <div class="flex items-center gap-xs">
-                        <span class="text-muted" id="run-status-dot-\${runId}" style="color: var(--accent-warning); font-size:16px;">●</span>
-                        <span id="run-status-title-\${runId}">Stata Output (running…)</span>
-                      </div>
-                      <div class="flex items-center gap-sm">
-                         <span id="run-rc-\${runId}"></span>
-                         <span id="run-duration-\${runId}"></span>
-                      </div>
-                  </div>
-                  <div class="output-progress" id="run-progress-wrap-\${runId}" style="display:none;">
-                      <div class="progress-row">
-                         <span class="progress-text" id="run-progress-text-\${runId}"></span>
-                         <span class="progress-meta" id="run-progress-meta-\${runId}"></span>
-                      </div>
-                      <div class="progress-bar"><div class="progress-fill" id="run-progress-fill-\${runId}" style="width:0%;"></div></div>
-                  </div>
-                  <div class="output-content error" id="run-stderr-\${runId}" style="display:none;"></div>
-                  <div class="output-content" id="run-stdout-\${runId}"></div>
-               </div>
-               <div id="run-artifacts-\${runId}"></div>
-            </div>
-        \`;
-
-        const div = document.createElement('div');
-        div.className = 'message-group entry';
-        div.dataset.runId = runId;
-        div.innerHTML = userHtml + systemHtml;
-        chatStream.appendChild(div);
-        if (autoScrollPinned) scrollToBottom();
-
-        runs[runId] = {
-            group: div,
-            stdoutEl: document.getElementById(\`run-stdout-\${runId}\`),
-            stderrEl: document.getElementById(\`run-stderr-\${runId}\`),
-            progressWrap: document.getElementById(\`run-progress-wrap-\${runId}\`),
-            progressText: document.getElementById(\`run-progress-text-\${runId}\`),
-            progressMeta: document.getElementById(\`run-progress-meta-\${runId}\`),
-            progressFill: document.getElementById(\`run-progress-fill-\${runId}\`),
-            statusDot: document.getElementById(\`run-status-dot-\${runId}\`),
-            statusTitle: document.getElementById(\`run-status-title-\${runId}\`),
-            rcEl: document.getElementById(\`run-rc-\${runId}\`),
-            durationEl: document.getElementById(\`run-duration-\${runId}\`),
-            artifactsEl: document.getElementById(\`run-artifacts-\${runId}\`)
-        };
-
-        return runs[runId];
-    }
-    function renderArtifacts(artifacts) {
+    function renderArtifacts(artifacts, id) {
         if (!artifacts || !Array.isArray(artifacts) || artifacts.length === 0) return '';
-        const items = artifacts.map(a => {
-            const label = window.stataUI.escapeHtml(a.label);
-            const isImg = (a.previewDataUri || a.dataUri) && (a.previewDataUri || a.dataUri).startsWith('data:');
-            const imgSrc = a.previewDataUri || a.dataUri;
-            const icon = isImg ? \`<img src="\${imgSrc}" style="width:100%; height:100%; object-fit:cover; border-radius:4px;">\` : '<span style="font-size:16px;">📄</span>';
-            return \`
-                <div class="artifact-card" data-action="open-artifact" data-path="\${window.stataUI.escapeHtml(a.path)}" data-basedir="\${window.stataUI.escapeHtml(a.baseDir || '')}" data-label="\${label}">
-                    <div class="artifact-icon">
-                        \${icon}
-                    </div>
-                    <div class="artifact-info">
-                        <div class="artifact-name">\${label}</div>
-                        <div class="artifact-meta">Click to open</div>
-                    </div>
-                </div>
-            \`;
+        const artifactsId = window.stataUI.escapeHtml(String(id || Date.now()));
+        const isCollapsed = collapsedArtifacts[artifactsId] === true;
+
+        const tiles = artifacts.map((a, idx) => {
+            const label = window.stataUI.escapeHtml(a.label || 'graph');
+            const preview = a.previewDataUri || (a.dataUri && String(a.dataUri).startsWith('data:') ? a.dataUri : null);
+            const canPreview = !!preview && String(preview).startsWith('data:image');
+            const error = a.error ? String(a.error) : '';
+            const errorHtml = error
+                ? '<div class="artifact-tile-error">' + window.stataUI.escapeHtml(error) + '</div>'
+                : '';
+
+            const thumbHtml = canPreview
+                ? '<img src="' + window.stataUI.escapeHtml(preview) + '" class="artifact-thumb-img" alt="' + label + '">' 
+                : '<div class="artifact-thumb-fallback">PDF</div>';
+
+            const tileAttrs = canPreview
+                ? ('data-action="preview-graph" data-src="' + window.stataUI.escapeHtml(preview) + '"')
+                : 'data-action="open-artifact"';
+
+            return (
+                '<div class="artifact-tile" ' + tileAttrs
+                + ' data-path="' + window.stataUI.escapeHtml(a.path || '') + '"'
+                + ' data-basedir="' + window.stataUI.escapeHtml(a.baseDir || '') + '"'
+                + ' data-label="' + label + '"'
+                + ' data-index="' + idx + '">' 
+                +   '<div class="artifact-thumb">' + thumbHtml + '</div>'
+                +   '<div class="artifact-tile-label" title="' + label + '">' + label + '</div>'
+                +   errorHtml
+                + '</div>'
+            );
         }).join('');
-        return \`<div class="artifact-grid">\${items}</div>\`;
+
+        return (
+            '<section class="artifacts-card" data-artifacts-id="' + artifactsId + '" data-collapsed="' + (isCollapsed ? 'true' : 'false') + '">' 
+            + '<header class="artifacts-header">'
+            +   '<div class="artifacts-title">Artifacts</div>'
+            +   '<div class="artifacts-header-right">'
+            +     '<span class="artifacts-count">' + artifacts.length + '</span>'
+            +     '<button class="artifacts-toggle" type="button" data-action="toggle-artifacts" data-artifacts-id="' + artifactsId + '">' + (isCollapsed ? 'Show' : 'Hide') + '</button>'
+            +   '</div>'
+            + '</header>'
+            + '<div class="artifacts-body ' + (isCollapsed ? 'hidden' : '') + '" data-artifacts-body="' + artifactsId + '">' 
+            +   '<div class="artifact-gallery">' + tiles + '</div>'
+            + '</div>'
+            + '</section>'
+        );
+    }
+
+    const collapsedArtifacts = Object.create(null);
+
+    const modal = document.getElementById('artifact-modal');
+    const modalTitle = document.getElementById('artifact-modal-title');
+    const modalImg = document.getElementById('artifact-modal-img');
+    const modalMeta = document.getElementById('artifact-modal-meta');
+    const modalOpenBtn = document.getElementById('artifact-modal-open');
+    const modalRevealBtn = document.getElementById('artifact-modal-reveal');
+    const modalCopyBtn = document.getElementById('artifact-modal-copy');
+    const modalDownloadBtn = document.getElementById('artifact-modal-download');
+
+    let activeModalArtifact = null;
+
+    function openArtifactModal(artifact) {
+        activeModalArtifact = artifact;
+        if (modalTitle) modalTitle.textContent = artifact.label || 'Graph';
+        if (modalImg) {
+            modalImg.src = artifact.src || '';
+            modalImg.alt = artifact.label || 'Graph';
+        }
+        if (modalMeta) {
+            modalMeta.textContent = artifact.path || '';
+        }
+        if (modalDownloadBtn) {
+            const ok = artifact.src && String(artifact.src).startsWith('data:image/png');
+            modalDownloadBtn.disabled = !ok;
+            modalDownloadBtn.style.opacity = ok ? '1' : '0.6';
+        }
+        if (modal) {
+            modal.classList.remove('hidden');
+            modal.setAttribute('aria-hidden', 'false');
+        }
+    }
+
+    function closeArtifactModal() {
+        activeModalArtifact = null;
+        if (modal) {
+            modal.classList.add('hidden');
+            modal.setAttribute('aria-hidden', 'true');
+        }
+        if (modalImg) modalImg.src = '';
     }
 
     window.addEventListener('message', event => {
@@ -782,7 +924,7 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
             if (run.progressMeta) run.progressMeta.textContent = '';
         }
 
-        const artifactsHtml = renderArtifacts(msg.artifacts);
+        const artifactsHtml = renderArtifacts(msg.artifacts, runId);
         if (run.artifactsEl) {
             run.artifactsEl.innerHTML = artifactsHtml;
         }
@@ -870,6 +1012,94 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
     window.addEventListener('scroll', () => {
         autoScrollPinned = isAtBottom();
     }, { passive: true });
+
+    document.addEventListener('click', (e) => {
+        const toggle = e.target.closest('[data-action="toggle-artifacts"]');
+        if (toggle) {
+            const id = toggle.getAttribute('data-artifacts-id');
+            if (!id) return;
+            const body = document.querySelector('[data-artifacts-body="' + CSS.escape(id) + '"]');
+            const card = document.querySelector('[data-artifacts-id="' + CSS.escape(id) + '"]');
+            const collapsed = !(collapsedArtifacts[id] === true);
+            collapsedArtifacts[id] = collapsed;
+            if (body) body.classList.toggle('hidden', collapsed);
+            if (card) card.setAttribute('data-collapsed', collapsed ? 'true' : 'false');
+            toggle.textContent = collapsed ? 'Show' : 'Hide';
+            return;
+        }
+
+        const preview = e.target.closest('[data-action="preview-graph"]');
+        if (preview) {
+            const src = preview.getAttribute('data-src') || '';
+            const path = preview.getAttribute('data-path') || '';
+            const baseDir = preview.getAttribute('data-basedir') || '';
+            const label = preview.getAttribute('data-label') || 'Graph';
+            openArtifactModal({ src, path, baseDir, label });
+            return;
+        }
+
+        const close = e.target.closest('[data-action="close-artifact-modal"]');
+        if (close) {
+            closeArtifactModal();
+        }
+    });
+
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && modal && !modal.classList.contains('hidden')) {
+            closeArtifactModal();
+        }
+    });
+
+    if (modalOpenBtn) {
+        modalOpenBtn.addEventListener('click', () => {
+            if (!activeModalArtifact) return;
+            vscode.postMessage({
+                type: 'openArtifact',
+                path: activeModalArtifact.path,
+                baseDir: activeModalArtifact.baseDir,
+                label: activeModalArtifact.label
+            });
+        });
+    }
+
+    if (modalRevealBtn) {
+        modalRevealBtn.addEventListener('click', () => {
+            if (!activeModalArtifact) return;
+            vscode.postMessage({
+                type: 'revealArtifact',
+                path: activeModalArtifact.path,
+                baseDir: activeModalArtifact.baseDir,
+                label: activeModalArtifact.label
+            });
+        });
+    }
+
+    if (modalCopyBtn) {
+        modalCopyBtn.addEventListener('click', () => {
+            if (!activeModalArtifact) return;
+            vscode.postMessage({
+                type: 'copyArtifactPath',
+                path: activeModalArtifact.path,
+                baseDir: activeModalArtifact.baseDir,
+                label: activeModalArtifact.label
+            });
+        });
+    }
+
+    if (modalDownloadBtn) {
+        modalDownloadBtn.addEventListener('click', () => {
+            if (!activeModalArtifact) return;
+            const src = activeModalArtifact.src;
+            if (!src || !String(src).startsWith('data:image/png')) return;
+            const nameBase = (activeModalArtifact.label || 'graph').replace(/[^a-z0-9_\-]+/gi, '_');
+            const a = document.createElement('a');
+            a.href = src;
+            a.download = nameBase + '.png';
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+        });
+    }
 
     window.addEventListener('resize', () => {
         updateSpacer();
@@ -975,9 +1205,11 @@ function toEntry(code, result) {
  * @returns {Array<object>}
  */
 function normalizeArtifacts(result) {
-  const artifacts = result?.artifacts || result?.graphArtifacts || [];
-  if (!Array.isArray(artifacts)) return [];
-  return artifacts.map((a) => {
+  const preferred = Array.isArray(result?.graphArtifacts)
+    ? result.graphArtifacts
+    : (result?.artifacts || []);
+  if (!Array.isArray(preferred)) return [];
+  const normalized = preferred.map((a) => {
     if (!a) return null;
     const label = a.label || path.basename(a.path || '') || 'artifact';
     const dataUri = a.dataUri && typeof a.dataUri === 'string' ? a.dataUri : null;
@@ -987,9 +1219,27 @@ function normalizeArtifacts(result) {
       path: a.path || a.dataUri || '',
       dataUri,
       previewDataUri: a.previewDataUri || null,
+      error: a.error || null,
       baseDir
     };
   }).filter(Boolean);
+
+  const counts = Object.create(null);
+  for (const a of normalized) {
+    const k = a.label || 'artifact';
+    counts[k] = (counts[k] || 0) + 1;
+  }
+
+  const seen = Object.create(null);
+  for (const a of normalized) {
+    const k = a.label || 'artifact';
+    if ((counts[k] || 0) > 1) {
+      seen[k] = (seen[k] || 0) + 1;
+      a.label = k + ' (' + String(seen[k]) + ')';
+    }
+  }
+
+  return normalized;
 }
 
 function isRunSuccess(result) {
