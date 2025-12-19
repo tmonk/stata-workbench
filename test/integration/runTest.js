@@ -6,10 +6,14 @@ const { runTests } = require('@vscode/test-electron');
 async function main() {
     let userDataDir;
     let extDir;
+    let workspacePath;
     try {
         const extensionDevelopmentPath = path.resolve(__dirname, '../../');
         const extensionTestsPath = path.resolve(__dirname, './suite/index');
-        const workspacePath = path.resolve(__dirname, './fixture');
+
+        // Use a real workspace folder so integration tests can write Workspace settings.
+        // Use a temp folder to avoid mutating this repo's .vscode/settings.json.
+        workspacePath = fs.mkdtempSync(path.join(os.tmpdir(), 'stata-wb-ws-'));
 
         // Optional: run uvx against a local mcp-stata repo instead of PyPI.
         // This is intended for integration tests in this mono-workspace.
@@ -34,7 +38,20 @@ async function main() {
         if (userDataDir) {
             dumpMcpLogs(userDataDir);
         }
+        if (workspacePath && fs.existsSync(workspacePath)) {
+            try {
+                fs.rmSync(workspacePath, { recursive: true, force: true });
+            } catch (_err) {
+            }
+        }
         process.exit(1);
+    }
+
+    if (workspacePath && fs.existsSync(workspacePath)) {
+        try {
+            fs.rmSync(workspacePath, { recursive: true, force: true });
+        } catch (_err) {
+        }
     }
 }
 
