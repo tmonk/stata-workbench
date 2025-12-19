@@ -509,6 +509,38 @@ describe('McpClient', () => {
             assert.equal(result.graphs[0].path, '/tmp/g1.pdf');
             assert.include(result.graphs[0].previewDataUri, 'data:image/png;base64,');
         });
+
+        it('should aggregate graph lists across multiple content chunks', async () => {
+            const wrappedResponse = {
+                content: [
+                    {
+                        type: 'text',
+                        text: JSON.stringify({ graphs: ['g1'] })
+                    },
+                    {
+                        type: 'text',
+                        text: JSON.stringify({ graphs: ['g2'] })
+                    }
+                ]
+            };
+
+            client._callTool.withArgs(sinon.match.any, 'list_graphs', sinon.match.any)
+                .resolves(wrappedResponse);
+
+            // Mock export for both graphs
+            client._exportGraphPreferred = sinon.stub().callsFake(async (_c, name) => ({ content: [{ type: 'text', text: `/tmp/${name}.pdf` }] }));
+            client._callTool.withArgs(sinon.match.any, 'export_graph', sinon.match.has('format', 'png'))
+                .callsFake(async (_c, _name, args) => ({ content: [{ type: 'text', text: `/tmp/${args.graph_name}.png` }] }));
+
+            const result = await client.listGraphs({ baseDir: '/tmp' });
+
+            assert.isArray(result.graphs);
+            assert.lengthOf(result.graphs, 2);
+
+            const labels = result.graphs.map((g) => g.label);
+            assert.includeMembers(labels, ['g1', 'g2']);
+        });
+
         it('should handle text-wrapped graph lists', async () => {
             // Mock list_graphs to return text-wrapped JSON (common MCP pattern)
             const wrappedResponse = {

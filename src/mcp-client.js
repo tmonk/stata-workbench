@@ -1051,42 +1051,78 @@ class StataMcpClient {
 
     _firstGraphs(candidate) {
         if (!candidate) return [];
-        if (Array.isArray(candidate)) return candidate;
-        if (candidate.graphs && Array.isArray(candidate.graphs)) return candidate.graphs;
-        // Check direct text property on candidate (common MCP single-text-content pattern)
-        if (candidate.text && typeof candidate.text === 'string') {
-            const parsed = this._tryParseJson(candidate.text);
-            if (parsed) {
-                const fromParsed = this._firstGraphs(parsed);
-                if (fromParsed.length) return fromParsed;
-            }
-        }
 
-        if (candidate.content && Array.isArray(candidate.content)) {
-            for (const item of candidate.content) {
-                const nested = this._firstGraphs(item);
-                if (nested.length) return nested;
-                if (item?.text) {
-                    const parsed = this._tryParseJson(item.text);
-                    if (parsed) {
-                        const fromParsed = this._firstGraphs(parsed);
-                        if (fromParsed.length) return fromParsed;
-                    }
-                }
-                if (typeof item === 'string') {
-                    const parsed = this._tryParseJson(item);
-                    if (parsed) {
-                        const fromString = this._firstGraphs(parsed);
-                        if (fromString.length) return fromString;
-                    }
+        const collected = [];
+        const pushAll = (arr) => {
+            if (!Array.isArray(arr) || arr.length === 0) return;
+            collected.push(...arr);
+        };
+
+        const visit = (node) => {
+            if (!node) return;
+            if (Array.isArray(node)) {
+                pushAll(node);
+                return;
+            }
+
+            if (typeof node === 'string') {
+                const parsed = this._tryParseJson(node);
+                if (parsed) visit(parsed);
+                return;
+            }
+
+            if (typeof node !== 'object') return;
+
+            if (Array.isArray(node.graphs)) {
+                pushAll(node.graphs);
+            }
+
+            // Some MCP servers put the primary JSON payload in structuredContent.result
+            if (typeof node?.structuredContent?.result === 'string') {
+                const parsed = this._tryParseJson(node.structuredContent.result);
+                if (parsed) visit(parsed);
+            }
+
+            // Common MCP single-text-content pattern
+            if (typeof node.text === 'string') {
+                const parsed = this._tryParseJson(node.text);
+                if (parsed) visit(parsed);
+            }
+
+            if (Array.isArray(node.content)) {
+                for (const item of node.content) {
+                    visit(item);
                 }
             }
+        };
+
+        // Prefer explicit top-level graphs first, then walk for chunked content.
+        if (Array.isArray(candidate.graphs)) {
+            pushAll(candidate.graphs);
         }
-        if (typeof candidate === 'string') {
-            const parsed = this._tryParseJson(candidate);
-            if (parsed) return this._firstGraphs(parsed);
+        visit(candidate);
+
+        if (!collected.length) return [];
+
+        // Dedupe while preserving order.
+        const seen = new Set();
+        const out = [];
+        for (const g of collected) {
+            let key;
+            if (typeof g === 'string') {
+                key = `s:${g}`;
+            } else {
+                try {
+                    key = `j:${JSON.stringify(g)}`;
+                } catch (_err) {
+                    key = `o:${String(g)}`;
+                }
+            }
+            if (seen.has(key)) continue;
+            seen.add(key);
+            out.push(g);
         }
-        return [];
+        return out;
     }
 
     _toDataUri(graph) {
