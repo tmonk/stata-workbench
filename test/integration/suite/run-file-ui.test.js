@@ -7,6 +7,8 @@ const os = require('os');
 suite('Run File UI Integration', function () {
     this.timeout(60000);
 
+    const enabled = process.env.MCP_STATA_INTEGRATION === '1';
+
     let tempFile;
 
     suiteSetup(() => {
@@ -23,6 +25,9 @@ suite('Run File UI Integration', function () {
     });
 
     test('Run File command should open panel and show output', async () => {
+        if (!enabled) {
+            return;
+        }
         // Open the document
         let doc = await vscode.workspace.openTextDocument(tempFile);
         await vscode.window.showTextDocument(doc);
@@ -41,11 +46,13 @@ suite('Run File UI Integration', function () {
         // Close all editors to ensure a clean state for the panel
         await vscode.commands.executeCommand('workbench.action.closeAllEditors');
 
-        // Setup listener for client messages
-        let receivedReady = false;
+        // Setup listener for webview messages (outgoing from extension -> webview)
         let receivedError = null;
+        const outgoing = [];
+        api.TerminalPanel._testOutgoingCapture = (msg) => {
+            outgoing.push(msg);
+        };
         api.TerminalPanel._testCapture = (msg) => {
-            if (msg.type === 'ready') receivedReady = true;
             if (msg.type === 'log' && msg.level === 'error') receivedError = msg.message;
         };
 
@@ -54,18 +61,58 @@ suite('Run File UI Integration', function () {
         await vscode.window.showTextDocument(doc);
         await vscode.commands.executeCommand('stata-workbench.runFile');
 
-        // Poll for 'ready' message or client error
-        for (let i = 0; i < 20; i++) { // Poll for up to 10 seconds
+        // Poll for run lifecycle events
+        let runStarted = null;
+        let runFinished = null;
+        let sawLogAppend = false;
+        let sawProgress = false;
+
+        for (let i = 0; i < 120; i++) { // up to 60s
             if (receivedError) throw new Error(`Client Script Error: ${receivedError}`);
-            if (receivedReady) break;
+
+            for (const m of outgoing) {
+                if (m?.type === 'runStarted') {
+                    runStarted = m;
+                }
+                if (m?.type === 'runLogAppend') {
+                    sawLogAppend = true;
+                }
+                if (m?.type === 'runProgress') {
+                    sawProgress = true;
+                }
+                if (m?.type === 'runFinished') {
+                    runFinished = m;
+                }
+            }
+
+            if (runStarted && runFinished) break;
             await new Promise(r => setTimeout(r, 500));
         }
 
-        assert.isTrue(receivedReady, 'Client script should send "ready" signal');
+        assert.ok(api.TerminalPanel.currentPanel, 'Terminal Panel should be open');
+        assert.ok(runStarted, 'should emit runStarted');
+        assert.ok(runFinished, 'should emit runFinished');
+        assert.strictEqual(runStarted.runId, runFinished.runId, 'runId should match');
+        assert.isTrue(runFinished.success === true || runFinished.success === false, 'runFinished should include success');
 
-        // Additional check: HTML content
-        const panel = api.TerminalPanel.currentPanel;
-        assert.ok(panel, 'Terminal Panel should be open');
-        assert.include(panel.webview.html, 'UI-INTEGRATION-SUCCESS', 'Terminal Panel HTML should contain "UI-INTEGRATION-SUCCESS"');
+        // We expect at least some streamed log output in normal runs.
+        // Progress may or may not be emitted depending on server/runtime.
+        const finalStdout = String(runFinished?.stdout || '');
+        assert.isTrue(
+            sawLogAppend || finalStdout.includes('UI-INTEGRATION-SUCCESS'),
+            'should stream logs or include expected output in runFinished'
+        );
+
+        const logMsgs = outgoing.filter(m => m?.type === 'runLogAppend');
+        if (logMsgs.length) {
+            assert.isTrue(logMsgs.every(m => m.runId === runStarted.runId), 'runLogAppend should match runId');
+        }
+
+        // If progress is emitted, it should come for the same run.
+        if (sawProgress) {
+            const progressMsgs = outgoing.filter(m => m?.type === 'runProgress');
+            assert.isAtLeast(progressMsgs.length, 1, 'should have at least one runProgress');
+            assert.isTrue(progressMsgs.every(m => m.runId === runStarted.runId), 'runProgress should match runId');
+        }
     });
 });

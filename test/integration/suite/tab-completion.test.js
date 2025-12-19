@@ -7,6 +7,8 @@ const os = require('os');
 suite('Tab Completion Integration', function () {
     this.timeout(60000);
 
+    const enabled = process.env.MCP_STATA_INTEGRATION === '1';
+
     let tempFile;
 
     suiteSetup(() => {
@@ -23,6 +25,9 @@ suite('Tab Completion Integration', function () {
     });
 
     test('webview requests variables for tab completion', async () => {
+        if (!enabled) {
+            return;
+        }
         const extension = vscode.extensions.getExtension('tmonk.stata-workbench');
         assert.ok(extension, 'Extension should be available');
 

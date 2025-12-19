@@ -4,12 +4,15 @@ const fs = require('fs');
 const vscode = require('vscode');
 const pkg = require('../package.json');
 const MCP_PACKAGE_NAME = 'mcp-stata';
-const MCP_PACKAGE_SPEC = `${MCP_PACKAGE_NAME}@latest`;
+const MCP_PACKAGE_SPEC = process.env.MCP_STATA_PACKAGE_SPEC || `${MCP_PACKAGE_NAME}@latest`;
 
 // The MCP SDK exposes a stdio client transport we can use for VS Code.
 // For Cursor, we first try a built-in bridge command if available, then fall back to stdio.
 let Client;
 let StdioClientTransport;
+let LoggingMessageNotificationSchema;
+let ProgressNotificationSchema;
+let CallToolResultSchema;
 let sdkLoadError = null;
 
 try {
@@ -17,6 +20,14 @@ try {
     ({ Client } = require('@modelcontextprotocol/sdk/client'));
     // Use the exported stdio transport path (requires .js to satisfy exports mapping).
     ({ StdioClientTransport } = require('@modelcontextprotocol/sdk/client/stdio.js'));
+
+    // Notification / result schemas are needed for streaming + low-level requests.
+    // Prefer the standard export, but keep a fallback path for older exports mapping.
+    try {
+        ({ LoggingMessageNotificationSchema, ProgressNotificationSchema, CallToolResultSchema } = require('@modelcontextprotocol/sdk/types'));
+    } catch (_err) {
+        ({ LoggingMessageNotificationSchema, ProgressNotificationSchema, CallToolResultSchema } = require('@modelcontextprotocol/sdk/types.js'));
+    }
 } catch (error) {
     // Capture the error so we can surface the root cause during activation.
     sdkLoadError = error;
@@ -37,6 +48,7 @@ class StataMcpClient {
         this._workspaceRoot = null;
         this._clientVersion = pkg?.version || '0.0.0';
         this._availableTools = new Set();
+        this._activeRun = null;
     }
 
     setLogger(logger) {
@@ -49,28 +61,39 @@ class StataMcpClient {
     }
 
     async runSelection(selection, options = {}) {
-        const { normalizeResult, includeGraphs, ...rest } = options || {};
+        const { normalizeResult, includeGraphs, onLog, onProgress, ...rest } = options || {};
         const config = vscode.workspace.getConfiguration('stataMcp');
         const maxOutputLines = rest.max_output_lines ??
             (config.get('maxOutputLines', 0) || undefined);
+        const enableStreaming = rest.enableStreaming ?? config.get('enableStreaming', true);
 
         return this._enqueue('run_selection', rest, async (client) => {
             const args = { code: selection };
             if (maxOutputLines && maxOutputLines > 0) {
                 args.max_output_lines = maxOutputLines;
             }
-            const response = await this._callTool(client, 'run_command', args);
-            return response;
+            if (enableStreaming === false && args.streaming === undefined) {
+                args.streaming = false;
+            }
+
+            const progressToken = (enableStreaming !== false && typeof onProgress === 'function')
+                ? this._generateProgressToken()
+                : null;
+
+            return this._withActiveRun({ onLog, onProgress, progressToken }, async () => {
+                return this._callTool(client, 'run_command', args, { progressToken });
+            });
         }, { command: selection }, normalizeResult === true, includeGraphs === true);
     }
 
     async runFile(filePath, options = {}) {
-        const { normalizeResult, includeGraphs, ...rest } = options || {};
+        const { normalizeResult, includeGraphs, onLog, onProgress, ...rest } = options || {};
         // Resolve working directory (configurable, defaults to the .do file folder).
         const cwd = this._resolveRunFileCwd(filePath);
         const config = vscode.workspace.getConfiguration('stataMcp');
         const maxOutputLines = rest.max_output_lines ??
             (config.get('maxOutputLines', 0) || undefined);
+        const enableStreaming = rest.enableStreaming ?? config.get('enableStreaming', true);
 
         return this._enqueue('run_file', rest, async (client) => {
             const args = {
@@ -82,25 +105,46 @@ class StataMcpClient {
             if (maxOutputLines && maxOutputLines > 0) {
                 args.max_output_lines = maxOutputLines;
             }
-            const response = await this._callTool(client, 'run_do_file', args);
-            return response;
+            if (enableStreaming === false && args.streaming === undefined) {
+                args.streaming = false;
+            }
+
+            const progressToken = (enableStreaming !== false && typeof onProgress === 'function')
+                ? this._generateProgressToken()
+                : null;
+
+            return this._withActiveRun({ onLog, onProgress, progressToken }, async () => {
+                return this._callTool(client, 'run_do_file', args, { progressToken });
+            });
         }, { command: `do "${filePath}"`, filePath, cwd }, normalizeResult === true, includeGraphs === true);
     }
 
     async run(code, options = {}) {
+        const { onLog, onProgress, ...rest } = options || {};
         const config = vscode.workspace.getConfiguration('stataMcp');
         const maxOutputLines = options.max_output_lines ??
             (config.get('maxOutputLines', 0) || undefined);
+        const enableStreaming = rest.enableStreaming ?? config.get('enableStreaming', true);
 
         const task = (client) => {
             const args = { code };
             if (maxOutputLines && maxOutputLines > 0) {
                 args.max_output_lines = maxOutputLines;
             }
-            return this._callTool(client, 'run_command', args);
+            if (enableStreaming === false && args.streaming === undefined) {
+                args.streaming = false;
+            }
+
+            const progressToken = (enableStreaming !== false && typeof onProgress === 'function')
+                ? this._generateProgressToken()
+                : null;
+
+            return this._withActiveRun({ onLog, onProgress, progressToken }, async () => {
+                return this._callTool(client, 'run_command', args, { progressToken });
+            });
         };
         // Normalize=true to parse standard MCP output, collectArtifacts=true to fetch graphs
-        return this._enqueue('run_command', options, task, { command: code }, true, true);
+        return this._enqueue('run_command', rest, task, { command: code }, true, true);
     }
 
     async viewData(start = 0, count = 50, options = {}) {
@@ -246,6 +290,30 @@ class StataMcpClient {
                 this._statusEmitter.emit('status', 'error');
             });
         }
+
+        if (typeof client.setNotificationHandler === 'function') {
+            if (LoggingMessageNotificationSchema) {
+                client.setNotificationHandler(LoggingMessageNotificationSchema, (notification) => {
+                    const run = this._activeRun;
+                    if (!run || typeof run.onLog !== 'function') return;
+                    const text = String(notification?.params?.data ?? '');
+                    if (text) run.onLog(text);
+                });
+            }
+
+            if (ProgressNotificationSchema) {
+                client.setNotificationHandler(ProgressNotificationSchema, (notification) => {
+                    const run = this._activeRun;
+                    if (!run || typeof run.onProgress !== 'function' || run.progressToken == null) return;
+                    const token = notification?.params?.progressToken;
+                    if (String(token ?? '') !== String(run.progressToken)) return;
+                    const progress = notification?.params?.progress;
+                    const total = notification?.params?.total;
+                    const message = notification?.params?.message;
+                    run.onProgress(progress, total, message);
+                });
+            }
+        }
         await client.connect(transport);
         this._log(`mcp-stata connected (pid=${transport.pid ?? 'unknown'})`);
 
@@ -293,7 +361,7 @@ class StataMcpClient {
         return preferred.filter(Boolean);
     }
 
-    async _callTool(client, name, args) {
+    async _callTool(client, name, args, callOptions = {}) {
         const toolArgs = args ?? {};
         try {
             if (client.type === 'cursor-bridge' && this._cursorCommand) {
@@ -304,12 +372,42 @@ class StataMcpClient {
                 });
             }
 
+            const progressToken = callOptions?.progressToken ?? null;
+            if (progressToken != null && typeof client.request === 'function' && CallToolResultSchema) {
+                return client.request(
+                    {
+                        method: 'tools/call',
+                        params: {
+                            name,
+                            arguments: toolArgs,
+                            _meta: { progressToken }
+                        }
+                    },
+                    CallToolResultSchema
+                );
+            }
+
             return client.callTool({ name, arguments: toolArgs });
         } catch (error) {
             this._statusEmitter.emit('status', 'error');
             const detail = error?.message || String(error);
             throw new Error(`MCP tool ${name} failed: ${detail}`);
         }
+    }
+
+    async _withActiveRun(run, fn) {
+        const prev = this._activeRun;
+        this._activeRun = run;
+        try {
+            return await fn();
+        } finally {
+            // Restore previous run (defensive) rather than always clearing.
+            this._activeRun = prev;
+        }
+    }
+
+    _generateProgressToken() {
+        return `p_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
     }
 
     async _enqueue(label, options = {}, task, meta = {}, normalize = false, collectArtifacts = false) {

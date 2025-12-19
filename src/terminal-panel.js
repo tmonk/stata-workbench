@@ -6,7 +6,9 @@ class TerminalPanel {
   static currentPanel = null;
   static extensionUri = null;
   static _testCapture = null;
+  static _testOutgoingCapture = null;
   static variableProvider = null;
+  static _defaultRunCommand = null;
 
   static setExtensionUri(uri) {
     TerminalPanel.extensionUri = uri;
@@ -75,9 +77,27 @@ class TerminalPanel {
           console.log(`[Client Log] ${message.level || 'info'}: ${message.message}`);
         }
       });
+
+      const webview = TerminalPanel.currentPanel.webview;
+      if (webview && typeof webview.postMessage === 'function' && !webview.__stataWorkbenchWrapped) {
+        const originalPostMessage = webview.postMessage.bind(webview);
+        webview.postMessage = (msg) => {
+          try {
+            if (TerminalPanel._testOutgoingCapture) {
+              TerminalPanel._testOutgoingCapture(msg);
+            }
+          } catch (_err) {
+          }
+          return originalPostMessage(msg);
+        };
+        webview.__stataWorkbenchWrapped = true;
+      }
     }
 
     const webview = TerminalPanel.currentPanel.webview;
+    if (typeof runCommand === 'function') {
+      TerminalPanel._defaultRunCommand = runCommand;
+    }
     const nonce = getNonce();
 
     // Convert initial data to history entry format for embedding
@@ -98,21 +118,97 @@ class TerminalPanel {
     const trimmed = (code || '').trim();
     if (!trimmed) return;
 
+    const runId = TerminalPanel._generateRunId();
     webview.postMessage({ type: 'busy', value: true });
+    webview.postMessage({ type: 'runStarted', runId, code: trimmed });
     try {
-      const result = await runCommand(trimmed);
+      const hooks = {
+        onLog: (text) => {
+          if (!text) return;
+          webview.postMessage({ type: 'runLogAppend', runId, text: String(text) });
+        },
+        onProgress: (progress, total, message) => {
+          webview.postMessage({ type: 'runProgress', runId, progress, total, message });
+        }
+      };
+      const result = await runCommand(trimmed, hooks);
       webview.postMessage({
-        type: 'append',
-        entry: toEntry(trimmed, result)
+        type: 'runFinished',
+        runId,
+        rc: typeof result?.rc === 'number' ? result.rc : null,
+        success: isRunSuccess(result),
+        durationMs: result?.durationMs ?? null,
+        stdout: result?.stdout || result?.contentText || '',
+        stderr: result?.stderr || '',
+        artifacts: normalizeArtifacts(result),
+        baseDir: result?.cwd || ''
       });
     } catch (error) {
-      webview.postMessage({
-        type: 'error',
-        message: error?.message || String(error)
-      });
+      webview.postMessage({ type: 'runFailed', runId, message: error?.message || String(error) });
     } finally {
       webview.postMessage({ type: 'busy', value: false });
     }
+  }
+
+  static startStreamingEntry(code, filePath, runCommand, variableProvider) {
+    const trimmed = (code || '').trim();
+    if (!trimmed) return null;
+
+    if (!TerminalPanel.currentPanel) {
+      TerminalPanel.show({
+        filePath,
+        initialCode: null,
+        initialResult: null,
+        runCommand: runCommand || TerminalPanel._defaultRunCommand || (async () => { throw new Error('Session not fully initialized'); }),
+        variableProvider: variableProvider || TerminalPanel.variableProvider
+      });
+    }
+
+    if (!TerminalPanel.currentPanel) return null;
+    const webview = TerminalPanel.currentPanel.webview;
+    const runId = TerminalPanel._generateRunId();
+    webview.postMessage({ type: 'busy', value: true });
+    webview.postMessage({ type: 'runStarted', runId, code: trimmed });
+    TerminalPanel.currentPanel.reveal(vscode.ViewColumn.Beside);
+    return runId;
+  }
+
+  static appendStreamingLog(runId, text) {
+    if (!TerminalPanel.currentPanel || !runId) return;
+    const chunk = String(text ?? '');
+    if (!chunk) return;
+    TerminalPanel.currentPanel.webview.postMessage({ type: 'runLogAppend', runId, text: chunk });
+  }
+
+  static updateStreamingProgress(runId, progress, total, message) {
+    if (!TerminalPanel.currentPanel || !runId) return;
+    TerminalPanel.currentPanel.webview.postMessage({ type: 'runProgress', runId, progress, total, message });
+  }
+
+  static finishStreamingEntry(runId, result) {
+    if (!TerminalPanel.currentPanel || !runId) return;
+    TerminalPanel.currentPanel.webview.postMessage({
+      type: 'runFinished',
+      runId,
+      rc: typeof result?.rc === 'number' ? result.rc : null,
+      success: isRunSuccess(result),
+      durationMs: result?.durationMs ?? null,
+      stdout: result?.stdout || result?.contentText || '',
+      stderr: result?.stderr || '',
+      artifacts: normalizeArtifacts(result),
+      baseDir: result?.cwd || ''
+    });
+    TerminalPanel.currentPanel.webview.postMessage({ type: 'busy', value: false });
+  }
+
+  static failStreamingEntry(runId, errorMessage) {
+    if (!TerminalPanel.currentPanel || !runId) return;
+    TerminalPanel.currentPanel.webview.postMessage({ type: 'runFailed', runId, message: errorMessage });
+    TerminalPanel.currentPanel.webview.postMessage({ type: 'busy', value: false });
+  }
+
+  static _generateRunId() {
+    return `run_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
   }
 
   /**
@@ -443,6 +539,103 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
         window.scrollTo(0, document.body.scrollHeight);
     }
 
+    const runs = Object.create(null);
+
+    function ensureRunGroup(runId, code) {
+        if (runs[runId]) return runs[runId];
+
+        const lastGroup = chatStream.lastElementChild;
+        if (lastGroup && lastGroup.dataset.optimistic) {
+            lastGroup.remove();
+        }
+
+        if (code) {
+          history.push(code);
+          historyIndex = -1;
+        }
+
+        updateLastCommand(code || '');
+
+        const userHtml = code ? \`
+            <div class="user-bubble">
+                \${window.stataUI.escapeHtml(code)}
+            </div>
+        \` : '';
+
+        const systemHtml = \`
+            <div class="system-bubble">
+               <div class="output-card">
+                  <div class="output-header">
+                      <div class="flex items-center gap-xs">
+                        <span class="text-muted" id="run-status-dot-\${runId}" style="color: var(--accent-warning); font-size:16px;">●</span>
+                        <span id="run-status-title-\${runId}">Stata Output (running…)</span>
+                      </div>
+                      <div class="flex items-center gap-sm">
+                         <span id="run-rc-\${runId}"></span>
+                         <span id="run-duration-\${runId}"></span>
+                      </div>
+                  </div>
+                  <div class="output-progress" id="run-progress-wrap-\${runId}" style="display:none;">
+                      <div class="progress-row">
+                         <span class="progress-text" id="run-progress-text-\${runId}"></span>
+                         <span class="progress-meta" id="run-progress-meta-\${runId}"></span>
+                      </div>
+                      <div class="progress-bar"><div class="progress-fill" id="run-progress-fill-\${runId}" style="width:0%;"></div></div>
+                  </div>
+                  <div class="output-content error" id="run-stderr-\${runId}" style="display:none;"></div>
+                  <div class="output-content" id="run-stdout-\${runId}"></div>
+               </div>
+               <div id="run-artifacts-\${runId}"></div>
+            </div>
+        \`;
+
+        const div = document.createElement('div');
+        div.className = 'message-group entry';
+        div.dataset.runId = runId;
+        div.innerHTML = userHtml + systemHtml;
+        chatStream.appendChild(div);
+        scrollToBottom();
+
+        runs[runId] = {
+            group: div,
+            stdoutEl: document.getElementById(\`run-stdout-\${runId}\`),
+            stderrEl: document.getElementById(\`run-stderr-\${runId}\`),
+            progressWrap: document.getElementById(\`run-progress-wrap-\${runId}\`),
+            progressText: document.getElementById(\`run-progress-text-\${runId}\`),
+            progressMeta: document.getElementById(\`run-progress-meta-\${runId}\`),
+            progressFill: document.getElementById(\`run-progress-fill-\${runId}\`),
+            statusDot: document.getElementById(\`run-status-dot-\${runId}\`),
+            statusTitle: document.getElementById(\`run-status-title-\${runId}\`),
+            rcEl: document.getElementById(\`run-rc-\${runId}\`),
+            durationEl: document.getElementById(\`run-duration-\${runId}\`),
+            artifactsEl: document.getElementById(\`run-artifacts-\${runId}\`)
+        };
+
+        return runs[runId];
+    }
+
+    function renderArtifacts(artifacts) {
+        if (!artifacts || !Array.isArray(artifacts) || artifacts.length === 0) return '';
+        const items = artifacts.map(a => {
+            const label = window.stataUI.escapeHtml(a.label);
+            const isImg = (a.previewDataUri || a.dataUri) && (a.previewDataUri || a.dataUri).startsWith('data:');
+            const imgSrc = a.previewDataUri || a.dataUri;
+            const icon = isImg ? \`<img src="\${imgSrc}" style="width:100%; height:100%; object-fit:cover; border-radius:4px;">\` : '<span style="font-size:16px;">📄</span>';
+            return \`
+                <div class="artifact-card" data-action="open-artifact" data-path="\${window.stataUI.escapeHtml(a.path)}" data-basedir="\${window.stataUI.escapeHtml(a.baseDir || '')}" data-label="\${label}">
+                    <div class="artifact-icon">
+                        \${icon}
+                    </div>
+                    <div class="artifact-info">
+                        <div class="artifact-name">\${label}</div>
+                        <div class="artifact-meta">Click to open</div>
+                    </div>
+                </div>
+            \`;
+        }).join('');
+        return \`<div class="artifact-grid">\${items}</div>\`;
+    }
+
     window.addEventListener('message', event => {
       const msg = event.data;
       if (msg.type === 'init') {
@@ -453,6 +646,101 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
         appendEntry(msg.entry);
       }
       if (msg.type === 'busy') setBusy(msg.value);
+
+      if (msg.type === 'runStarted') {
+        const runId = msg.runId;
+        const code = String(msg.code || '');
+        ensureRunGroup(runId, code);
+      }
+
+      if (msg.type === 'runLogAppend') {
+        const runId = msg.runId;
+        const run = runs[runId];
+        if (!run || !run.stdoutEl) return;
+        const chunk = String(msg.text ?? '');
+        if (!chunk) return;
+        run.stdoutEl.textContent += chunk;
+        if (isAtBottom()) scrollToBottom();
+      }
+
+      if (msg.type === 'runProgress') {
+        const runId = msg.runId;
+        const run = runs[runId];
+        if (!run) return;
+        const progress = msg.progress;
+        const total = msg.total;
+        const message = msg.message;
+        if (run.progressWrap) run.progressWrap.style.display = 'block';
+        if (run.progressText) run.progressText.textContent = message ? String(message) : '';
+        let pct = null;
+        if (typeof progress === 'number' && typeof total === 'number' && total > 0) {
+            pct = Math.max(0, Math.min(100, (progress / total) * 100));
+            if (run.progressMeta) run.progressMeta.textContent = String(progress) + '/' + String(total);
+        } else if (typeof progress === 'number') {
+            if (run.progressMeta) run.progressMeta.textContent = String(progress);
+        } else {
+            if (run.progressMeta) run.progressMeta.textContent = '';
+        }
+        if (run.progressFill) {
+            run.progressFill.style.width = pct == null ? '0%' : (pct.toFixed(0) + '%');
+        }
+      }
+
+      if (msg.type === 'runFinished') {
+        const runId = msg.runId;
+        const run = runs[runId];
+        if (!run) return;
+
+        const success = msg.success === true;
+        if (run.statusDot) {
+            run.statusDot.style.color = success ? 'var(--accent-success)' : 'var(--accent-error)';
+        }
+        if (run.statusTitle) {
+            run.statusTitle.textContent = 'Stata Output';
+        }
+
+        if (run.rcEl) {
+            run.rcEl.textContent = (msg.rc !== null && msg.rc !== undefined) ? ('RC ' + String(msg.rc)) : '';
+        }
+        if (run.durationEl) {
+            run.durationEl.textContent = msg.durationMs ? window.stataUI.formatDuration(msg.durationMs) : '';
+        }
+
+        const stderr = String(msg.stderr || '');
+        if (stderr && run.stderrEl) {
+            run.stderrEl.style.display = 'block';
+            run.stderrEl.textContent = stderr;
+        }
+
+        // Only backfill stdout if nothing was streamed (streamed transcript is canonical).
+        const finalStdout = String(msg.stdout || '');
+        if (finalStdout && run.stdoutEl && !run.stdoutEl.textContent) {
+            run.stdoutEl.textContent = finalStdout;
+        }
+
+        if (run.progressWrap) {
+            // Keep progress visible if it was ever shown, but it is now final.
+            if (run.progressText) run.progressText.textContent = '';
+            if (run.progressMeta) run.progressMeta.textContent = '';
+        }
+
+        const artifactsHtml = renderArtifacts(msg.artifacts);
+        if (run.artifactsEl) {
+            run.artifactsEl.innerHTML = artifactsHtml;
+        }
+      }
+
+      if (msg.type === 'runFailed') {
+        const runId = msg.runId;
+        const run = runs[runId];
+        if (!run) return;
+        if (run.statusDot) run.statusDot.style.color = 'var(--accent-error)';
+        if (run.statusTitle) run.statusTitle.textContent = 'Stata Output (failed)';
+        if (run.stderrEl) {
+            run.stderrEl.style.display = 'block';
+            run.stderrEl.textContent = String(msg.message || 'Unknown error');
+        }
+      }
 
       if (msg.type === 'variables') {
         variablesPending = false;
@@ -473,7 +761,7 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
       if (msg.type === 'error') {
         const div = document.createElement('div');
         div.className = 'message-group';
-        div.innerHTML = \`<div class="system-bubble"><div class="output-content error">\${window.stataUI.escapeHtml(msg.message)}</div></div>\`;
+        div.innerHTML = '<div class="system-bubble"><div class="output-content error">' + window.stataUI.escapeHtml(msg.message) + '</div></div>';
         chatStream.appendChild(div);
         setBusy(false);
         const lastGroup = chatStream.lastElementChild;
