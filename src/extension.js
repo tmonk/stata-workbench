@@ -97,7 +97,8 @@ function activate(context) {
     // Expose API for testing
     if (context.extensionMode === vscode.ExtensionMode.Test) {
         return {
-            TerminalPanel
+            TerminalPanel,
+            downloadGraphAsPdf
         };
     }
 }
@@ -307,8 +308,11 @@ function getMcpConfigTarget(context) {
     const { configPath, prefersCursorFormat } = resolved;
     return {
         configPath,
-        writeVscode: true,
-        writeCursor: prefersCursorFormat
+        // Only one entry per host:
+        // - VS Code / Insiders -> servers
+        // - Cursor / Windsurf / Antigravity -> mcpServers
+        writeVscode: !prefersCursorFormat,
+        writeCursor: !!prefersCursorFormat
     };
 }
 
@@ -369,34 +373,59 @@ function writeMcpConfig(target) {
         const dir = path.dirname(configPath);
         fs.mkdirSync(dir, { recursive: true });
         const raw = fs.existsSync(configPath) ? fs.readFileSync(configPath, 'utf8') : '';
-        let json;
-        try {
-            json = raw ? JSON.parse(raw) : {};
-        } catch (_err) {
-            json = {};
+        const parsed = safeParseJson(raw);
+        if (parsed.error) {
+            outputChannel?.appendLine?.(`Skipping MCP config update: could not parse ${configPath} (${parsed.error.message || parsed.error})`);
+            return;
         }
+        const json = parsed.data && typeof parsed.data === 'object' ? parsed.data : {};
+
+        // Only write the format appropriate for the host app.
+        const shouldWriteCursor = !!writeCursor;
+        const shouldWriteVscode = !!writeVscode;
 
         const resolvedCommand = uvCommand || 'uvx';
         const expectedArgs = ['--refresh', '--from', MCP_PACKAGE_SPEC, MCP_PACKAGE_NAME];
 
-        if (writeCursor) {
+        const existingCursor = json.mcpServers?.[MCP_SERVER_ID];
+        const existingVscode = json.servers?.[MCP_SERVER_ID];
+
+        const mergedEnvForCursor = {
+            ...(existingVscode?.env || {}),
+            ...(existingCursor?.env || {})
+        };
+        const mergedEnvForVscode = {
+            ...(existingCursor?.env || {}),
+            ...(existingVscode?.env || {})
+        };
+
+        if (shouldWriteCursor) {
             json.mcpServers = json.mcpServers || {};
             const expectedCursor = {
                 command: resolvedCommand,
                 args: expectedArgs
             };
 
-            const existingCursor = json.mcpServers[MCP_SERVER_ID];
-            if (!configsMatch(existingCursor, expectedCursor, false)) {
-                json.mcpServers[MCP_SERVER_ID] = {
-                    ...existingCursor,
-                    ...expectedCursor
-                };
+            const baseCursor = existingCursor ? { ...existingCursor } : {};
+            if (Object.keys(mergedEnvForCursor).length) {
+                baseCursor.env = mergedEnvForCursor;
+            }
+
+            const nextCursor = mergeConfigEntry(baseCursor, expectedCursor);
+            const changed = JSON.stringify(nextCursor) !== JSON.stringify(existingCursor || {});
+            json.mcpServers[MCP_SERVER_ID] = nextCursor;
+            if (changed) {
                 outputChannel?.appendLine?.(`Updated Cursor MCP config at ${configPath} for ${MCP_SERVER_ID}`);
+            }
+
+            // Do not touch non-mcp_stata entries. Only remove mcp_stata from the opposite container.
+            if (json.servers && json.servers[MCP_SERVER_ID]) {
+                delete json.servers[MCP_SERVER_ID];
+                outputChannel?.appendLine?.(`Removed VS Code MCP entry for ${MCP_SERVER_ID} to keep single source (Cursor host).`);
             }
         }
 
-        if (writeVscode) {
+        if (shouldWriteVscode) {
             json.servers = json.servers || {};
             const expectedVscode = {
                 type: 'stdio',
@@ -404,14 +433,31 @@ function writeMcpConfig(target) {
                 args: expectedArgs
             };
 
-            const existingVscode = json.servers[MCP_SERVER_ID];
-            if (!configsMatch(existingVscode, expectedVscode, true)) {
-                json.servers[MCP_SERVER_ID] = {
-                    ...existingVscode,
-                    ...expectedVscode
-                };
+            const baseVscode = existingVscode ? { ...existingVscode } : {};
+            if (Object.keys(mergedEnvForVscode).length) {
+                baseVscode.env = mergedEnvForVscode;
+            }
+
+            const nextVscode = mergeConfigEntry(baseVscode, expectedVscode);
+            const changed = JSON.stringify(nextVscode) !== JSON.stringify(existingVscode || {});
+            json.servers[MCP_SERVER_ID] = nextVscode;
+            if (changed) {
                 outputChannel?.appendLine?.(`Updated VS Code MCP config at ${configPath} for ${MCP_SERVER_ID}`);
             }
+
+            // Do not touch non-mcp_stata entries. Only remove mcp_stata from the opposite container.
+            if (json.mcpServers && json.mcpServers[MCP_SERVER_ID]) {
+                delete json.mcpServers[MCP_SERVER_ID];
+                outputChannel?.appendLine?.(`Removed Cursor MCP entry for ${MCP_SERVER_ID} to keep single source (VS Code host).`);
+            }
+        }
+
+        // Clean up empty containers
+        if (json.servers && Object.keys(json.servers).length === 0) {
+            delete json.servers;
+        }
+        if (json.mcpServers && Object.keys(json.mcpServers).length === 0) {
+            delete json.mcpServers;
         }
 
         fs.writeFileSync(configPath, JSON.stringify(json, null, 2));
@@ -432,6 +478,33 @@ function configsMatch(existing, expected, hasType) {
     if (existing.command !== expected.command) return false;
     if (!Array.isArray(existing.args) || existing.args.length !== expected.args.length) return false;
     return existing.args.every((v, i) => v === expected.args[i]);
+}
+
+function safeParseJson(raw) {
+    if (!raw) return { data: {} };
+    try {
+        return { data: JSON.parse(raw) };
+    } catch (_err) {
+        const stripped = raw
+            // Remove // and /* */ comments
+            .replace(/\/\*[^]*?\*\//g, '')
+            .replace(/(^|\s)\/\/.*$/gm, '')
+            // Remove trailing commas before } or ]
+            .replace(/,\s*([}\]])/g, '$1');
+        try {
+            return { data: JSON.parse(stripped) };
+        } catch (err) {
+            return { data: {}, error: err };
+        }
+    }
+}
+
+function mergeConfigEntry(existing, expected) {
+    const base = (existing && typeof existing === 'object') ? { ...existing } : {};
+    base.type = expected.type ?? base.type;
+    base.command = expected.command ?? base.command;
+    base.args = expected.args ?? base.args;
+    return base;
 }
 
 function deactivate() {
@@ -1285,5 +1358,6 @@ module.exports = {
     getUvInstallCommand,
     promptInstallMcpCli,
     hasExistingMcpConfig,
-    getMcpConfigTarget
+    getMcpConfigTarget,
+    downloadGraphAsPdf
 };

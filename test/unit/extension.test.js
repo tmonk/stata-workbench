@@ -48,58 +48,7 @@ describe('extension refreshMcpPackage', () => {
         assert.isTrue(spawnSync.calledOnce, 'spawnSync should be invoked');
     });
 
-    it('writeMcpConfig updates VS Code and Cursor configs with --refresh', () => {
-        const writeFileSync = sinon.stub();
-        const readFileSync = sinon.stub();
-        const existsSync = sinon.stub().returns(true);
-
-        readFileSync.onCall(0).returns(JSON.stringify({
-            servers: {
-                mcp_stata: {
-                    type: 'stdio',
-                    command: 'uvx',
-                    args: ['--from', 'mcp-stata@latest', 'mcp-stata']
-                }
-            },
-            mcpServers: {
-                mcp_stata: {
-                    command: 'uvx',
-                    args: ['--from', 'mcp-stata@latest', 'mcp-stata']
-                }
-            }
-        }));
-
-        const extensionWithFs = proxyquire.noCallThru().load('../../src/extension', {
-            vscode: buildVscodeMock(),
-            './mcp-client': { client: { setLogger: () => { }, onStatusChanged: () => ({ dispose() { } }) } },
-            './terminal-panel': { TerminalPanel: { setExtensionUri: () => { }, addEntry: () => { }, show: () => { } } },
-            './artifact-utils': { openArtifact: () => { } },
-            fs: {
-                mkdirSync: sinon.stub(),
-                writeFileSync,
-                existsSync,
-                readFileSync
-            },
-            child_process: { spawnSync: sinon.stub() }
-        });
-
-        const { writeMcpConfig } = extensionWithFs;
-
-        writeMcpConfig({
-            configPath: '/tmp/user/globalStorage/mcp.json',
-            writeVscode: true,
-            writeCursor: true
-        });
-
-        assert.isTrue(writeFileSync.calledOnce, 'writes once to shared user config');
-        const updated = JSON.parse(writeFileSync.firstCall.args[1]);
-        const serverArgs = updated.servers.mcp_stata.args;
-        const cursorArgs = updated.mcpServers.mcp_stata.args;
-        assert.deepEqual(serverArgs.slice(0, 3), ['--refresh', '--from', 'mcp-stata@latest']);
-        assert.deepEqual(cursorArgs.slice(0, 3), ['--refresh', '--from', 'mcp-stata@latest']);
-    });
-
-    it('writeMcpConfig preserves custom env and settings', () => {
+    it('writeMcpConfig (VS Code host) writes only servers entry, merges env, and removes cursor mcp_stata', () => {
         const writeFileSync = sinon.stub();
         const readFileSync = sinon.stub();
         const existsSync = sinon.stub().returns(true);
@@ -111,7 +60,13 @@ describe('extension refreshMcpPackage', () => {
                     command: 'uvx',
                     args: ['--from', 'mcp-stata@latest', 'mcp-stata'],
                     env: { STATA_HOME: '/opt/stata' },
-                    customField: 'keep-me'
+                    note: 'keep-me'
+                },
+                other_server: {
+                    type: 'stdio',
+                    command: 'foo',
+                    args: ['bar'],
+                    env: { KEEP: 'me' }
                 }
             },
             mcpServers: {
@@ -120,6 +75,11 @@ describe('extension refreshMcpPackage', () => {
                     args: ['--from', 'mcp-stata@latest', 'mcp-stata'],
                     env: { STATA_LICENSE: 'abc' },
                     retry: 3
+                },
+                other_cursor: {
+                    command: 'baz',
+                    args: ['qux'],
+                    env: { ALSO: 'keep' }
                 }
             }
         }));
@@ -143,21 +103,112 @@ describe('extension refreshMcpPackage', () => {
         writeMcpConfig({
             configPath: '/tmp/user/globalStorage/mcp.json',
             writeVscode: true,
-            writeCursor: true
+            writeCursor: false
         });
 
         assert.isTrue(writeFileSync.calledOnce, 'writes once to shared user config');
         const updated = JSON.parse(writeFileSync.firstCall.args[1]);
         const serverEntry = updated.servers.mcp_stata;
-        const cursorEntry = updated.mcpServers.mcp_stata;
-
-        assert.deepEqual(serverEntry.env, { STATA_HOME: '/opt/stata' });
-        assert.equal(serverEntry.customField, 'keep-me');
         assert.deepEqual(serverEntry.args.slice(0, 3), ['--refresh', '--from', 'mcp-stata@latest']);
+        // env merged from both containers
+        assert.deepEqual(serverEntry.env, { STATA_LICENSE: 'abc', STATA_HOME: '/opt/stata' });
+        assert.equal(serverEntry.note, 'keep-me');
+        // other entries untouched
+        assert.deepEqual(updated.servers.other_server, {
+            type: 'stdio',
+            command: 'foo',
+            args: ['bar'],
+            env: { KEEP: 'me' }
+        });
+        // cursor mcp_stata removed but other cursor entries kept
+        assert.property(updated, 'mcpServers');
+        assert.notProperty(updated.mcpServers, 'mcp_stata');
+        assert.deepEqual(updated.mcpServers.other_cursor, {
+            command: 'baz',
+            args: ['qux'],
+            env: { ALSO: 'keep' }
+        });
+    });
 
-        assert.deepEqual(cursorEntry.env, { STATA_LICENSE: 'abc' });
-        assert.equal(cursorEntry.retry, 3);
+    it('writeMcpConfig (Cursor host) writes only mcpServers entry, merges env, and removes VS Code mcp_stata', () => {
+        const writeFileSync = sinon.stub();
+        const readFileSync = sinon.stub();
+        const existsSync = sinon.stub().returns(true);
+
+        readFileSync.onCall(0).returns(JSON.stringify({
+            servers: {
+                mcp_stata: {
+                    type: 'stdio',
+                    command: 'uvx',
+                    args: ['--from', 'mcp-stata@latest', 'mcp-stata'],
+                    env: { STATA_HOME: '/opt/stata' },
+                    note: 'keep-me'
+                },
+                other_server: {
+                    type: 'stdio',
+                    command: 'foo',
+                    args: ['bar'],
+                    env: { KEEP: 'me' }
+                }
+            },
+            mcpServers: {
+                mcp_stata: {
+                    command: 'uvx',
+                    args: ['--from', 'mcp-stata@latest', 'mcp-stata'],
+                    env: { STATA_LICENSE: 'abc' },
+                    retry: 3
+                },
+                other_cursor: {
+                    command: 'baz',
+                    args: ['qux'],
+                    env: { ALSO: 'keep' }
+                }
+            }
+        }));
+
+        const extensionWithFs = proxyquire.noCallThru().load('../../src/extension', {
+            vscode: buildVscodeMock(),
+            './mcp-client': { client: { setLogger: () => { }, onStatusChanged: () => ({ dispose() { } }) } },
+            './terminal-panel': { TerminalPanel: { setExtensionUri: () => { }, addEntry: () => { }, show: () => { } } },
+            './artifact-utils': { openArtifact: () => { } },
+            fs: {
+                mkdirSync: sinon.stub(),
+                writeFileSync,
+                existsSync,
+                readFileSync
+            },
+            child_process: { spawnSync: sinon.stub() }
+        });
+
+        const { writeMcpConfig } = extensionWithFs;
+
+        writeMcpConfig({
+            configPath: '/tmp/user/globalStorage/mcp.json',
+            writeVscode: false,
+            writeCursor: true
+        });
+
+        assert.isTrue(writeFileSync.calledOnce, 'writes once to shared user config');
+        const updated = JSON.parse(writeFileSync.firstCall.args[1]);
+        const cursorEntry = updated.mcpServers.mcp_stata;
         assert.deepEqual(cursorEntry.args.slice(0, 3), ['--refresh', '--from', 'mcp-stata@latest']);
+        assert.deepEqual(cursorEntry.env, { STATA_HOME: '/opt/stata', STATA_LICENSE: 'abc' });
+        assert.equal(cursorEntry.retry, 3);
+        // other cursor entries untouched
+        assert.deepEqual(updated.mcpServers.other_cursor, {
+            command: 'baz',
+            args: ['qux'],
+            env: { ALSO: 'keep' }
+        });
+        // VS Code mcp_stata removed but other servers retained
+        assert.property(updated, 'servers');
+        assert.notProperty(updated.servers, 'mcp_stata');
+        assert.deepEqual(updated.servers.other_server, {
+            type: 'stdio',
+            command: 'foo',
+            args: ['bar'],
+            env: { KEEP: 'me' }
+        });
     });
 
     describe('getUvInstallCommand', () => {
@@ -472,7 +523,7 @@ describe('extension refreshMcpPackage', () => {
             const target = extWithFs.getMcpConfigTarget(ctx);
             assert.equal(target.configPath, '/tmp/override/mcp.json');
             assert.isTrue(target.writeCursor);
-            assert.isTrue(target.writeVscode);
+            assert.isFalse(target.writeVscode);
         });
 
         it('falls back to home/AppData/Roaming when APPDATA unset', () => {

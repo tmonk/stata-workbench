@@ -1,9 +1,11 @@
 const { EventEmitter } = require('events');
 const path = require('path');
 const fs = require('fs');
+const os = require('os');
 const vscode = require('vscode');
 const pkg = require('../package.json');
 const MCP_PACKAGE_NAME = 'mcp-stata';
+const MCP_SERVER_ID = 'mcp_stata';
 const MCP_PACKAGE_SPEC = process.env.MCP_STATA_PACKAGE_SPEC || `${MCP_PACKAGE_NAME}@latest`;
 
 // The MCP SDK exposes a stdio client transport we can use for VS Code.
@@ -359,6 +361,7 @@ class StataMcpClient {
         })();
 
         const uvCommand = process.env.MCP_STATA_UVX_CMD || 'uvx';
+        const configuredEnv = this._loadConfiguredEnv();
         const transport = new StdioClientTransport({
             command: uvCommand,
             args: ['--from', MCP_PACKAGE_SPEC, MCP_PACKAGE_NAME],
@@ -366,6 +369,7 @@ class StataMcpClient {
             cwd: this._resolveWorkspaceRoot(),
             env: {
                 ...process.env,
+                ...configuredEnv,
                 STATA_SETUP_TIMEOUT: setupTimeoutSeconds
             }
         });
@@ -1275,6 +1279,100 @@ class StataMcpClient {
         if (error.name === 'AbortError') return true;
         const message = String(error?.message || error || '').toLowerCase();
         return message.includes('cancelled') || message.includes('canceled') || message.includes('abort');
+    }
+
+    _loadConfiguredEnv() {
+        const env = {};
+        for (const configPath of this._candidateMcpConfigPaths()) {
+            if (!configPath) continue;
+            try {
+                if (!fs.existsSync(configPath)) continue;
+                const raw = fs.readFileSync(configPath, 'utf8');
+                const parsed = this._safeParseJson(raw);
+                const entry = parsed?.servers?.[MCP_SERVER_ID] || parsed?.mcpServers?.[MCP_SERVER_ID];
+                if (entry && typeof entry.env === 'object' && entry.env !== null) {
+                    Object.assign(env, entry.env);
+                }
+            } catch (err) {
+                this._log(`[mcp-stata] Failed to read MCP env from ${configPath}: ${err?.message || err}`);
+            }
+        }
+        return env;
+    }
+
+    _candidateMcpConfigPaths() {
+        const paths = new Set();
+        const workspaceRoot = this._resolveWorkspaceRoot();
+        if (workspaceRoot) {
+            paths.add(path.join(workspaceRoot, '.vscode', 'mcp.json'));
+        }
+
+        const hostConfig = this._resolveHostMcpPath();
+        if (hostConfig) {
+            paths.add(hostConfig);
+        }
+
+        return Array.from(paths).filter(Boolean);
+    }
+
+    _resolveHostMcpPath() {
+        const appName = (vscode.env?.appName || '').toLowerCase();
+        const home = os.homedir();
+        const platform = process.platform;
+        const codePath = (codeDir) => {
+            if (!home) return null;
+            if (platform === 'darwin') return path.join(home, 'Library', 'Application Support', codeDir, 'User', 'mcp.json');
+            if (platform === 'win32') {
+                const envAppData = (process.env.APPDATA && process.env.APPDATA !== 'undefined' && process.env.APPDATA !== 'null' && process.env.APPDATA !== '')
+                    ? process.env.APPDATA
+                    : null;
+                const roaming = envAppData || (home ? path.join(home, 'AppData', 'Roaming') : null);
+                if (!roaming) return null;
+                return path.join(roaming, codeDir, 'User', 'mcp.json');
+            }
+            return path.join(home, '.config', codeDir, 'User', 'mcp.json');
+        };
+
+        if (appName.includes('cursor')) {
+            return home ? path.join(home, '.cursor', 'mcp.json') : null;
+        }
+
+        if (appName.includes('windsurf')) {
+            return home ? path.join(home, '.codeium', 'mcp_config.json') : null;
+        }
+
+        if (appName.includes('antigravity')) {
+            if (!home) return null;
+            if (platform === 'darwin') {
+                return path.join(home, 'Library', 'Application Support', 'Antigravity', 'User', 'mcp.json');
+            }
+            if (platform === 'win32') {
+                const roaming = process.env.APPDATA || path.join(home, 'AppData', 'Roaming');
+                return path.join(roaming, 'Antigravity', 'User', 'mcp.json');
+            }
+            return path.join(home, '.antigravity', 'mcp.json');
+        }
+
+        const isInsiders = appName.includes('insider');
+        const codeDir = isInsiders ? 'Code - Insiders' : 'Code';
+        return codePath(codeDir);
+    }
+
+    _safeParseJson(raw) {
+        if (!raw) return {};
+        try {
+            return JSON.parse(raw);
+        } catch (_err) {
+            try {
+                const stripped = raw
+                    .replace(/\/\*[^]*?\*\//g, '')
+                    .replace(/(^|\s)\/\/.*$/gm, '')
+                    .replace(/,\s*([}\]])/g, '$1');
+                return JSON.parse(stripped);
+            } catch (__err) {
+                return {};
+            }
+        }
     }
 }
 
