@@ -55,6 +55,11 @@ suite('McpClient integration (VS Code host)', function () {
         if (client?.dispose) {
             await client.dispose();
         }
+        // Reset workspace configuration to avoid pointing at deleted temp dirs for later suites.
+        if (enabled) {
+            const config = vscode.workspace.getConfiguration('stataMcp');
+            await config.update('runFileWorkingDirectory', '', vscode.ConfigurationTarget.Workspace);
+        }
         if (tempRoot && fs.existsSync(tempRoot)) {
             fs.rmSync(tempRoot, { recursive: true, force: true });
         }

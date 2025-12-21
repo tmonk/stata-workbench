@@ -169,6 +169,28 @@ describe('Panels', () => {
 
                 assert.isTrue(stub.calledOnce);
             });
+
+            it('startStreamingEntry wires cancel handler and passes through show', () => {
+                const { TerminalPanel } = terminalPanelModule;
+                const cancelStub = () => {};
+                const runStub = () => {};
+                const varStub = () => [];
+                let capturedOptions = null;
+
+                const originalShow = TerminalPanel.show;
+                TerminalPanel.show = (opts) => {
+                    capturedOptions = opts;
+                };
+
+                TerminalPanel.currentPanel = null;
+                TerminalPanel.startStreamingEntry('code', '/tmp/x', runStub, varStub, cancelStub);
+
+                assert.strictEqual(TerminalPanel._cancelHandler, cancelStub);
+                assert.strictEqual(capturedOptions.cancelRun, cancelStub);
+
+                TerminalPanel.show = originalShow;
+                TerminalPanel.currentPanel = null;
+            });
         });
     });
 });

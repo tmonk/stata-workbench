@@ -191,6 +191,29 @@ describe('McpClient', () => {
         });
     });
 
+    describe('fetchGraph', () => {
+        it('enqueues export_graph with graph_name and format (no base64)', async () => {
+            const enqueueSpy = sinon.spy(client, '_enqueue');
+            const taskResult = { path: '/tmp/g1.pdf' };
+
+            const callToolStub = client._callTool;
+            callToolStub.callsFake(async (c, name, args) => {
+                assert.equal(name, 'export_graph');
+                assert.deepEqual(args, { graph_name: 'g1', format: 'pdf' });
+                return { content: [{ type: 'text', text: '/tmp/g1.pdf' }] };
+            });
+            client._graphResponseToArtifact = sinon.stub().returns(taskResult);
+
+            const result = await client.fetchGraph('g1');
+
+            assert.strictEqual(result, taskResult);
+            assert.isTrue(enqueueSpy.calledOnce);
+            const [label, options] = enqueueSpy.firstCall.args;
+            assert.equal(label, 'fetch_graph');
+            assert.deepEqual(options, {});
+        });
+    });
+
     describe('getVariableList', () => {
         it('enqueues get_variable_list and returns normalized list', async () => {
             const enqueueStub = sinon.stub(client, '_enqueue').callsFake(async (label, options, task) => {
@@ -291,6 +314,52 @@ describe('McpClient', () => {
             assert.equal(result.taskResult.args.code, 'display "hi"');
 
             enqueueStub.restore();
+        });
+    });
+
+    describe('cancellation', () => {
+        it('passes progressToken and signal to client.request when provided', async () => {
+            const abort = new AbortController();
+            const requestStub = sinon.stub().resolves({ ok: true });
+            const callToolStub = sinon.stub().resolves({});
+            const clientMock = { request: requestStub, callTool: callToolStub };
+
+            await client._callTool(clientMock, 'run_command', { code: 'sleep 10' }, { progressToken: 'p_tok', signal: abort.signal });
+
+            assert.isTrue(requestStub.calledOnce, 'client.request should be used when progressToken exists');
+            const [reqPayload, , options] = requestStub.firstCall.args;
+            assert.deepEqual(reqPayload.params._meta, { progressToken: 'p_tok' });
+            assert.strictEqual(options.signal, abort.signal);
+            assert.isTrue(callToolStub.notCalled, 'callTool should not be used when request path is taken');
+        });
+
+        it('treats AbortError as cancellation and surfaces a friendly message', async () => {
+            const abortErr = new Error('Aborted');
+            abortErr.name = 'AbortError';
+            const callToolStub = sinon.stub().rejects(abortErr);
+            const emitSpy = sinon.spy(client._statusEmitter, 'emit');
+            const clientMock = { callTool: callToolStub };
+
+            let thrown = null;
+            try {
+                await client._callTool(clientMock, 'run_command', { code: 'sleep 10' });
+            } catch (err) {
+                thrown = err;
+            }
+
+            assert.isNotNull(thrown, 'error should be thrown');
+            assert.match(String(thrown?.message || thrown), /cancel/i);
+            assert.isTrue(emitSpy.calledWith('connected'), 'status should reset to connected on cancel');
+            emitSpy.restore();
+        });
+
+        it('cancelAll triggers active cancellation with a reason', async () => {
+            const cancelSpy = sinon.spy();
+            client._activeCancellation = { cancel: cancelSpy };
+            const result = await client.cancelAll();
+            assert.isTrue(result, 'cancelAll should report true');
+            assert.isTrue(cancelSpy.calledOnce);
+            assert.match(String(cancelSpy.firstCall.args[0] || ''), /user cancelled/);
         });
     });
 

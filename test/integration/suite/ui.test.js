@@ -89,4 +89,122 @@ suite('UI Integration', function () {
             }
         }
     });
+
+    test('Download PDF button triggers export_graph and yields PDF path', async () => {
+        if (!enabled) {
+            return;
+        }
+
+        const extension = vscode.extensions.getExtension('tmonk.stata-workbench');
+        assert.ok(extension, 'Extension should be present');
+        if (!extension.isActive) {
+            await extension.activate();
+        }
+        const api = extension.exports;
+        assert.ok(api?.TerminalPanel, 'TerminalPanel should be exported');
+
+        // Prepare a document and create a graph
+        const doc = await vscode.workspace.openTextDocument({ language: 'stata', content: 'sysuse auto\nscatter price mpg, name(gint, replace)' });
+        const editor = await vscode.window.showTextDocument(doc);
+        editor.selection = new vscode.Selection(0, 0, doc.lineCount - 1, doc.lineAt(doc.lineCount - 1).text.length);
+
+        const outgoing = [];
+        api.TerminalPanel._testOutgoingCapture = (msg) => {
+            outgoing.push(msg);
+        };
+
+        // Run selection to create graph
+        await vscode.commands.executeCommand('stata-workbench.runSelection');
+
+        // Wait for run finished
+        let runFinished = null;
+        for (let i = 0; i < 120; i++) {
+            for (const m of outgoing) {
+                if (m?.type === 'runFinished') runFinished = m;
+            }
+            if (runFinished) break;
+            await new Promise(r => setTimeout(r, 500));
+        }
+        assert.ok(runFinished, 'runFinished should arrive');
+        assert.strictEqual(runFinished.success, true, 'graph creation run should succeed');
+
+        // Trigger downloadGraphPdf directly through panel handler
+        let downloadResult = null;
+        api.TerminalPanel._downloadGraphPdf = async (graphName) => {
+            const res = await extension.exports.downloadGraphAsPdf(graphName);
+            downloadResult = res;
+        };
+
+        await api.TerminalPanel._handleDownloadGraphPdf('gint');
+
+        assert.isOk(downloadResult, 'download result should exist');
+        const resolvedPath = downloadResult.path || downloadResult.file_path || downloadResult.url || null;
+        const resolvedDataUri = downloadResult.dataUri || null;
+        assert.isTrue(!!resolvedPath || !!resolvedDataUri, 'download result should contain a path/url or dataUri');
+        if (resolvedPath) {
+            assert.match(resolvedPath, /\.pdf$/i, 'result path/url should be a PDF');
+        }
+        if (resolvedDataUri) {
+            assert.match(resolvedDataUri, /^data:application\/pdf;base64,/i, 'dataUri should be a PDF data URI');
+        }
+    });
+
+    test('Stop button cancels a running command', async () => {
+        if (!enabled) {
+            return;
+        }
+
+        const extension = vscode.extensions.getExtension('tmonk.stata-workbench');
+        assert.ok(extension, 'Extension should be present');
+        if (!extension.isActive) {
+            await extension.activate();
+        }
+        const api = extension.exports;
+        assert.ok(api?.TerminalPanel, 'TerminalPanel should be exported');
+
+        const doc = await vscode.workspace.openTextDocument({ language: 'stata', content: 'sleep 5000' });
+        const editor = await vscode.window.showTextDocument(doc);
+        editor.selection = new vscode.Selection(0, 0, doc.lineCount - 1, doc.lineAt(doc.lineCount - 1).text.length);
+
+        const outgoing = [];
+        api.TerminalPanel._testOutgoingCapture = (msg) => {
+            outgoing.push(msg);
+        };
+
+        // Kick off a long run
+        const runPromise = vscode.commands.executeCommand('stata-workbench.runSelection');
+
+        // Wait for runStarted
+        let runStarted = null;
+        for (let i = 0; i < 40; i++) {
+            for (const m of outgoing) {
+                if (m?.type === 'runStarted') runStarted = m;
+            }
+            if (runStarted) break;
+            await new Promise(r => setTimeout(r, 250));
+        }
+        assert.ok(runStarted, 'runStarted should arrive');
+
+        // Trigger cancel via handler (simulating stop button)
+        await api.TerminalPanel._handleCancelRun();
+
+        let runFinished = null;
+        for (let i = 0; i < 40; i++) {
+            for (const m of outgoing) {
+                if (m?.type === 'runFinished') runFinished = m;
+            }
+            if (runFinished) break;
+            await new Promise(r => setTimeout(r, 250));
+        }
+
+        let cancelledThrown = false;
+        try {
+            await runPromise;
+        } catch (_err) {
+            cancelledThrown = true;
+        }
+
+        // We accept either an explicit runFinished with error or a thrown cancellation
+        assert.isTrue(cancelledThrown || (!!runFinished && runFinished.success === false), 'run should be cancelled or end unsuccessful');
+    });
 });

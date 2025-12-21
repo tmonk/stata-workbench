@@ -231,8 +231,15 @@ class TerminalPanel {
     if (typeof TerminalPanel._downloadGraphPdf !== 'function') return;
     try {
       await TerminalPanel._downloadGraphPdf(graphName);
+      TerminalPanel._postMessage({ type: 'downloadStatus', success: true, graphName });
     } catch (error) {
       console.error('[TerminalPanel] downloadGraphPdf failed:', error);
+      TerminalPanel._postMessage({
+        type: 'downloadStatus',
+        success: false,
+        graphName,
+        message: error?.message || String(error)
+      });
     }
   }
 
@@ -240,31 +247,19 @@ class TerminalPanel {
     if (typeof TerminalPanel._cancelHandler === 'function') {
       try {
         await TerminalPanel._cancelHandler();
+        // Optimistically mark the active run as cancelled in the UI.
+        const runId = TerminalPanel._activeRunId;
+        if (runId) {
+          TerminalPanel._postMessage({ type: 'runCancelled', runId, message: 'Run cancelled by user.' });
+          TerminalPanel._postMessage({ type: 'busy', value: false });
+        }
       } catch (error) {
         console.error('[TerminalPanel] cancelRun failed:', error);
       }
     }
   }
 
-  static async _handleClearAll() {
-    if (typeof TerminalPanel._clearHandler === 'function') {
-      try {
-        TerminalPanel._postMessage({ type: 'busy', value: true });
-        await TerminalPanel._clearHandler();
-      } catch (error) {
-        console.error('[TerminalPanel] clearAll failed:', error);
-      } finally {
-        TerminalPanel._postMessage({ type: 'busy', value: false });
-      }
-      return;
-    }
-    // Fallback: attempt to run clear all through the default runner
-    if (typeof TerminalPanel._defaultRunCommand === 'function') {
-      await TerminalPanel.handleRun('clear all', TerminalPanel._defaultRunCommand);
-    }
-  }
-
-  static startStreamingEntry(code, filePath, runCommand, variableProvider) {
+  static startStreamingEntry(code, filePath, runCommand, variableProvider, cancelRun, downloadGraphPdf) {
     const trimmed = (code || '').trim();
     if (!trimmed) return null;
 
@@ -274,6 +269,12 @@ class TerminalPanel {
     }
     if (typeof runCommand === 'function') {
       TerminalPanel._defaultRunCommand = runCommand;
+    }
+    if (typeof cancelRun === 'function') {
+      TerminalPanel._cancelHandler = cancelRun;
+    }
+    if (typeof downloadGraphPdf === 'function') {
+      TerminalPanel._downloadGraphPdf = downloadGraphPdf;
     }
 
     if (!TerminalPanel.currentPanel) {
@@ -295,17 +296,6 @@ class TerminalPanel {
     TerminalPanel._postMessage({ type: 'runStarted', runId, code: trimmed });
     TerminalPanel.currentPanel.reveal(vscode.ViewColumn.Beside);
     return runId;
-  }
-
-  static _postMessage(msg) {
-    if (!TerminalPanel.currentPanel) return;
-    const webview = TerminalPanel.currentPanel.webview;
-    if (!webview || typeof webview.postMessage !== 'function') return;
-    if (!TerminalPanel._webviewReady) {
-      TerminalPanel._pendingWebviewMessages.push(msg);
-      return;
-    }
-    webview.postMessage(msg);
   }
 
   static appendStreamingLog(runId, text) {
@@ -388,6 +378,34 @@ class TerminalPanel {
     TerminalPanel.currentPanel.reveal(vscode.ViewColumn.Beside);
   }
 
+  static async _handleClearAll() {
+  if (typeof TerminalPanel._clearHandler === 'function') {
+    try {
+      // Clear UI first, before running command
+      TerminalPanel._postMessage({ type: 'cleared' });
+      TerminalPanel._postMessage({ type: 'busy', value: true });
+      await TerminalPanel._clearHandler();
+      // Success - UI already cleared, no need to show anything
+    } catch (error) {
+      console.error('[TerminalPanel] clearAll failed:', error);
+      TerminalPanel._postMessage({ type: 'error', message: 'Failed to clear: ' + error.message });
+    } finally {
+      TerminalPanel._postMessage({ type: 'busy', value: false });
+    }
+    return;
+  }
+  // Fallback: clear UI first, then run command silently
+  TerminalPanel._postMessage({ type: 'cleared' });
+  if (typeof TerminalPanel._defaultRunCommand === 'function') {
+    // Run silently in background without showing in terminal
+    try {
+      await TerminalPanel._defaultRunCommand('clear all', {});
+    } catch (error) {
+      TerminalPanel._postMessage({ type: 'error', message: 'Failed to clear: ' + error.message });
+    }
+  }
+}
+
 }
 
 module.exports = { TerminalPanel, toEntry, normalizeArtifacts };
@@ -395,21 +413,25 @@ module.exports = { TerminalPanel, toEntry, normalizeArtifacts };
 function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = []) {
   const designUri = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'src', 'ui-shared', 'design.css'));
   const mainJsUri = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'src', 'ui-shared', 'main.js'));
+  
   const fileName = filePath ? path.basename(filePath) : 'Terminal Session';
   const escapedTitle = escapeHtml(fileName);
-  const initialJson = JSON.stringify(initialEntries).replace(/</g, '\\u003c'); // Safe JSON embedding
+  const initialJson = JSON.stringify(initialEntries).replace(/</g, '\\u003c');
 
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${webview.cspSource} https: data:; script-src 'nonce-${nonce}' ${webview.cspSource}; style-src 'unsafe-inline' ${webview.cspSource};">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${webview.cspSource} https: data:; script-src 'nonce-${nonce}' ${webview.cspSource}; style-src 'unsafe-inline' ${webview.cspSource} https://unpkg.com; font-src ${webview.cspSource} https://unpkg.com;">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <link rel="stylesheet" href="${designUri}">
   <title>Stata Terminal</title>
   <script nonce="${nonce}">
     window.initialEntries = ${initialJson};
   </script>
+  <style nonce="${nonce}">
+    @import url('https://unpkg.com/@vscode/codicons@0.0.44/dist/codicon.css');
+  </style>
 </head>
 <body>
 
@@ -463,15 +485,15 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
         </div>
         <div class="input-actions">
           <button id="clear-btn" class="btn btn-sm btn-ghost" title="Clear all (Stata)">
-            <span class="icon-eraser" aria-hidden="true">⌧</span>
+            <i class="codicon codicon-trash"></i>
             <span>Clear</span>
           </button>
           <button id="stop-btn" class="btn btn-sm btn-ghost" title="Stop current run">
-            <span class="icon-circle" aria-hidden="true">✕</span>
+            <i class="codicon codicon-debug-stop"></i>
             <span>Stop</span>
           </button>
           <button id="run-btn" class="btn btn-primary btn-sm">
-            <span aria-hidden="true">▶</span>
+            <i class="codicon codicon-play"></i>
             <span>Run</span>
           </button>
         </div>
@@ -535,6 +557,33 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
     const runs = Object.create(null);
 
     let busy = false;
+
+    function clearAllOutput() {
+        // Clear the chat stream
+        if (chatStream) {
+            chatStream.innerHTML = '';
+        }
+        
+        // Reset runs tracking
+        for (const key in runs) {
+            delete runs[key];
+        }
+        
+        // Reset history
+        history.length = 0;
+        historyIndex = -1;
+        
+        // Reset last command display
+        updateLastCommand('—');
+        
+        // Clear any optimistic messages
+        const optimistic = chatStream.querySelectorAll('[data-optimistic="true"]');
+        optimistic.forEach(el => el.remove());
+        
+        // Reset scroll
+        autoScrollPinned = true;
+        scrollToBottom();
+    }
 
     function scrollToBottom() {
         const top = document.body.scrollHeight;
@@ -649,13 +698,19 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
             setTimeout(() => { if (busy) stopBtn.disabled = false; }, 1200);
         });
     }
+
     if (clearBtn) {
-        clearBtn.addEventListener('click', () => {
-            if (busy) return;
-            setBusy(true);
-            vscode.postMessage({ type: 'clearAll' });
-        });
-    }
+    clearBtn.addEventListener('click', () => {
+        if (busy) return;
+        setBusy(true);
+        
+        // Clear UI immediately for better UX
+        clearAllOutput();
+        
+        // Send message to extension to clear Stata session
+        vscode.postMessage({ type: 'clearAll' });
+    });
+}
 
     // Bind shared artifact events (delegated)
     if (window.stataUI && typeof window.stataUI.bindArtifactEvents === 'function') {
@@ -1029,10 +1084,16 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
         }
     });
 
-    console.log('[Modal] Modal script loaded, vscode API:', typeof vscode);
+    console.log('[Modal] Modal script loaded, vscode API:', typeof vscode);    
 
     window.addEventListener('message', event => {
       const msg = event.data;
+      if (msg.type === 'cleared') {
+          clearAllOutput();
+          setBusy(false);
+          return;
+      }
+
       if (msg.type === 'init') {
           // Legacy init support if needed, but we prefer embedded
           if (msg.history) msg.history.forEach(appendEntry);
@@ -1046,6 +1107,34 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
         const runId = msg.runId;
         const code = String(msg.code || '');
         ensureRunGroup(runId, code);
+      }
+
+      if (msg.type === 'runCancelled') {
+        const runId = msg.runId;
+        const run = runs[runId];
+        if (!run) return;
+        if (run.statusDot) run.statusDot.style.color = 'var(--accent-warning)';
+        if (run.statusTitle) run.statusTitle.textContent = 'Stata Output (cancelled)';
+        if (run.stderrEl) {
+            run.stderrEl.style.display = 'block';
+            run.stderrEl.textContent = String(msg.message || 'Run cancelled.');
+        }
+        if (run.progressWrap) {
+            if (run.progressText) run.progressText.textContent = '';
+            if (run.progressMeta) run.progressMeta.textContent = '';
+        }
+        if (autoScrollPinned) scrollToBottomSmooth();
+      }
+
+      if (msg.type === 'downloadStatus') {
+        // Reset modal download button state
+        if (modalDownloadBtn) {
+          modalDownloadBtn.disabled = false;
+          modalDownloadBtn.textContent = 'Download PDF';
+        }
+        if (!msg.success && msg.message) {
+          console.error('[Modal] Download failed:', msg.message);
+        }
       }
 
       if (msg.type === 'runLogAppend') {

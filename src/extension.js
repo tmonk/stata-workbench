@@ -492,7 +492,7 @@ async function runSelection() {
     const cwd = filePath ? path.dirname(filePath) : null;
 
     await withStataProgress('Running selection', async (token) => {
-        const runId = TerminalPanel.startStreamingEntry(text, filePath, terminalRunCommand, variableListProvider);
+        const runId = TerminalPanel.startStreamingEntry(text, filePath, terminalRunCommand, variableListProvider, cancelRequest, downloadGraphAsPdf);
         try {
             const result = await mcpClient.runSelection(text, {
                 cancellationToken: token,
@@ -536,7 +536,7 @@ async function runFile() {
 
     await withStataProgress(`Running ${path.basename(filePath)}`, async (token) => {
         const commandText = `do "${path.basename(filePath)}"`;
-        const runId = TerminalPanel.startStreamingEntry(commandText, filePath, terminalRunCommand, variableListProvider);
+        const runId = TerminalPanel.startStreamingEntry(commandText, filePath, terminalRunCommand, variableListProvider, cancelRequest, downloadGraphAsPdf);
         try {
             const result = await mcpClient.runFile(filePath, {
                 cancellationToken: token,
@@ -700,6 +700,7 @@ async function showGraphs() {
 
 async function downloadGraphAsPdf(graphName) {
     try {
+        revealOutput();
         outputChannel.appendLine(`[Download] Starting PDF export for: ${graphName}`);
         
         // Request PDF export from MCP server
@@ -710,19 +711,24 @@ async function downloadGraphAsPdf(graphName) {
         // Extract the PDF data
         let pdfData = null;
         let pdfPath = null;
+        let savedPath = null;
         
         // Check if response has base64 data
         if (response?.data && response?.mimeType === 'application/pdf') {
             pdfData = response.data;
             outputChannel.appendLine('[Download] Found base64 data in response.data');
-        } else if (response?.dataUri && response.dataUri.startsWith('data:application/pdf')) {
-            // Extract base64 from data URI
+        }
+
+        // Check dataUri regardless of path presence
+        if (!pdfData && response?.dataUri && response.dataUri.startsWith('data:application/pdf')) {
             const base64Match = response.dataUri.match(/^data:application\/pdf;base64,(.+)$/);
             if (base64Match) {
                 pdfData = base64Match[1];
                 outputChannel.appendLine('[Download] Extracted base64 from dataUri');
             }
-        } else if (response?.path || response?.file_path) {
+        }
+
+        if (!pdfData && (response?.path || response?.file_path)) {
             pdfPath = response.path || response.file_path;
             outputChannel.appendLine(`[Download] Found file path: ${pdfPath}`);
         }
@@ -745,10 +751,11 @@ async function downloadGraphAsPdf(graphName) {
             if (saveUri) {
                 outputChannel.appendLine(`[Download] Saving to: ${saveUri.fsPath}`);
                 await vscode.workspace.fs.writeFile(saveUri, buffer);
-                vscode.window.showInformationMessage(`Graph saved to ${saveUri.fsPath}`);
                 outputChannel.appendLine('[Download] Save complete!');
+                savedPath = saveUri.fsPath;
             } else {
                 outputChannel.appendLine('[Download] User cancelled save dialog');
+                savedPath = null;
             }
         } else if (pdfPath && fs.existsSync(pdfPath)) {
             outputChannel.appendLine(`[Download] Reading file from: ${pdfPath}`);
@@ -765,20 +772,29 @@ async function downloadGraphAsPdf(graphName) {
                 outputChannel.appendLine(`[Download] Copying to: ${saveUri.fsPath}`);
                 const buffer = fs.readFileSync(pdfPath);
                 await vscode.workspace.fs.writeFile(saveUri, buffer);
-                vscode.window.showInformationMessage(`Graph saved to ${saveUri.fsPath}`);
                 outputChannel.appendLine('[Download] Copy complete!');
+                savedPath = saveUri.fsPath;
             } else {
                 outputChannel.appendLine('[Download] User cancelled save dialog');
+                savedPath = pdfPath;
             }
         } else {
             outputChannel.appendLine('[Download] ERROR: No PDF data found in response');
             throw new Error('No PDF data received from server');
         }
+
+        return {
+            path: savedPath || pdfPath || response?.path || response?.file_path || response?.url || response?.href || null,
+            url: response?.url || response?.href || null,
+            dataUri: response?.dataUri || null,
+            label: response?.label || graphName
+        };
     } catch (error) {
         const msg = `Failed to download PDF: ${error.message}`;
         outputChannel.appendLine(`[Download] ERROR: ${msg}`);
         outputChannel.appendLine(`[Download] Stack trace: ${error.stack}`);
-        vscode.window.showErrorMessage(msg);
+        // Avoid toasts; surface via output channel only
+        throw error;
     }
 }
 
@@ -1241,12 +1257,18 @@ function isRunSuccess(result) {
 }
 
 async function cancelRequest() {
+  console.log('[Extension] cancelRequest called');
+  try {
     const cancelled = await mcpClient.cancelAll();
-    if (cancelled) {
-        vscode.window.showInformationMessage('Cancelled current Stata request.');
-    } else {
-        vscode.window.showInformationMessage('No running Stata requests to cancel.');
+    // Suppress toast notifications; rely on panel status/logs instead.
+    if (!cancelled) {
+      console.log('[Extension] No running Stata requests to cancel.');
     }
+  } catch (error) {
+    console.error('[Extension] Cancel failed:', error);
+    // Keep error visible to aid debugging, but avoid duplicate info toasts.
+    vscode.window.showErrorMessage('Failed to cancel: ' + error.message);
+  }
 }
 
 module.exports = {
