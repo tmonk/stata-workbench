@@ -388,7 +388,10 @@ function writeMcpConfig(target) {
 
             const existingCursor = json.mcpServers[MCP_SERVER_ID];
             if (!configsMatch(existingCursor, expectedCursor, false)) {
-                json.mcpServers[MCP_SERVER_ID] = expectedCursor;
+                json.mcpServers[MCP_SERVER_ID] = {
+                    ...existingCursor,
+                    ...expectedCursor
+                };
                 outputChannel?.appendLine?.(`Updated Cursor MCP config at ${configPath} for ${MCP_SERVER_ID}`);
             }
         }
@@ -403,7 +406,10 @@ function writeMcpConfig(target) {
 
             const existingVscode = json.servers[MCP_SERVER_ID];
             if (!configsMatch(existingVscode, expectedVscode, true)) {
-                json.servers[MCP_SERVER_ID] = expectedVscode;
+                json.servers[MCP_SERVER_ID] = {
+                    ...existingVscode,
+                    ...expectedVscode
+                };
                 outputChannel?.appendLine?.(`Updated VS Code MCP config at ${configPath} for ${MCP_SERVER_ID}`);
             }
         }

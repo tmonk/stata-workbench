@@ -99,6 +99,67 @@ describe('extension refreshMcpPackage', () => {
         assert.deepEqual(cursorArgs.slice(0, 3), ['--refresh', '--from', 'mcp-stata@latest']);
     });
 
+    it('writeMcpConfig preserves custom env and settings', () => {
+        const writeFileSync = sinon.stub();
+        const readFileSync = sinon.stub();
+        const existsSync = sinon.stub().returns(true);
+
+        readFileSync.onCall(0).returns(JSON.stringify({
+            servers: {
+                mcp_stata: {
+                    type: 'stdio',
+                    command: 'uvx',
+                    args: ['--from', 'mcp-stata@latest', 'mcp-stata'],
+                    env: { STATA_HOME: '/opt/stata' },
+                    customField: 'keep-me'
+                }
+            },
+            mcpServers: {
+                mcp_stata: {
+                    command: 'uvx',
+                    args: ['--from', 'mcp-stata@latest', 'mcp-stata'],
+                    env: { STATA_LICENSE: 'abc' },
+                    retry: 3
+                }
+            }
+        }));
+
+        const extensionWithFs = proxyquire.noCallThru().load('../../src/extension', {
+            vscode: buildVscodeMock(),
+            './mcp-client': { client: { setLogger: () => { }, onStatusChanged: () => ({ dispose() { } }) } },
+            './terminal-panel': { TerminalPanel: { setExtensionUri: () => { }, addEntry: () => { }, show: () => { } } },
+            './artifact-utils': { openArtifact: () => { } },
+            fs: {
+                mkdirSync: sinon.stub(),
+                writeFileSync,
+                existsSync,
+                readFileSync
+            },
+            child_process: { spawnSync: sinon.stub() }
+        });
+
+        const { writeMcpConfig } = extensionWithFs;
+
+        writeMcpConfig({
+            configPath: '/tmp/user/globalStorage/mcp.json',
+            writeVscode: true,
+            writeCursor: true
+        });
+
+        assert.isTrue(writeFileSync.calledOnce, 'writes once to shared user config');
+        const updated = JSON.parse(writeFileSync.firstCall.args[1]);
+        const serverEntry = updated.servers.mcp_stata;
+        const cursorEntry = updated.mcpServers.mcp_stata;
+
+        assert.deepEqual(serverEntry.env, { STATA_HOME: '/opt/stata' });
+        assert.equal(serverEntry.customField, 'keep-me');
+        assert.deepEqual(serverEntry.args.slice(0, 3), ['--refresh', '--from', 'mcp-stata@latest']);
+
+        assert.deepEqual(cursorEntry.env, { STATA_LICENSE: 'abc' });
+        assert.equal(cursorEntry.retry, 3);
+        assert.deepEqual(cursorEntry.args.slice(0, 3), ['--refresh', '--from', 'mcp-stata@latest']);
+    });
+
     describe('getUvInstallCommand', () => {
         it('returns curl/sh installer on macOS', () => {
             const { getUvInstallCommand } = extension;
