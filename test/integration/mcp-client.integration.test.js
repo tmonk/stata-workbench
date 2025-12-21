@@ -10,14 +10,15 @@ const { spawnSync } = require('child_process');
 describe('McpClient integration (requires mcp_stata)', function () {
     this.timeout(120000);
 
-    const enabled = process.env.MCP_STATA_INTEGRATION === '1';
     let tempRoot;
     let workDir;
     let doDir;
     let doFile;
     let client;
+    let enabled;
 
     before(function () {
+        enabled = process.env.MCP_STATA_INTEGRATION === '1';
         if (!enabled) {
             this.skip();
             return;
@@ -97,5 +98,46 @@ describe('McpClient integration (requires mcp_stata)', function () {
         assert.isAtLeast(vars.length, 1, 'variable list should not be empty');
         const names = vars.map(v => v.name);
         assert.include(names, 'price', 'should include known variable from auto dataset');
+    });
+
+    it('cancels a long-running command via cancelAll', async function () {
+        if (!enabled) {
+            this.skip();
+            return;
+        }
+
+        // Fire a long-running command and cancel shortly after
+        const runPromise = client.runSelection('sleep 5000', { normalizeResult: true, includeGraphs: false });
+        // Give the request a moment to enqueue/start
+        await new Promise(res => setTimeout(res, 150));
+        const cancelled = await client.cancelAll();
+        assert.isTrue(cancelled, 'cancelAll should report true');
+
+        let errorCaught = false;
+        try {
+            await runPromise;
+        } catch (err) {
+            errorCaught = true;
+            assert.match(err.message || String(err), /cancel/i);
+        }
+        assert.isTrue(errorCaught, 'run should reject after cancellation');
+    });
+
+    it('exports a graph to PDF without base64', async function () {
+        if (!enabled) {
+            this.skip();
+            return;
+        }
+
+        // Create a graph
+        await client.runSelection('sysuse auto', { normalizeResult: true, includeGraphs: false });
+        await client.runSelection('twoway scatter price mpg, name(gint, replace)', { normalizeResult: true, includeGraphs: true });
+
+        const result = await client.fetchGraph('gint', { format: 'pdf' });
+        assert.isOk(result, 'fetchGraph returned result');
+        assert.isString(result.path, 'graph path present');
+        assert.match(result.path, /\.pdf$/i, 'graph path should be PDF');
+        assert.isFalse(result.path.startsWith('data:'), 'should not return base64 data uri');
+        assert.isTrue(fs.existsSync(result.path), 'exported PDF should exist on disk');
     });
 });

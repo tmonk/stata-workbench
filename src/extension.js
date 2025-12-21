@@ -492,7 +492,7 @@ async function runSelection() {
     const cwd = filePath ? path.dirname(filePath) : null;
 
     await withStataProgress('Running selection', async (token) => {
-        const runId = TerminalPanel.startStreamingEntry(text, filePath, terminalRunCommand, variableListProvider);
+        const runId = TerminalPanel.startStreamingEntry(text, filePath, terminalRunCommand, variableListProvider, cancelRequest, downloadGraphAsPdf);
         try {
             const result = await mcpClient.runSelection(text, {
                 cancellationToken: token,
@@ -536,7 +536,7 @@ async function runFile() {
 
     await withStataProgress(`Running ${path.basename(filePath)}`, async (token) => {
         const commandText = `do "${path.basename(filePath)}"`;
-        const runId = TerminalPanel.startStreamingEntry(commandText, filePath, terminalRunCommand, variableListProvider);
+        const runId = TerminalPanel.startStreamingEntry(commandText, filePath, terminalRunCommand, variableListProvider, cancelRequest, downloadGraphAsPdf);
         try {
             const result = await mcpClient.runFile(filePath, {
                 cancellationToken: token,
@@ -603,6 +603,23 @@ const terminalRunCommand = async (code, hooks) => {
     }
 };
 
+// Clear-all convenience for terminal UI
+const clearAllCommand = async () => {
+    try {
+        return await mcpClient.runSelection('clear all', {
+            normalizeResult: true,
+            includeGraphs: false
+        });
+    } catch (error) {
+        return {
+            success: false,
+            rc: -1,
+            stderr: error?.message || String(error),
+            error: { message: error?.message || String(error) }
+        };
+    }
+};
+
 const variableListProvider = async () => {
     try {
         const list = await mcpClient.getVariableList();
@@ -649,7 +666,10 @@ async function showTerminal() {
         initialCode,
         initialResult,
         runCommand: terminalRunCommand,
-        variableProvider: variableListProvider
+        variableProvider: variableListProvider,
+        downloadGraphPdf: downloadGraphAsPdf,
+        cancelRun: cancelRequest,
+        clearAll: clearAllCommand
     });
 }
 
@@ -659,21 +679,122 @@ async function viewData() {
 
 async function showGraphs() {
     try {
-        const graphList = await mcpClient.listGraphs();
-        const items = Array.isArray(graphList?.graphs) ? graphList.graphs : [];
+        // Use exportAllGraphs to get actual exported files with data URIs
+        const result = await mcpClient.exportAllGraphs();
+        const items = Array.isArray(result?.graphs) ? result.graphs : [];
+        
+        // Items already have dataUri from _collectGraphArtifacts -> _fileToDataUri conversion
         const detailed = items.map((g) => {
-            const dataUri = g.dataUri || (g.path && g.path.startsWith('data:') ? g.path : null);
-            const href = dataUri || g.path || g.url;
             return {
-                name: g.label || g.name,
-                dataUri: dataUri || href,
-                previewDataUri: g.previewDataUri || null,
+                name: g.label || g.name || 'graph',
+                dataUri: g.dataUri || null,
+                path: g.path || null,
                 error: g.error || null
             };
         });
         openGraphPanel(detailed);
     } catch (error) {
-        vscode.window.showErrorMessage(`Failed to list graphs: ${error.message}`);
+        vscode.window.showErrorMessage(`Failed to export graphs: ${error.message}`);
+    }
+}
+
+async function downloadGraphAsPdf(graphName) {
+    try {
+        revealOutput();
+        outputChannel.appendLine(`[Download] Starting PDF export for: ${graphName}`);
+        
+        // Request PDF export from MCP server
+        outputChannel.appendLine('[Download] Calling mcpClient.fetchGraph...');
+        const response = await mcpClient.fetchGraph(graphName, { format: 'pdf' });
+        outputChannel.appendLine(`[Download] Response received: ${JSON.stringify(response, null, 2)}`);
+        
+        // Extract the PDF data
+        let pdfData = null;
+        let pdfPath = null;
+        let savedPath = null;
+        
+        // Check if response has base64 data
+        if (response?.data && response?.mimeType === 'application/pdf') {
+            pdfData = response.data;
+            outputChannel.appendLine('[Download] Found base64 data in response.data');
+        }
+
+        // Check dataUri regardless of path presence
+        if (!pdfData && response?.dataUri && response.dataUri.startsWith('data:application/pdf')) {
+            const base64Match = response.dataUri.match(/^data:application\/pdf;base64,(.+)$/);
+            if (base64Match) {
+                pdfData = base64Match[1];
+                outputChannel.appendLine('[Download] Extracted base64 from dataUri');
+            }
+        }
+
+        if (!pdfData && (response?.path || response?.file_path)) {
+            pdfPath = response.path || response.file_path;
+            outputChannel.appendLine(`[Download] Found file path: ${pdfPath}`);
+        }
+        
+        // If we have base64 data, convert to buffer and save
+        if (pdfData) {
+            outputChannel.appendLine('[Download] Converting base64 to buffer...');
+            const buffer = Buffer.from(pdfData, 'base64');
+            outputChannel.appendLine(`[Download] Buffer created: ${buffer.length} bytes`);
+            
+            const defaultUri = vscode.Uri.file(path.join(os.homedir(), 'Downloads', `${graphName}.pdf`));
+            
+            outputChannel.appendLine('[Download] Showing save dialog...');
+            const saveUri = await vscode.window.showSaveDialog({
+                defaultUri,
+                filters: { 'PDF Files': ['pdf'] },
+                saveLabel: 'Save Graph'
+            });
+            
+            if (saveUri) {
+                outputChannel.appendLine(`[Download] Saving to: ${saveUri.fsPath}`);
+                await vscode.workspace.fs.writeFile(saveUri, buffer);
+                outputChannel.appendLine('[Download] Save complete!');
+                savedPath = saveUri.fsPath;
+            } else {
+                outputChannel.appendLine('[Download] User cancelled save dialog');
+                savedPath = null;
+            }
+        } else if (pdfPath && fs.existsSync(pdfPath)) {
+            outputChannel.appendLine(`[Download] Reading file from: ${pdfPath}`);
+            // If we have a file path, copy it
+            const defaultUri = vscode.Uri.file(path.join(os.homedir(), 'Downloads', `${graphName}.pdf`));
+            
+            const saveUri = await vscode.window.showSaveDialog({
+                defaultUri,
+                filters: { 'PDF Files': ['pdf'] },
+                saveLabel: 'Save Graph'
+            });
+            
+            if (saveUri) {
+                outputChannel.appendLine(`[Download] Copying to: ${saveUri.fsPath}`);
+                const buffer = fs.readFileSync(pdfPath);
+                await vscode.workspace.fs.writeFile(saveUri, buffer);
+                outputChannel.appendLine('[Download] Copy complete!');
+                savedPath = saveUri.fsPath;
+            } else {
+                outputChannel.appendLine('[Download] User cancelled save dialog');
+                savedPath = pdfPath;
+            }
+        } else {
+            outputChannel.appendLine('[Download] ERROR: No PDF data found in response');
+            throw new Error('No PDF data received from server');
+        }
+
+        return {
+            path: savedPath || pdfPath || response?.path || response?.file_path || response?.url || response?.href || null,
+            url: response?.url || response?.href || null,
+            dataUri: response?.dataUri || null,
+            label: response?.label || graphName
+        };
+    } catch (error) {
+        const msg = `Failed to download PDF: ${error.message}`;
+        outputChannel.appendLine(`[Download] ERROR: ${msg}`);
+        outputChannel.appendLine(`[Download] Stack trace: ${error.stack}`);
+        // Avoid toasts; surface via output channel only
+        throw error;
     }
 }
 
@@ -765,10 +886,26 @@ function openGraphPanel(graphDetails) {
 
         // Handle messages from the webview
         graphPanel.webview.onDidReceiveMessage(async (message) => {
-            if (!message || typeof message !== 'object') return;
+            try {
+                outputChannel.appendLine(`[Graph Panel] Received message: ${JSON.stringify(message)}`);
+                
+                if (!message || typeof message !== 'object') {
+                    outputChannel.appendLine('[Graph Panel] Invalid message format');
+                    return;
+                }
 
-            if (message.type === 'openArtifact' && message.path) {
-                openArtifact(message.path, message.baseDir);
+                if (message.command === 'download-graph-pdf' && message.graphName) {
+                    outputChannel.appendLine(`[Graph Panel] Processing PDF download for: ${message.graphName}`);
+                    await downloadGraphAsPdf(message.graphName);
+                } else if (message.type === 'openArtifact' && message.path) {
+                    outputChannel.appendLine(`[Graph Panel] Opening artifact: ${message.path}`);
+                    openArtifact(message.path, message.baseDir);
+                } else {
+                    outputChannel.appendLine(`[Graph Panel] Unknown message type: ${message.command || message.type}`);
+                }
+            } catch (err) {
+                outputChannel.appendLine(`[Graph Panel] Message handler error: ${err.message}`);
+                vscode.window.showErrorMessage(`Message handler failed: ${err.message}`);
             }
         });
     }
@@ -782,30 +919,36 @@ function renderGraphHtml(graphDetails, webview, extensionUri) {
     const mainJsUri = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'src', 'ui-shared', 'main.js'));
     const items = Array.isArray(graphDetails) ? graphDetails : [];
 
-    // Use artifact-card style for graphs
-    const blocks = items.map(g => {
-        const name = escapeHtml(g.name || 'graph');
-        const resolved = g.previewDataUri ? escapeHtml(g.previewDataUri) : (g.dataUri ? escapeHtml(g.dataUri) : '');
-        const error = g.error ? `<div class="code-block" style="color:var(--error-color);border-color:var(--error-color);">Error: ${escapeHtml(g.error)}</div>` : '';
-        const image = resolved
-            ? `<div class="artifact-preview" style="height:auto; min-height:200px; background:transparent; border:none;">
-                 <img src="${resolved}" alt="${name}" style="max-width:100%; border-radius:var(--radius-sm); border:1px solid var(--border-subtle);">
+    const tiles = items.map(g => {
+        const name = escapeHtml(g.name || g.label || 'graph');
+        // Use dataUri directly - it's already a base64 data URI from Node.js conversion
+        const preview = g.dataUri || g.previewDataUri || g.path || '';
+        const canPreview = preview && preview.indexOf('data:image/') !== -1;
+        
+        const error = g.error 
+            ? `<div class="artifact-tile-error">Error: ${escapeHtml(g.error)}</div>` 
+            : '';
+        
+        const thumbHtml = canPreview
+            ? `<div class="artifact-thumb">
+                 <img src="${preview}" class="artifact-thumb-img" alt="${name}">
                </div>`
-            : '<div class="text-muted p-4">No image data</div>';
-
-        // Add data attributes for click handling
-        const path = g.dataUri || g.path || '';
-        const displayPath = escapeHtml(path);
+            : `<div class="artifact-thumb">
+                 <div class="artifact-thumb-fallback">PDF</div>
+               </div>`;
+        
+        // Make tile clickable to open modal
+        const dataPath = escapeHtml(preview);
         const baseDir = g.baseDir || '';
-
-        return `<div class="artifact-card" data-action="open-artifact" data-path="${displayPath}" data-basedir="${escapeHtml(baseDir)}" data-label="${name}" style="cursor:pointer;">
-          <div class="flex justify-between items-center" style="margin-bottom:var(--space-sm);">
-             <span class="font-medium">${name}</span>
-          </div>
-          ${image}
+        
+        return `<div class="artifact-tile" data-action="open-modal" data-path="${dataPath}" data-basedir="${escapeHtml(baseDir)}" data-label="${name}">
+          ${thumbHtml}
+          <div class="artifact-tile-label">${name}</div>
           ${error}
         </div>`;
-    }).join('') || '<div class="text-muted">No graphs available</div>';
+    }).join('');
+
+    const gridHtml = tiles || '<div class="text-muted">No graphs available</div>';
 
     return `<!DOCTYPE html>
 <html lang="en">
@@ -815,20 +958,166 @@ function renderGraphHtml(graphDetails, webview, extensionUri) {
   <title>Stata Graphs</title>
   <style>
     body { padding: var(--space-md); }
-    .artifact-grid { display: grid; grid-template-columns: 1fr; gap: var(--space-md); }
+    .hidden { display: none !important; }
   </style>
 </head>
 <body>
   <div class="header" style="margin-bottom:var(--space-md);">
      <span class="font-bold" style="font-size:16px;">Stata Graphs</span>
   </div>
-  <div class="artifact-grid">
-    ${blocks}
+  <div class="artifact-gallery">
+    ${gridHtml}
   </div>
+
+  <!-- Modal HTML -->
+  <div id="artifact-modal" class="artifact-modal hidden" aria-hidden="true">
+    <div class="artifact-modal-overlay"></div>
+    <div class="artifact-modal-panel">
+        <div class="artifact-modal-header">
+            <span id="artifact-modal-title" class="artifact-modal-title">Graph</span>
+            <button id="artifact-modal-close" class="btn btn-secondary" aria-label="Close">×</button>
+        </div>
+        <div class="artifact-modal-body">
+            <img id="artifact-modal-img" class="artifact-modal-img" src="" alt="Graph">
+            <div id="artifact-modal-meta" class="artifact-modal-meta"></div>
+        </div>
+        <div class="artifact-modal-actions">
+            <button id="artifact-modal-download" class="btn btn-primary">Download PDF</button>
+            <button id="artifact-modal-close-footer" class="btn btn-secondary">Close</button>
+        </div>
+    </div>
+  </div>
+
   <script src="${mainJsUri}"></script>
   <script>
      const vscode = acquireVsCodeApi();
-     window.stataUI.bindArtifactEvents(vscode);
+     
+     // Modal elements
+     const modal = document.getElementById('artifact-modal');
+     const modalTitle = document.getElementById('artifact-modal-title');
+     const modalImg = document.getElementById('artifact-modal-img');
+     const modalMeta = document.getElementById('artifact-modal-meta');
+     const modalDownloadBtn = document.getElementById('artifact-modal-download');
+     const modalCloseBtn = document.getElementById('artifact-modal-close');
+     const modalCloseFooterBtn = document.getElementById('artifact-modal-close-footer');
+     let activeModalArtifact = null;
+
+     console.log('[Modal] Modal script loaded, vscode API:', typeof vscode);
+     console.log('[Modal] Download button found:', !!modalDownloadBtn);
+
+     function openArtifactModal(artifact) {
+         activeModalArtifact = artifact;
+         if (modalTitle) modalTitle.textContent = artifact.label || 'Graph';
+         if (modalImg) {
+             modalImg.src = artifact.src || '';
+             modalImg.alt = artifact.label || 'Graph';
+         }
+         if (modalMeta) {
+             modalMeta.textContent = artifact.path || '';
+         }
+         if (modalDownloadBtn) {
+             const ok = artifact.label || artifact.name;
+             modalDownloadBtn.disabled = !ok;
+             modalDownloadBtn.style.opacity = ok ? '1' : '0.6';
+         }
+         if (modal) {
+             modal.classList.remove('hidden');
+             modal.setAttribute('aria-hidden', 'false');
+         }
+     }
+
+     function closeArtifactModal() {
+         activeModalArtifact = null;
+         if (modal) {
+             modal.classList.add('hidden');
+             modal.setAttribute('aria-hidden', 'true');
+         }
+         if (modalImg) modalImg.src = '';
+     }
+
+     // Download button handler
+     if (modalDownloadBtn) {
+         modalDownloadBtn.addEventListener('click', async () => {
+             console.log('[Modal] Download button clicked');
+             
+             if (!activeModalArtifact) {
+                 console.error('[Modal] No active artifact');
+                 return;
+             }
+             
+             const graphName = activeModalArtifact.label || activeModalArtifact.name;
+             console.log('[Modal] Graph name:', graphName);
+             
+             if (!graphName) {
+                 console.error('[Modal] No graph name found');
+                 return;
+             }
+             
+             try {
+                 const originalText = modalDownloadBtn.textContent;
+                 modalDownloadBtn.disabled = true;
+                 modalDownloadBtn.textContent = 'Downloading...';
+                 
+                 console.log('[Modal] Sending download-graph-pdf message:', graphName);
+                 vscode.postMessage({
+                     command: 'download-graph-pdf',
+                     graphName: graphName
+                 });
+                 console.log('[Modal] Message sent successfully');
+                 
+                 setTimeout(() => {
+                     modalDownloadBtn.disabled = false;
+                     modalDownloadBtn.textContent = originalText;
+                     console.log('[Modal] Button reset');
+                 }, 3000);
+             } catch (err) {
+                 console.error('[Modal] Download error:', err);
+                 modalDownloadBtn.disabled = false;
+                 modalDownloadBtn.textContent = 'Download PDF';
+             }
+         });
+     }
+
+     // Close button handlers
+     if (modalCloseBtn) {
+         modalCloseBtn.addEventListener('click', closeArtifactModal);
+     }
+     if (modalCloseFooterBtn) {
+         modalCloseFooterBtn.addEventListener('click', closeArtifactModal);
+     }
+
+     // Close on overlay click
+     if (modal) {
+         modal.addEventListener('click', (e) => {
+             if (e.target === modal || e.target.classList.contains('artifact-modal-overlay')) {
+                 closeArtifactModal();
+             }
+         });
+     }
+
+     // Close on escape key
+     document.addEventListener('keydown', (e) => {
+         if (e.key === 'Escape' && !modal.classList.contains('hidden')) {
+             closeArtifactModal();
+         }
+     });
+
+     // Tile click handlers - open modal
+     document.querySelectorAll('[data-action="open-modal"]').forEach(tile => {
+         tile.addEventListener('click', () => {
+             const label = tile.getAttribute('data-label');
+             const path = tile.getAttribute('data-path');
+             const src = tile.querySelector('img')?.src || path;
+             
+             console.log('[Modal] Opening modal for:', label);
+             openArtifactModal({ label, name: label, src, path });
+         });
+     });
+
+     // Also bind old artifact events if they exist
+     if (window.stataUI && window.stataUI.bindArtifactEvents) {
+         window.stataUI.bindArtifactEvents(vscode);
+     }
   </script>
 </body></html>`;
 }
@@ -968,12 +1257,18 @@ function isRunSuccess(result) {
 }
 
 async function cancelRequest() {
+  console.log('[Extension] cancelRequest called');
+  try {
     const cancelled = await mcpClient.cancelAll();
-    if (cancelled) {
-        vscode.window.showInformationMessage('Cancelled current Stata request.');
-    } else {
-        vscode.window.showInformationMessage('No running Stata requests to cancel.');
+    // Suppress toast notifications; rely on panel status/logs instead.
+    if (!cancelled) {
+      console.log('[Extension] No running Stata requests to cancel.');
     }
+  } catch (error) {
+    console.error('[Extension] Cancel failed:', error);
+    // Keep error visible to aid debugging, but avoid duplicate info toasts.
+    vscode.window.showErrorMessage('Failed to cancel: ' + error.message);
+  }
 }
 
 module.exports = {

@@ -9,6 +9,10 @@ class TerminalPanel {
   static _testOutgoingCapture = null;
   static variableProvider = null;
   static _defaultRunCommand = null;
+  static _downloadGraphPdf = null;
+  static _cancelHandler = null;
+  static _clearHandler = null;
+  static _activeRunId = null;
   static _activeFilePath = null;
   static _webviewReady = true;
   static _pendingWebviewMessages = [];
@@ -24,13 +28,25 @@ class TerminalPanel {
    * @param {string} options.filePath
    * @param {string} options.initialCode
    * @param {object} options.initialResult
-   * @param {(code: string) => Promise<object>} options.runCommand
+   * @param {(code: string, hooks?: object) => Promise<object>} options.runCommand
+   * @param {(graphName: string) => Promise<void>} [options.downloadGraphPdf]
+   * @param {() => Promise<void>} [options.cancelRun]
+   * @param {() => Promise<void>} [options.clearAll]
    */
-  static show({ filePath, initialCode, initialResult, runCommand, variableProvider }) {
+  static show({ filePath, initialCode, initialResult, runCommand, variableProvider, downloadGraphPdf, cancelRun, clearAll }) {
     const column = vscode.ViewColumn.Beside;
     TerminalPanel._activeFilePath = filePath || null;
     if (typeof variableProvider === 'function') {
       TerminalPanel.variableProvider = variableProvider;
+    }
+    if (typeof downloadGraphPdf === 'function') {
+      TerminalPanel._downloadGraphPdf = downloadGraphPdf;
+    }
+    if (typeof cancelRun === 'function') {
+      TerminalPanel._cancelHandler = cancelRun;
+    }
+    if (typeof clearAll === 'function') {
+      TerminalPanel._clearHandler = clearAll;
     }
     if (!TerminalPanel.currentPanel) {
       TerminalPanel.currentPanel = vscode.window.createWebviewPanel(
@@ -68,6 +84,15 @@ class TerminalPanel {
 
         if (message.type === 'run' && typeof message.code === 'string') {
           await TerminalPanel.handleRun(message.code, runCommand);
+        }
+        if ((message.command === 'download-graph-pdf' || message.type === 'downloadGraphPdf') && message.graphName) {
+          await TerminalPanel._handleDownloadGraphPdf(message.graphName);
+        }
+        if (message.type === 'cancelRun') {
+          await TerminalPanel._handleCancelRun();
+        }
+        if (message.type === 'clearAll') {
+          await TerminalPanel._handleClearAll();
         }
         if (message.type === 'openArtifact' && message.path) {
           openArtifact(message.path, message.baseDir);
@@ -135,8 +160,6 @@ class TerminalPanel {
     TerminalPanel._pendingWebviewMessages = [];
     TerminalPanel.currentPanel.reveal(column);
 
-
-
   }
 
   static _postMessage(msg) {
@@ -168,6 +191,7 @@ class TerminalPanel {
     if (!trimmed) return;
 
     const runId = TerminalPanel._generateRunId();
+    TerminalPanel._activeRunId = runId;
     TerminalPanel._postMessage({ type: 'busy', value: true });
     TerminalPanel._postMessage({ type: 'runStarted', runId, code: trimmed });
     try {
@@ -198,15 +222,60 @@ class TerminalPanel {
     } catch (error) {
       TerminalPanel._postMessage({ type: 'runFailed', runId, message: error?.message || String(error) });
     } finally {
+      TerminalPanel._activeRunId = null;
       TerminalPanel._postMessage({ type: 'busy', value: false });
     }
   }
 
-  static startStreamingEntry(code, filePath, runCommand, variableProvider) {
+  static async _handleDownloadGraphPdf(graphName) {
+    if (typeof TerminalPanel._downloadGraphPdf !== 'function') return;
+    try {
+      await TerminalPanel._downloadGraphPdf(graphName);
+      TerminalPanel._postMessage({ type: 'downloadStatus', success: true, graphName });
+    } catch (error) {
+      console.error('[TerminalPanel] downloadGraphPdf failed:', error);
+      TerminalPanel._postMessage({
+        type: 'downloadStatus',
+        success: false,
+        graphName,
+        message: error?.message || String(error)
+      });
+    }
+  }
+
+  static async _handleCancelRun() {
+    if (typeof TerminalPanel._cancelHandler === 'function') {
+      try {
+        await TerminalPanel._cancelHandler();
+        // Optimistically mark the active run as cancelled in the UI.
+        const runId = TerminalPanel._activeRunId;
+        if (runId) {
+          TerminalPanel._postMessage({ type: 'runCancelled', runId, message: 'Run cancelled by user.' });
+          TerminalPanel._postMessage({ type: 'busy', value: false });
+        }
+      } catch (error) {
+        console.error('[TerminalPanel] cancelRun failed:', error);
+      }
+    }
+  }
+
+  static startStreamingEntry(code, filePath, runCommand, variableProvider, cancelRun, downloadGraphPdf) {
     const trimmed = (code || '').trim();
     if (!trimmed) return null;
 
     TerminalPanel._activeFilePath = filePath || TerminalPanel._activeFilePath || null;
+    if (typeof variableProvider === 'function') {
+      TerminalPanel.variableProvider = variableProvider;
+    }
+    if (typeof runCommand === 'function') {
+      TerminalPanel._defaultRunCommand = runCommand;
+    }
+    if (typeof cancelRun === 'function') {
+      TerminalPanel._cancelHandler = cancelRun;
+    }
+    if (typeof downloadGraphPdf === 'function') {
+      TerminalPanel._downloadGraphPdf = downloadGraphPdf;
+    }
 
     if (!TerminalPanel.currentPanel) {
       TerminalPanel.show({
@@ -214,7 +283,10 @@ class TerminalPanel {
         initialCode: null,
         initialResult: null,
         runCommand: runCommand || TerminalPanel._defaultRunCommand || (async () => { throw new Error('Session not fully initialized'); }),
-        variableProvider: variableProvider || TerminalPanel.variableProvider
+        variableProvider: variableProvider || TerminalPanel.variableProvider,
+        downloadGraphPdf: TerminalPanel._downloadGraphPdf,
+        cancelRun: TerminalPanel._cancelHandler,
+        clearAll: TerminalPanel._clearHandler
       });
     }
 
@@ -275,12 +347,21 @@ class TerminalPanel {
   static addEntry(code, result, filePath, runCommand, variableProvider) {
     if (!TerminalPanel.currentPanel) {
       // If panel not open, open it with this as initial state
+      if (typeof runCommand === 'function') {
+        TerminalPanel._defaultRunCommand = runCommand;
+      }
+      if (typeof variableProvider === 'function') {
+        TerminalPanel.variableProvider = variableProvider;
+      }
       TerminalPanel.show({
         filePath,
         initialCode: code,
         initialResult: result,
         runCommand: runCommand || (async () => { throw new Error('Session not fully initialized'); }),
-        variableProvider: variableProvider || TerminalPanel.variableProvider
+        variableProvider: variableProvider || TerminalPanel.variableProvider,
+        downloadGraphPdf: TerminalPanel._downloadGraphPdf,
+        cancelRun: TerminalPanel._cancelHandler,
+        clearAll: TerminalPanel._clearHandler
       });
       return;
     }
@@ -297,6 +378,34 @@ class TerminalPanel {
     TerminalPanel.currentPanel.reveal(vscode.ViewColumn.Beside);
   }
 
+  static async _handleClearAll() {
+  if (typeof TerminalPanel._clearHandler === 'function') {
+    try {
+      // Clear UI first, before running command
+      TerminalPanel._postMessage({ type: 'cleared' });
+      TerminalPanel._postMessage({ type: 'busy', value: true });
+      await TerminalPanel._clearHandler();
+      // Success - UI already cleared, no need to show anything
+    } catch (error) {
+      console.error('[TerminalPanel] clearAll failed:', error);
+      TerminalPanel._postMessage({ type: 'error', message: 'Failed to clear: ' + error.message });
+    } finally {
+      TerminalPanel._postMessage({ type: 'busy', value: false });
+    }
+    return;
+  }
+  // Fallback: clear UI first, then run command silently
+  TerminalPanel._postMessage({ type: 'cleared' });
+  if (typeof TerminalPanel._defaultRunCommand === 'function') {
+    // Run silently in background without showing in terminal
+    try {
+      await TerminalPanel._defaultRunCommand('clear all', {});
+    } catch (error) {
+      TerminalPanel._postMessage({ type: 'error', message: 'Failed to clear: ' + error.message });
+    }
+  }
+}
+
 }
 
 module.exports = { TerminalPanel, toEntry, normalizeArtifacts };
@@ -304,21 +413,25 @@ module.exports = { TerminalPanel, toEntry, normalizeArtifacts };
 function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = []) {
   const designUri = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'src', 'ui-shared', 'design.css'));
   const mainJsUri = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'src', 'ui-shared', 'main.js'));
+  
   const fileName = filePath ? path.basename(filePath) : 'Terminal Session';
   const escapedTitle = escapeHtml(fileName);
-  const initialJson = JSON.stringify(initialEntries).replace(/</g, '\\u003c'); // Safe JSON embedding
+  const initialJson = JSON.stringify(initialEntries).replace(/</g, '\\u003c');
 
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${webview.cspSource} https: data:; script-src 'nonce-${nonce}' ${webview.cspSource}; style-src 'unsafe-inline' ${webview.cspSource};">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${webview.cspSource} https: data:; script-src 'nonce-${nonce}' ${webview.cspSource}; style-src 'unsafe-inline' ${webview.cspSource} https://unpkg.com; font-src ${webview.cspSource} https://unpkg.com;">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <link rel="stylesheet" href="${designUri}">
   <title>Stata Terminal</title>
   <script nonce="${nonce}">
     window.initialEntries = ${initialJson};
   </script>
+  <style nonce="${nonce}">
+    @import url('https://unpkg.com/@vscode/codicons@0.0.44/dist/codicon.css');
+  </style>
 </head>
 <body>
 
@@ -355,7 +468,7 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
         <button class="btn btn-sm" id="artifact-modal-open" type="button">Open</button>
         <button class="btn btn-sm" id="artifact-modal-reveal" type="button">Reveal</button>
         <button class="btn btn-sm" id="artifact-modal-copy" type="button">Copy path</button>
-        <button class="btn btn-sm btn-primary" id="artifact-modal-download" type="button">Download PNG</button>
+        <button class="btn btn-sm btn-primary" id="artifact-modal-download" type="button">Download PDF</button>
       </div>
     </div>
   </div>
@@ -370,9 +483,20 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
           <span class="kbd">PgUp/Down</span><span>prev/next</span>
           <span class="kbd">Tab</span><span>complete</span>
         </div>
-        <button id="run-btn" class="btn btn-primary btn-sm">
-          <span>Run</span>
-        </button>
+        <div class="input-actions">
+          <button id="clear-btn" class="btn btn-sm btn-ghost" title="Clear all (Stata)">
+            <i class="codicon codicon-trash"></i>
+            <span>Clear</span>
+          </button>
+          <button id="stop-btn" class="btn btn-sm btn-ghost" title="Stop current run">
+            <i class="codicon codicon-debug-stop"></i>
+            <span>Stop</span>
+          </button>
+          <button id="run-btn" class="btn btn-primary btn-sm">
+            <i class="codicon codicon-play"></i>
+            <span>Run</span>
+          </button>
+        </div>
       </div>
     </div>
   </footer>
@@ -419,6 +543,8 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
     const chatStream = document.getElementById('chat-stream');
     const input = document.getElementById('command-input');
     const runBtn = document.getElementById('run-btn');
+    const stopBtn = document.getElementById('stop-btn');
+    const clearBtn = document.getElementById('clear-btn');
     
     // Initial history embedded from server
     const initialEntries = window.initialEntries || [];
@@ -431,6 +557,33 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
     const runs = Object.create(null);
 
     let busy = false;
+
+    function clearAllOutput() {
+        // Clear the chat stream
+        if (chatStream) {
+            chatStream.innerHTML = '';
+        }
+        
+        // Reset runs tracking
+        for (const key in runs) {
+            delete runs[key];
+        }
+        
+        // Reset history
+        history.length = 0;
+        historyIndex = -1;
+        
+        // Reset last command display
+        updateLastCommand('—');
+        
+        // Clear any optimistic messages
+        const optimistic = chatStream.querySelectorAll('[data-optimistic="true"]');
+        optimistic.forEach(el => el.remove());
+        
+        // Reset scroll
+        autoScrollPinned = true;
+        scrollToBottom();
+    }
 
     function scrollToBottom() {
         const top = document.body.scrollHeight;
@@ -536,6 +689,28 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
     });
 
     runBtn.addEventListener('click', doRun);
+    if (stopBtn) {
+        stopBtn.addEventListener('click', () => {
+            if (!busy) return;
+            stopBtn.disabled = true;
+            vscode.postMessage({ type: 'cancelRun' });
+            // Re-enable after a short delay in case host doesn't respond immediately
+            setTimeout(() => { if (busy) stopBtn.disabled = false; }, 1200);
+        });
+    }
+
+    if (clearBtn) {
+    clearBtn.addEventListener('click', () => {
+        if (busy) return;
+        setBusy(true);
+        
+        // Clear UI immediately for better UX
+        clearAllOutput();
+        
+        // Send message to extension to clear Stata session
+        vscode.postMessage({ type: 'clearAll' });
+    });
+}
 
     // Bind shared artifact events (delegated)
     if (window.stataUI && typeof window.stataUI.bindArtifactEvents === 'function') {
@@ -594,8 +769,18 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
 
     function setBusy(value) {
         busy = value;
-        runBtn.disabled = value;
-        runBtn.style.opacity = value ? 0.7 : 1;
+        if (runBtn) {
+            runBtn.disabled = value;
+            runBtn.style.opacity = value ? 0.7 : 1;
+        }
+        if (stopBtn) {
+            stopBtn.disabled = !value;
+            stopBtn.style.opacity = value ? 1 : 0.6;
+        }
+        if (clearBtn) {
+            clearBtn.disabled = value;
+            clearBtn.style.opacity = value ? 0.6 : 1;
+        }
         if (!value) setTimeout(() => input.focus(), 50);
     }
 
@@ -747,17 +932,17 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
         const isCollapsed = collapsedArtifacts[artifactsId] === true;
 
         const tiles = artifacts.map((a, idx) => {
-            const label = window.stataUI.escapeHtml(a.label || 'graph');
-            const preview = a.previewDataUri || (a.dataUri && String(a.dataUri).startsWith('data:') ? a.dataUri : null);
-            const canPreview = !!preview && String(preview).startsWith('data:image');
-            const error = a.error ? String(a.error) : '';
-            const errorHtml = error
-                ? '<div class="artifact-tile-error">' + window.stataUI.escapeHtml(error) + '</div>'
-                : '';
-
-            const thumbHtml = canPreview
-                ? '<img src="' + window.stataUI.escapeHtml(preview) + '" class="artifact-thumb-img" alt="' + label + '">' 
-                : '<div class="artifact-thumb-fallback">PDF</div>';
+          const label = window.stataUI.escapeHtml(a.label || 'graph');
+          const preview = a.dataUri || a.path; // Already converted to data URI by Node.js code
+          const canPreview = !!preview && (String(preview).indexOf('data:image/') !== -1);
+          
+          const error = a.error ? String(a.error) : '';
+          const errorHtml = error
+              ? '<div class="artifact-tile-error">' + window.stataUI.escapeHtml(error) + '</div>'
+              : '';
+          const thumbHtml = canPreview
+              ? '<img src="' + window.stataUI.escapeHtml(preview) + '" class="artifact-thumb-img" alt="' + label + '">' 
+              : '<div class="artifact-thumb-fallback">PDF</div>';
 
             const tileAttrs = canPreview
                 ? ('data-action="preview-graph" data-src="' + window.stataUI.escapeHtml(preview) + '"')
@@ -802,7 +987,6 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
     const modalRevealBtn = document.getElementById('artifact-modal-reveal');
     const modalCopyBtn = document.getElementById('artifact-modal-copy');
     const modalDownloadBtn = document.getElementById('artifact-modal-download');
-
     let activeModalArtifact = null;
 
     function openArtifactModal(artifact) {
@@ -816,7 +1000,8 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
             modalMeta.textContent = artifact.path || '';
         }
         if (modalDownloadBtn) {
-            const ok = artifact.src && String(artifact.src).startsWith('data:image/png');
+            // Enable download button if we have a graph name
+            const ok = artifact.label || artifact.name;
             modalDownloadBtn.disabled = !ok;
             modalDownloadBtn.style.opacity = ok ? '1' : '0.6';
         }
@@ -835,8 +1020,80 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
         if (modalImg) modalImg.src = '';
     }
 
+    // Download button handler - requests PDF export and downloads it
+    if (modalDownloadBtn) {
+        modalDownloadBtn.addEventListener('click', async () => {
+            console.log('[Modal] Download button clicked');
+            
+            if (!activeModalArtifact) {
+                console.error('[Modal] No active artifact');
+                return;
+            }
+            
+            const graphName = activeModalArtifact.label || activeModalArtifact.name;
+            console.log('[Modal] Graph name:', graphName);
+            
+            if (!graphName) {
+                console.error('[Modal] No graph name found');
+                return;
+            }
+            
+            try {
+                const originalText = modalDownloadBtn.textContent;
+                modalDownloadBtn.disabled = true;
+                modalDownloadBtn.textContent = 'Downloading...';
+                
+                console.log('[Modal] Sending download-graph-pdf message:', graphName);
+                
+                // Request PDF export from the extension
+                vscode.postMessage({
+                    command: 'download-graph-pdf',
+                    graphName: graphName
+                });
+                
+                console.log('[Modal] Message sent successfully');
+                
+                // Reset button after a delay
+                setTimeout(() => {
+                    modalDownloadBtn.disabled = false;
+                    modalDownloadBtn.textContent = originalText;
+                    console.log('[Modal] Button reset');
+                }, 3000);
+            } catch (err) {
+                console.error('[Modal] Download error:', err);
+                modalDownloadBtn.disabled = false;
+                modalDownloadBtn.textContent = 'Download PDF';
+                alert('Download failed: ' + err.message);
+            }
+        });
+    }
+
+    // Close modal on overlay click
+    if (modal) {
+        modal.addEventListener('click', (e) => {
+            if (e.target === modal || e.target.classList.contains('artifact-modal-overlay')) {
+                closeArtifactModal();
+            }
+        });
+    }
+
+    // Close on escape key
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && !modal.classList.contains('hidden')) {
+            closeArtifactModal();
+        }
+    });
+
+    console.log('[Modal] Modal script loaded, vscode API:', typeof vscode);    
+
     window.addEventListener('message', event => {
       const msg = event.data;
+      if (msg.type === 'cleared') {
+          clearAllOutput();
+          setBusy(false);
+          return;
+      }
+
       if (msg.type === 'init') {
           // Legacy init support if needed, but we prefer embedded
           if (msg.history) msg.history.forEach(appendEntry);
@@ -850,6 +1107,34 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
         const runId = msg.runId;
         const code = String(msg.code || '');
         ensureRunGroup(runId, code);
+      }
+
+      if (msg.type === 'runCancelled') {
+        const runId = msg.runId;
+        const run = runs[runId];
+        if (!run) return;
+        if (run.statusDot) run.statusDot.style.color = 'var(--accent-warning)';
+        if (run.statusTitle) run.statusTitle.textContent = 'Stata Output (cancelled)';
+        if (run.stderrEl) {
+            run.stderrEl.style.display = 'block';
+            run.stderrEl.textContent = String(msg.message || 'Run cancelled.');
+        }
+        if (run.progressWrap) {
+            if (run.progressText) run.progressText.textContent = '';
+            if (run.progressMeta) run.progressMeta.textContent = '';
+        }
+        if (autoScrollPinned) scrollToBottomSmooth();
+      }
+
+      if (msg.type === 'downloadStatus') {
+        // Reset modal download button state
+        if (modalDownloadBtn) {
+          modalDownloadBtn.disabled = false;
+          modalDownloadBtn.textContent = 'Download PDF';
+        }
+        if (!msg.success && msg.message) {
+          console.error('[Modal] Download failed:', msg.message);
+        }
       }
 
       if (msg.type === 'runLogAppend') {
@@ -1089,15 +1374,11 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
     if (modalDownloadBtn) {
         modalDownloadBtn.addEventListener('click', () => {
             if (!activeModalArtifact) return;
-            const src = activeModalArtifact.src;
-            if (!src || !String(src).startsWith('data:image/png')) return;
-            const nameBase = (activeModalArtifact.label || 'graph').replace(/[^a-z0-9_\-]+/gi, '_');
-            const a = document.createElement('a');
-            a.href = src;
-            a.download = nameBase + '.png';
-            document.body.appendChild(a);
-            a.click();
-            a.remove();
+            const graphName = activeModalArtifact.label || activeModalArtifact.name || 'graph';
+            vscode.postMessage({
+                command: 'download-graph-pdf',
+                graphName
+            });
         });
     }
 
