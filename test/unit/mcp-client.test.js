@@ -79,6 +79,8 @@ describe('McpClient', () => {
             };
 
             // Setup mock responses for exports
+            const expectedDataUri = `data:image/png;base64,${Buffer.from('fake_image_data').toString('base64')}`;
+            client._fileToDataUri = sinon.stub().returns(expectedDataUri);
             client._exportGraphPreferred = sinon.stub().callsFake(async (c, name) => {
                 return { content: [{ type: 'text', text: `/tmp/${name}.pdf` }] };
             });
@@ -95,19 +97,15 @@ describe('McpClient', () => {
 
             assert.lengthOf(artifacts, 3);
 
-            const expectedDataUri = `data:image/png;base64,${Buffer.from('fake_image_data').toString('base64')}`;
-
             // Check simple_graph
             const simple = artifacts.find(a => a.label === 'simple_graph');
             assert.exists(simple);
             assert.equal(simple.path, '/tmp/simple_graph.pdf');
-            assert.equal(simple.previewDataUri, expectedDataUri);
 
             // Check named_graph
             const named = artifacts.find(a => a.label === 'named_graph');
             assert.exists(named);
             assert.equal(named.path, '/tmp/named_graph.pdf');
-            assert.equal(named.previewDataUri, expectedDataUri);
 
 
             // Check existing_graph
@@ -499,6 +497,8 @@ describe('McpClient', () => {
             client._exportGraphPreferred = sinon.stub().resolves({ content: [{ type: 'text', text: '/tmp/g1.pdf' }] });
             client._callTool.withArgs(sinon.match.any, 'export_graph', sinon.match.has('format', 'png'))
                 .resolves({ content: [{ type: 'text', text: '/tmp/g1.png' }] });
+            const expectedDataUri = `data:image/png;base64,${Buffer.from('fake_image_data').toString('base64')}`;
+            client._fileToDataUri = sinon.stub().returns(expectedDataUri);
 
 
             const result = await client.listGraphs({ baseDir: '/tmp' });
@@ -507,7 +507,6 @@ describe('McpClient', () => {
             assert.lengthOf(result.graphs, 1);
             assert.equal(result.graphs[0].label, 'g1');
             assert.equal(result.graphs[0].path, '/tmp/g1.pdf');
-            assert.include(result.graphs[0].previewDataUri, 'data:image/png;base64,');
         });
 
         it('should aggregate graph lists across multiple content chunks', async () => {

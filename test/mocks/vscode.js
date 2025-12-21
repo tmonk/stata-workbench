@@ -21,7 +21,8 @@ const vscode = {
                 onDidReceiveMessage: sinon.stub(),
                 html: '',
                 cspSource: 'mock-csp-source',
-                postMessage: sinon.stub().resolves()
+                postMessage: sinon.stub().resolves(),
+                asWebviewUri: sinon.stub().callsFake((uri) => uri)
             },
             reveal: sinon.stub()
         }),
@@ -39,7 +40,11 @@ const vscode = {
     },
     Uri: {
         file: (path) => ({ fsPath: path, with: () => ({ toString: () => `file://${path}` }) }),
-        joinPath: (uri, ...fragments) => ({ fsPath: `${uri.fsPath}/${fragments.join('/')}` })
+        joinPath: (uri, ...fragments) => {
+            // Handle both string and Uri-like inputs for tests
+            const base = uri?.fsPath || uri || '';
+            return { fsPath: `${base}/${fragments.join('/')}` };
+        }
     },
     ViewColumn: {
         Beside: 2

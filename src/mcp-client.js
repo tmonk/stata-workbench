@@ -201,8 +201,20 @@ class StataMcpClient {
 
     async fetchGraph(name, options = {}) {
         return this._enqueue('fetch_graph', options, async (client) => {
-            const response = await this._exportGraphPreferred(client, name);
-            return response;
+            const format = options.format || 'pdf'; // default to PDF for downloads
+            const args = { graph_name: name };
+            if (format) {
+                args.format = format;
+            }
+            const response = await this._callTool(client, 'export_graph', args);
+            return this._graphResponseToArtifact(response, name, options.baseDir);
+        });
+    }
+
+    async exportAllGraphs(options = {}) {
+        return this._enqueue('export_all_graphs', options, async (client) => {
+            const artifacts = await this._collectGraphArtifacts(client, options);
+            return { graphs: artifacts };
         });
     }
 
@@ -378,21 +390,6 @@ class StataMcpClient {
             this._availableTools = new Set();
             this._log(`[mcp-stata] listTools failed: ${err?.message || err}`);
         }
-    }
-
-    _graphListToolOrder() {
-        const preferred = [];
-        // Prefer server-advertised tools first.
-        if (this._availableTools?.has('export_graphs_all')) preferred.push('export_graphs_all');
-        if (this._availableTools?.has('list_graphs')) preferred.push('list_graphs');
-
-        // Default ordering when tool discovery is unavailable.
-        if (!preferred.length) {
-            preferred.push('export_graphs_all', 'list_graphs');
-        }
-
-        // Remove any falsy entries just in case.
-        return preferred.filter(Boolean);
     }
 
     async _callTool(client, name, args, callOptions = {}) {
@@ -857,26 +854,13 @@ class StataMcpClient {
 
     async _collectGraphArtifacts(client, meta = {}) {
         try {
-            const candidates = this._graphListToolOrder();
             let response;
             let lastError = null;
             const config = vscode.workspace.getConfiguration('stataMcp');
             const useBase64 = config.get('useBase64Graphs', false);
 
-            for (const tool of candidates) {
-                try {
-                    const args = tool === 'export_graphs_all'
-                        ? { use_base64: useBase64 }
-                        : {};
-
-                    response = await this._callTool(client, tool, args);
-                    this._log(`[mcp-stata graphs] ${tool} response: ${this._stringifySafe(response)}`);
-                    break;
-                } catch (err) {
-                    lastError = err;
-                    this._log(`[mcp-stata graphs] ${tool} failed: ${err?.message || err}`);
-                }
-            }
+            response = await this._callTool(client, 'export_graphs_all', { use_base64: useBase64 });
+            this._log(`[mcp-stata graphs] export_graphs_all response: ${this._stringifySafe(response)}`);
 
             if (!response) {
                 if (lastError) throw lastError;
@@ -899,77 +883,45 @@ class StataMcpClient {
         if (!graphs || !Array.isArray(graphs)) return [];
 
         for (const g of graphs) {
-            // Check if this candidate is already a fully formed artifact (has data/path)
-            // If it is, we prefer that over re-exporting, EXCEPT if it's just a simple string without extension (which is likely a name).
-            const isSimpleString = typeof g === 'string' && !g.includes('/') && !g.includes('\\') && !g.startsWith('data:') && !g.includes('.');
-            const isObjectWithData = g && typeof g === 'object' && (g.data || g.url || g.path || g.dataUri);
-
-            if (isObjectWithData) {
-                const direct = this._graphToArtifact(g, baseDir, response);
-                if (direct) {
-                    artifacts.push(direct);
-                    continue;
+            // Check if graph already has file_path or dataUri
+            const hasData = g && typeof g === 'object' && (g.file_path || g.dataUri || g.data);
+            
+            if (hasData) {
+                // Graph already has data, just convert it
+                const artifact = this._graphToArtifact(g, baseDir, response);
+                if (artifact) {
+                    artifacts.push(artifact);
+                    this._log(`[mcp-stata graphs] parsed artifact: ${this._stringifySafe(artifact)}`);
                 }
-            }
-
-            // Identify potential graph name
-            const graphName = (typeof g === 'string') ? g : (g?.name || g?.graph_name || g?.label);
-
-            // Try export if we have a name and a client
-            if (graphName && client) {
-                // If it's a simple string or strictly a name-only object, we DEFINITELY want to try export.
-                // Or if we fell through from above.
-                try {
-                    // Double fetch: PDF for the main artifact (durable), PNG for the preview.
-                    const [pdfExport, pngExport] = await Promise.all([
-                        this._exportGraphPreferred(client, graphName),
-                        this._callTool(client, 'export_graph', { graph_name: graphName, format: 'png' }).catch(() => null)
-                    ]);
-
-                    const art = this._graphResponseToArtifact(pdfExport, graphName, baseDir);
-                    if (art) {
-                        if (pngExport) {
-                            const pngArt = this._graphResponseToArtifact(pngExport, graphName, baseDir);
-                            if (pngArt) {
-                                // If we have a local path but no dataUri, try to read the file
-                                if (pngArt.path && !pngArt.dataUri) {
-                                    try {
-                                        if (fs.existsSync(pngArt.path)) {
-                                            const buf = fs.readFileSync(pngArt.path);
-                                            pngArt.dataUri = `data:image/png;base64,${buf.toString('base64')}`;
-                                        }
-                                    } catch (e) {
-                                        this._log(`[mcp-stata] Failed to read preview file: ${e}`);
-                                    }
-                                }
-
-                                if (pngArt.dataUri || pngArt.path) {
-                                    art.previewDataUri = pngArt.dataUri || pngArt.path;
-                                }
-                            }
+            } else {
+                // Graph needs to be exported - it only has metadata (name, active, etc)
+                const graphName = (typeof g === 'string') ? g : (g?.name || g?.graph_name || g?.label);
+                
+                if (graphName && client) {
+                    try {
+                        // Export the graph to get actual file data
+                        const exportResponse = await this._exportGraphPreferred(client, graphName);
+                        const artifact = this._graphResponseToArtifact(exportResponse, graphName, baseDir);
+                        
+                        if (artifact) {
+                            artifacts.push(artifact);
+                            this._log(`[mcp-stata graphs] exported artifact: ${this._stringifySafe(artifact)}`);
+                        } else {
+                            this._log(`[mcp-stata graphs] export returned no data for: ${graphName}`);
                         }
-                        artifacts.push(art);
-                        this._log(`[mcp-stata graphs] export_graph(${graphName}) -> ${this._stringifySafe(art)}`);
-                        continue; // Successfully exported
+                    } catch (err) {
+                        this._log(`[mcp-stata graphs] export failed for ${graphName}: ${err?.message || err}`);
+                        artifacts.push({
+                            label: graphName,
+                            error: `Export failed: ${err.message || String(err)}`
+                        });
                     }
-                } catch (err) {
-                    this._log(`[mcp-stata export_graph error] ${err?.message || err}`);
-                    // Fall through to try direct conversion as fallback
-                    // If we have a name but export failed, create an error placeholder so it's not invisible
-                    artifacts.push({
-                        label: graphName,
-                        error: `Export failed: ${err.message || String(err)}`
-                    });
-                    continue;
+                } else {
+                    this._log(`[mcp-stata graphs] no graph name found in: ${this._stringifySafe(g)}`);
                 }
-            }
-
-            // Fallback: try interpret as direct artifact (e.g. string path with extension)
-            if (!isObjectWithData) {
-                const direct = this._graphToArtifact(g, baseDir, response);
-                if (direct) artifacts.push(direct);
             }
         }
+        
         return artifacts;
     }
 
@@ -993,7 +945,13 @@ class StataMcpClient {
         const label = graph.name || graph.label || graph.graph_name || 'graph';
         const base = graph.baseDir || graph.base_dir || baseDir || response?.baseDir || response?.base_dir || null;
         const href = graph.file_path || graph.url || graph.href || graph.link || graph.path || graph.file || graph.filename || null;
-        const dataUri = this._toDataUri(graph) || (href && href.startsWith('data:') ? href : null);
+        let dataUri = this._toDataUri(graph) || (href && href.startsWith('data:') ? href : null);
+        
+        // If we have a file path but no dataUri, read the file and convert it to base64
+        if (!dataUri && href && !href.startsWith('http') && !href.startsWith('data:')) {
+            dataUri = this._fileToDataUri(href);
+        }
+        
         const pathOrData = href || dataUri;
         if (!pathOrData) return null;
         return {
@@ -1002,6 +960,34 @@ class StataMcpClient {
             dataUri: dataUri || (href && href.startsWith('data:') ? href : null),
             baseDir: base
         };
+    }
+
+    _fileToDataUri(filePath) {
+        try {
+            if (!filePath || !fs.existsSync(filePath)) {
+                this._log(`[mcp-stata] File not found for data URI: ${filePath}`);
+                return null;
+            }
+            
+            const buffer = fs.readFileSync(filePath);
+            const ext = path.extname(filePath).toLowerCase();
+            
+            const mimeTypes = {
+                '.svg': 'image/svg+xml',
+                '.png': 'image/png',
+                '.jpg': 'image/jpeg',
+                '.jpeg': 'image/jpeg',
+                '.pdf': 'application/pdf'
+            };
+            const mimeType = mimeTypes[ext] || 'application/octet-stream';
+            
+            const dataUri = `data:${mimeType};base64,${buffer.toString('base64')}`;
+            this._log(`[mcp-stata] Converted file to data URI: ${filePath} (${buffer.length} bytes)`);
+            return dataUri;
+        } catch (err) {
+            this._log(`[mcp-stata] Failed to convert file to data URI: ${err?.message || err}`);
+            return null;
+        }
     }
 
     _graphResponseToArtifact(resp, label, baseDir) {
@@ -1191,4 +1177,3 @@ module.exports = {
     StataMcpClient,
     client: new StataMcpClient()
 };
-

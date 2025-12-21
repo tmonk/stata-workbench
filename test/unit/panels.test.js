@@ -1,6 +1,7 @@
 const assert = require('chai').assert;
 const proxyquire = require('proxyquire');
 const vscodeMock = require('../mocks/vscode');
+const sinon = require('sinon');
 
 describe('Panels', () => {
     let terminalPanelModule;
@@ -120,6 +121,53 @@ describe('Panels', () => {
 
                 // Restore
                 TerminalPanel.show = originalShow;
+            });
+        });
+
+        describe('new controls + download wiring', () => {
+            it('stores download/cancel handlers on show', () => {
+                const { TerminalPanel } = terminalPanelModule;
+                TerminalPanel.currentPanel = null;
+                const downloadStub = () => {};
+                const cancelStub = () => {};
+                const clearStub = () => {};
+
+                TerminalPanel.show({
+                    filePath: '/tmp/foo',
+                    initialCode: null,
+                    initialResult: null,
+                    runCommand: async () => ({}),
+                    variableProvider: () => [],
+                    downloadGraphPdf: downloadStub,
+                    cancelRun: cancelStub,
+                    clearAll: clearStub
+                });
+
+                assert.strictEqual(TerminalPanel._downloadGraphPdf, downloadStub);
+                assert.strictEqual(TerminalPanel._cancelHandler, cancelStub);
+                assert.strictEqual(TerminalPanel._clearHandler, clearStub);
+
+                TerminalPanel.currentPanel = null;
+            });
+
+            it('_handleDownloadGraphPdf delegates when set', async () => {
+                const { TerminalPanel } = terminalPanelModule;
+                const stub = sinon.stub().resolves();
+                TerminalPanel._downloadGraphPdf = stub;
+
+                await TerminalPanel._handleDownloadGraphPdf('g1');
+
+                assert.isTrue(stub.calledOnceWith('g1'));
+            });
+
+            it('_handleClearAll delegates when set', async () => {
+                const { TerminalPanel } = terminalPanelModule;
+                const stub = sinon.stub().resolves();
+                TerminalPanel._clearHandler = stub;
+
+                await TerminalPanel._handleClearAll();
+
+                assert.isTrue(stub.calledOnce);
             });
         });
     });
