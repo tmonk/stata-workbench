@@ -201,26 +201,9 @@ class DataBrowserPanel {
                 <title>Stata Data Browser</title>
             </head>
             <body>
-                <div id="loading-overlay" class="loading-overlay hidden">
-                    <div class="spinner"></div>
-                </div>
                 <div id="error-banner" class="error-banner hidden"></div>
 
                 <div id="toolbar">
-                    <div id="filter-container">
-                        <input type="text" id="filter-input" placeholder="Filter expression (e.g. price > 5000 & mpg > 20)">
-                        <button id="apply-filter" class="btn btn-primary btn-sm">Filter</button>
-                    </div>
-                    <div class="input-actions" style="margin-left: auto;">
-                        <button id="btn-refresh" class="btn btn-sm btn-ghost" title="Refresh Data">
-                            <span>Refresh</span>
-                        </button>
-                        <select id="variable-selector" class="btn btn-sm" style="max-width: 150px;">
-                            <option value="">Variables...</option>
-                        </select>
-                    </div>
-                </div>
-                <div id="statusbar">
                         <span id="status-text">Not connected</span>
                         <div class="pagination-controls">
                             <button id="btn-prev" class="btn btn-sm btn-ghost" disabled>Prev</button>
@@ -231,6 +214,9 @@ class DataBrowserPanel {
                 </div>
 
                 <div id="data-grid-container">
+                    <div id="loading-overlay" class="loading-overlay hidden">
+                        <div class="spinner"></div>
+                    </div>
                     <table id="data-grid">
                         <thead id="grid-header"></thead>
                         <tbody id="grid-body"></tbody>

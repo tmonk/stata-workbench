@@ -323,12 +323,17 @@ async function applyFilter() {
             filterExpr: filterExpr
         });
 
-        if (viewRes && viewRes.viewId) {
-            log(`View created: ${viewRes.viewId}`);
-            state.viewId = viewRes.viewId;
+        // Handle nested view object (e.g. { view: { id: "...", filteredN: ... } })
+        const viewData = viewRes.view || viewRes;
+
+        if (viewData && viewData.id) {
+            log(`View created: ${viewData.id}`);
+            state.viewId = viewData.id;
             state.offset = 0;
-            if (viewRes.n !== undefined) {
-                dom.statusText.textContent = `Filtered: ${viewRes.n.toLocaleString()} observations`;
+            if (viewData.filteredN !== undefined) {
+                dom.statusText.textContent = `Filtered: ${viewData.filteredN.toLocaleString()} observations`;
+            } else if (viewData.n !== undefined) {
+                dom.statusText.textContent = `Filtered: ${viewData.n.toLocaleString()} observations`;
             }
             await loadPage();
         }

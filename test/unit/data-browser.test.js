@@ -349,9 +349,14 @@ describe('Data Browser Frontend (data-browser.js)', () => {
         triggerMessage({ type: 'apiResponse', reqId: validateReqId, success: true, data: { ok: true } });
         await new Promise(resolve => setTimeout(resolve, 0));
 
-        // View creation response
+        // View creation response (nested view object)
         const viewReqId = getApiCall('/v1/views').args[0].reqId;
-        triggerMessage({ type: 'apiResponse', reqId: viewReqId, success: true, data: { viewId: 'VIEW_1', n: 50 } });
+        triggerMessage({ 
+            type: 'apiResponse', 
+            reqId: viewReqId, 
+            success: true, 
+            data: { view: { id: 'VIEW_1', filteredN: 50 } } 
+        });
         await new Promise(resolve => setTimeout(resolve, 0));
 
         // Should trigger loadPage with view endpoint
