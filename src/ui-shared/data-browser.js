@@ -305,17 +305,20 @@ async function applyFilter() {
         // 1. Validate filter
         const valid = await apiCall('/v1/filters/validate', 'POST', {
             datasetId: state.datasetId,
-            filter: filterExpr
+            filterExpr: filterExpr
         });
+        
+        // Accept valid or isValid property
+        const isOk = valid && (valid.isValid === true || valid.valid === true);
 
-        if (!valid || !valid.isValid) {
-            throw new Error(valid?.error || 'Invalid filter expression');
+        if (!isOk) {
+            throw new Error(valid?.error || `Invalid filter expression (Response: ${JSON.stringify(valid)})`);
         }
 
         // 2. Create View
         const viewRes = await apiCall('/v1/views', 'POST', {
             datasetId: state.datasetId,
-            filter: filterExpr
+            filterExpr: filterExpr
         });
 
         if (viewRes && viewRes.viewId) {

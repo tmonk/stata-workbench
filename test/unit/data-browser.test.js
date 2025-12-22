@@ -286,4 +286,41 @@ describe('Data Browser Frontend (data-browser.js)', () => {
         assert.equal(body.limit, 100, 'Invalid limit should fall back to 100');
         assert.equal(body.offset, 0, 'Invalid offset should fall back to 0');
     });
+
+    it('should use "filterExpr" property when applying filter', async () => {
+        triggerMessage({ type: 'init', baseUrl: 'http://test', token: 'xyz' });
+
+        // init flow
+        const dsReqId = getApiCall('/v1/dataset').args[0].reqId;
+        triggerMessage({ type: 'apiResponse', reqId: dsReqId, success: true, data: { dataset: { id: '123', n: 10 } } });
+        await new Promise(resolve => setTimeout(resolve, 0));
+        const varsReqId = getApiCall('/v1/vars').args[0].reqId;
+        triggerMessage({ type: 'apiResponse', reqId: varsReqId, success: true, data: { vars: [] } });
+        await new Promise(resolve => setTimeout(resolve, 0));
+
+        // Simulate filter input
+        document.getElementById('filter-input').value = 'price > 5000';
+        document.getElementById('apply-filter').click();
+        
+        await new Promise(resolve => setTimeout(resolve, 0));
+
+        // Check validation call
+        const validateCall = getApiCall('/v1/filters/validate');
+        assert.ok(validateCall, 'Should have called /v1/filters/validate');
+        const valBody = JSON.parse(validateCall.args[0].options.body);
+        assert.property(valBody, 'filterExpr', 'Body should contain filterExpr');
+        assert.notProperty(valBody, 'filter', 'Body should NOT contain "filter" property');
+        assert.equal(valBody.filterExpr, 'price > 5000');
+
+        // Respond valid
+        triggerMessage({ type: 'apiResponse', reqId: validateCall.args[0].reqId, success: true, data: { isValid: true } });
+        await new Promise(resolve => setTimeout(resolve, 0));
+
+        // Check create view call
+        const viewCall = getApiCall('/v1/views');
+        assert.ok(viewCall, 'Should have called /v1/views');
+        const viewBody = JSON.parse(viewCall.args[0].options.body);
+        assert.property(viewBody, 'filterExpr', 'Body should contain filterExpr');
+        assert.notProperty(viewBody, 'filter', 'Body should NOT contain "filter" property');
+    });
 });
