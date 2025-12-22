@@ -971,7 +971,7 @@ class StataMcpClient {
             }
 
             const resolved = await this._resolveArtifactsFromList(response, meta?.cwd, client);
-            this._log(`[mcp-stata graphs] resolved artifacts: ${this._stringifySafe(resolved)}`);
+            this._log(`[mcp-stata graphs] resolved artifacts.`); // : ${this._stringifySafe(resolved)}`);
             return resolved;
         } catch (error) {
             this._log(`[mcp-stata graph collection error] ${error?.message || error}`);
@@ -994,7 +994,28 @@ class StataMcpClient {
                 const artifact = this._graphToArtifact(g, baseDir, response);
                 if (artifact) {
                     artifacts.push(artifact);
-                    this._log(`[mcp-stata graphs] parsed artifact: ${this._stringifySafe(artifact)}`);
+                    
+                    // Deep copy and sanitize for logging
+                    const artifact_log = JSON.parse(JSON.stringify(artifact));
+                    
+                    // Remove base64 data from all locations
+                    const sanitize = (obj) => {
+                        for (const key in obj) {
+                            if (typeof obj[key] === 'string') {
+                                if (obj[key].startsWith('data:')) {
+                                    obj[key] = `[base64 data: ${obj[key].substring(0, 30)}...]`;
+                                } else if (obj[key].length > 100 && /^[A-Za-z0-9+/=]+$/.test(obj[key])) {
+                                    // Looks like raw base64
+                                    obj[key] = `[base64 string: ${obj[key].length} chars]`;
+                                }
+                            } else if (typeof obj[key] === 'object' && obj[key] !== null) {
+                                sanitize(obj[key]);
+                            }
+                        }
+                    };
+                    
+                    sanitize(artifact_log);
+                    this._log(`[mcp-stata graphs] parsed artifact: ${this._stringifySafe(artifact_log)}`);
                 }
             } else {
                 // Graph needs to be exported - it only has metadata (name, active, etc)
