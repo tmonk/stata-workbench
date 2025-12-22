@@ -60,7 +60,7 @@ Offline/VSIX fallback:
 <p align="center">
   <img src="img/screenshot.png" width="70%" alt="Stata Terminal panel showing Stata output cards and a graph artifact" />
   <br />
-  <em>Stata Terminal panel showing output cards and a graph artifact (click to enlarge).</em>
+  <em>Stata Terminal panel showing output cards and a graph artifact.</em>
 </p>
 
 <p align="center">
@@ -111,7 +111,8 @@ Stata Workbench **automatically writes** your MCP configuration when you first r
 | **VS Code** | `~/Library/Application Support/Code/User/mcp.json` | `%APPDATA%/Code/User/mcp.json` | `~/.config/Code/User/mcp.json` |
 | **VS Code Insiders** | `~/Library/Application Support/Code - Insiders/User/mcp.json` | `%APPDATA%/Code - Insiders/User/mcp.json` | `~/.config/Code - Insiders/User/mcp.json` |
 | **Cursor** | `~/.cursor/mcp.json` | `%USERPROFILE%/.cursor/mcp.json` | `~/.cursor/mcp.json` |
-| **Windsurf** | `~/.codeium/mcp_config.json` | `%USERPROFILE%/.codeium/mcp_config.json` | `~/.codeium/mcp_config.json` |
+| **Windsurf** | `~/.codeium/windsurf/mcp_config.json` | `%USERPROFILE%/.codeium/windsurf/mcp_config.json` | `~/.codeium/windsurf/mcp_config.json` |
+| **Windsurf Next** | `~/.codeium/windsurf-next/mcp_config.json` | `%USERPROFILE%/.codeium/windsurf-next/mcp_config.json` | `~/.codeium/windsurf-next/mcp_config.json` |
 | **Antigravity** | `~/Library/Application Support/Antigravity/User/mcp.json` | `%APPDATA%/Antigravity/User/mcp.json` | `~/.antigravity/mcp.json` |
 
 If you want to manage the file yourself, here is the content to add. User-level `mcp.json`:

@@ -343,7 +343,9 @@ function resolveHostMcpPath(appName, home, overridePath, platform, _hasHomeOverr
     }
 
     if (appName.includes('windsurf')) {
-        return { configPath: path.join(home, '.codeium', 'mcp_config.json'), prefersCursorFormat: true };
+        const isNext = appName.includes('next');
+        const dirName = isNext ? 'windsurf-next' : 'windsurf';
+        return { configPath: path.join(home, '.codeium', dirName, 'mcp_config.json'), prefersCursorFormat: true };
     }
 
     if (appName.includes('antigravity')) {

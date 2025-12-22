@@ -443,7 +443,34 @@ describe('extension refreshMcpPackage', () => {
             };
 
             const target = extWithFs.getMcpConfigTarget(ctx);
-            const expected = path.join('/home/alex', '.codeium', 'mcp_config.json');
+            const expected = path.join('/home/alex', '.codeium', 'windsurf', 'mcp_config.json');
+            assert.equal(target.configPath, expected);
+            assert.isTrue(target.writeCursor);
+        });
+
+        it('resolves Windsurf Next path on mac', () => {
+            const extWithFs = proxyquire.noCallThru().load('../../src/extension', {
+                vscode: buildVscodeMock(),
+                './mcp-client': { client: { setLogger: () => { }, onStatusChanged: () => ({ dispose() { } }) } },
+                            './terminal-panel': { TerminalPanel: { setExtensionUri: () => { }, addEntry: () => { }, show: () => { } } },
+                            './data-browser-panel': { DataBrowserPanel: { createOrShow: () => { } } },
+                            './artifact-utils': { openArtifact: () => { } },                fs: {
+                    mkdirSync: sinon.stub(),
+                    writeFileSync: sinon.stub(),
+                    existsSync: sinon.stub().returns(false),
+                    readFileSync: sinon.stub().returns('{}')
+                },
+                child_process: { spawnSync: sinon.stub() }
+            });
+
+            const ctx = {
+                mcpPlatformOverride: 'darwin',
+                mcpHomeOverride: '/Users/tom',
+                mcpAppNameOverride: 'Windsurf Next'
+            };
+
+            const target = extWithFs.getMcpConfigTarget(ctx);
+            const expected = path.join('/Users/tom', '.codeium', 'windsurf-next', 'mcp_config.json');
             assert.equal(target.configPath, expected);
             assert.isTrue(target.writeCursor);
         });
