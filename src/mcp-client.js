@@ -196,6 +196,14 @@ class StataMcpClient {
         });
     }
 
+    async getUiChannel(options = {}) {
+        return this._enqueue('get_ui_channel', options, async (client) => {
+            const response = await this._callTool(client, 'get_ui_channel', {});
+            const text = this._extractText(response);
+            return this._tryParseJson(text) || this._parseJson(response);
+        });
+    }
+
     async getVariableList(options = {}) {
         return this._enqueue('get_variable_list', options, async (client) => {
             const response = await this._callTool(client, 'get_variable_list', {});

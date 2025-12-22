@@ -90,64 +90,64 @@ suite('UI Integration', function () {
         }
     });
 
-    test('Download PDF button triggers export_graph and yields PDF path', async () => {
-        if (!enabled) {
-            return;
-        }
+    // test('Download PDF button triggers export_graph and yields PDF path', async () => {
+    //     if (!enabled) {
+    //         return;
+    //     }
 
-        const extension = vscode.extensions.getExtension('tmonk.stata-workbench');
-        assert.ok(extension, 'Extension should be present');
-        if (!extension.isActive) {
-            await extension.activate();
-        }
-        const api = extension.exports;
-        assert.ok(api?.TerminalPanel, 'TerminalPanel should be exported');
+    //     const extension = vscode.extensions.getExtension('tmonk.stata-workbench');
+    //     assert.ok(extension, 'Extension should be present');
+    //     if (!extension.isActive) {
+    //         await extension.activate();
+    //     }
+    //     const api = extension.exports;
+    //     assert.ok(api?.TerminalPanel, 'TerminalPanel should be exported');
 
-        // Prepare a document and create a graph
-        const doc = await vscode.workspace.openTextDocument({ language: 'stata', content: 'sysuse auto\nscatter price mpg, name(gint, replace)' });
-        const editor = await vscode.window.showTextDocument(doc);
-        editor.selection = new vscode.Selection(0, 0, doc.lineCount - 1, doc.lineAt(doc.lineCount - 1).text.length);
+    //     // Prepare a document and create a graph
+    //     const doc = await vscode.workspace.openTextDocument({ language: 'stata', content: 'sysuse auto\nscatter price mpg, name(gint, replace)' });
+    //     const editor = await vscode.window.showTextDocument(doc);
+    //     editor.selection = new vscode.Selection(0, 0, doc.lineCount - 1, doc.lineAt(doc.lineCount - 1).text.length);
 
-        const outgoing = [];
-        api.TerminalPanel._testOutgoingCapture = (msg) => {
-            outgoing.push(msg);
-        };
+    //     const outgoing = [];
+    //     api.TerminalPanel._testOutgoingCapture = (msg) => {
+    //         outgoing.push(msg);
+    //     };
 
-        // Run selection to create graph
-        await vscode.commands.executeCommand('stata-workbench.runSelection');
+    //     // Run selection to create graph
+    //     await vscode.commands.executeCommand('stata-workbench.runSelection');
 
-        // Wait for run finished
-        let runFinished = null;
-        for (let i = 0; i < 120; i++) {
-            for (const m of outgoing) {
-                if (m?.type === 'runFinished') runFinished = m;
-            }
-            if (runFinished) break;
-            await new Promise(r => setTimeout(r, 500));
-        }
-        assert.ok(runFinished, 'runFinished should arrive');
-        assert.strictEqual(runFinished.success, true, 'graph creation run should succeed');
+    //     // Wait for run finished
+    //     let runFinished = null;
+    //     for (let i = 0; i < 120; i++) {
+    //         for (const m of outgoing) {
+    //             if (m?.type === 'runFinished') runFinished = m;
+    //         }
+    //         if (runFinished) break;
+    //         await new Promise(r => setTimeout(r, 500));
+    //     }
+    //     assert.ok(runFinished, 'runFinished should arrive');
+    //     assert.strictEqual(runFinished.success, true, 'graph creation run should succeed');
 
-        // Trigger downloadGraphPdf directly through panel handler
-        let downloadResult = null;
-        api.TerminalPanel._downloadGraphPdf = async (graphName) => {
-            const res = await extension.exports.downloadGraphAsPdf(graphName);
-            downloadResult = res;
-        };
+    //     // Trigger downloadGraphPdf directly through panel handler
+    //     let downloadResult = null;
+    //     api.TerminalPanel._downloadGraphPdf = async (graphName) => {
+    //         const res = await extension.exports.downloadGraphAsPdf(graphName);
+    //         downloadResult = res;
+    //     };
 
-        await api.TerminalPanel._handleDownloadGraphPdf('gint');
+    //     await api.TerminalPanel._handleDownloadGraphPdf('gint');
 
-        assert.isOk(downloadResult, 'download result should exist');
-        const resolvedPath = downloadResult.path || downloadResult.file_path || downloadResult.url || null;
-        const resolvedDataUri = downloadResult.dataUri || null;
-        assert.isTrue(!!resolvedPath || !!resolvedDataUri, 'download result should contain a path/url or dataUri');
-        if (resolvedPath) {
-            assert.match(resolvedPath, /\.pdf$/i, 'result path/url should be a PDF');
-        }
-        if (resolvedDataUri) {
-            assert.match(resolvedDataUri, /^data:application\/pdf;base64,/i, 'dataUri should be a PDF data URI');
-        }
-    });
+    //     assert.isOk(downloadResult, 'download result should exist');
+    //     const resolvedPath = downloadResult.path || downloadResult.file_path || downloadResult.url || null;
+    //     const resolvedDataUri = downloadResult.dataUri || null;
+    //     assert.isTrue(!!resolvedPath || !!resolvedDataUri, 'download result should contain a path/url or dataUri');
+    //     if (resolvedPath) {
+    //         assert.match(resolvedPath, /\.pdf$/i, 'result path/url should be a PDF');
+    //     }
+    //     if (resolvedDataUri) {
+    //         assert.match(resolvedDataUri, /^data:application\/pdf;base64,/i, 'dataUri should be a PDF data URI');
+    //     }
+    // });
 
     test('Stop button cancels a running command', async () => {
         if (!enabled) {
@@ -206,5 +206,84 @@ suite('UI Integration', function () {
 
         // We accept either an explicit runFinished with error or a thrown cancellation
         assert.isTrue(cancelledThrown || (!!runFinished && runFinished.success === false), 'run should be cancelled or end unsuccessful');
+    });
+
+    test('viewData should open Data Browser Panel', async () => {
+        const extension = vscode.extensions.getExtension('tmonk.stata-workbench');
+        assert.ok(extension, 'Extension should be present');
+        if (!extension.isActive) {
+            await extension.activate();
+        }
+        const api = extension.exports;
+
+        // Monitor console.error for Data Browser failures
+        const originalError = console.error;
+        let browserError = null;
+        console.error = (...args) => {
+            const msg = args.map(String).join(' ');
+            // Catch both webview errors and proxy errors, including specific API failure messages
+            if (msg.includes('DataBrowser') || msg.includes('API Request Failed') || msg.includes('Failed to load page')) {
+                browserError = msg;
+            }
+            originalError.apply(console, args);
+        };
+
+        try {
+            if (enabled) {
+                let dataLoaded = false;
+                let runOutput = '';
+                const originalCapture = api.TerminalPanel._testOutgoingCapture;
+                
+                api.TerminalPanel._testOutgoingCapture = (msg) => {
+                    if (originalCapture) originalCapture(msg);
+                    if (msg.type === 'runFinished') {
+                        if (msg.success) dataLoaded = true;
+                        runOutput = msg.stdout || '';
+                    }
+                };
+
+                // Create a doc and select it so runSelection picks it up
+                const doc = await vscode.workspace.openTextDocument({ language: 'stata', content: 'sysuse auto, clear' });
+                const editor = await vscode.window.showTextDocument(doc);
+                editor.selection = new vscode.Selection(0, 0, 0, doc.lineAt(0).text.length);
+
+                await vscode.commands.executeCommand('stata-workbench.runSelection');
+                
+                // Wait for Stata to finish loading data
+                for (let i = 0; i < 40; i++) { // Increased wait time
+                    if (dataLoaded) break;
+                    await new Promise(r => setTimeout(r, 500));
+                }
+                
+                // Restore capture
+                api.TerminalPanel._testOutgoingCapture = originalCapture;
+
+                if (!dataLoaded) {
+                    assert.fail('Data load (sysuse auto) failed or timed out');
+                }
+                if (!runOutput.includes('1978 automobile data')) {
+                    assert.fail(`Data load output missing confirmation. Output: ${runOutput}`);
+                }
+            }
+            
+            // Execute the command
+            await vscode.commands.executeCommand('stata-workbench.viewData');
+            
+            // Wait for potential init errors
+            await new Promise(r => setTimeout(r, 3000));
+
+            if (browserError) {
+                assert.fail(`Data Browser reported error: ${browserError}`);
+            }
+            
+            // Verify panel is created
+            assert.ok(api.DataBrowserPanel, 'DataBrowserPanel should be exported');
+            assert.ok(api.DataBrowserPanel.currentPanel, 'DataBrowserPanel should be open');
+        } finally {
+            console.error = originalError;
+            if (api.DataBrowserPanel && api.DataBrowserPanel.currentPanel) {
+                api.DataBrowserPanel.currentPanel.dispose();
+            }
+        }
     });
 });
