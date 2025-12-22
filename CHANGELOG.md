@@ -3,101 +3,206 @@
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.8.2] - 2025-12-22
 
 ### Changed
-- Updated graph export to use file paths by default (more token-efficient)
-- Added support for `max_output_lines` parameter to limit verbose output
+
+* **Windsurf / Windsurf Next:** Updated MCP config paths and support.
+
+## [0.8.1] - 2025-12-22
+
+### Changed
+
+* Documentation updates.
+
+## [0.8.0] - 2025-12-22
 
 ### Added
-- Configuration option: `stataMcp.maxOutputLines`
-- Configuration option: `stataMcp.useBase64Graphs`
+
+* **Data Browser:** Explore datasets with a live, in-editor table view.
+
+## [0.7.3] - 2025-12-22
+
+### Fixed
+
+* Prevented logs from emitting full base64 payloads.
+
+## [0.7.2] - 2025-12-21
+
+### Fixed
+
+* MCP config handling: avoid duplicate entries across host formats; preserve custom env/settings.
+
+## [0.7.1] - 2025-12-21
+
+### Changed
+
+* Hardened `mcp.json` editing and preserved custom config values more reliably.
+
+## [0.7.0] - 2025-12-21
+
+### Added
+
+* UI improvements (including codicons integration).
+
+## [0.6.0] - 2025-12-19
+
+### Added
+
+* **Full do-file streaming** with live output.
+* Improved scrolling behavior.
+* Artifact modal for better file viewing.
+
+### Removed
+
+* `stataMcp.enableStreaming` configuration (streaming now always enabled).
+
+## [0.5.0] - 2025-12-19
+
+### Added
+
+* **Streaming output** for real-time command execution feedback.
+
+## [0.4.4] - 2025-12-17
+
+### Changed
+
+* Updated compatibility for `mcp-stata` 0.4.0.
+
+## [0.4.3] - 2025-12-16
+
+### Changed
+
+* Minor improvements and bug fixes.
+
+## [0.4.2] - 2025-12-15
+
+### Added
+
+* Windows platform support improvements.
+
+### Changed
+
+* Updates to `mcp_stata` integration.
+
+## [0.4.1] - 2025-12-15
+
+### Changed
+
+* Project renaming updates.
+
+## [0.4.0] - 2025-12-14
+
+### Added
+
+* Command history navigation (PageUp/PageDown).
+* Tab completion for variable names.
+
+## [0.3.2] - 2025-12-14
+
+### Added
+
+* Automatic MCP package refresh functionality.
 
 ## [0.3.1] - 2025-12-14
 
 ### Changed
-- Updated README with new packaging instructions
-- Updated documentation
+
+* Updated README with packaging instructions.
+* Documentation/test updates.
 
 ## [0.3.0] - 2025-12-14
 
 ### Added
-- Terminal panel with context header showing last command executed
-- Artifact utilities for improved file handling
-- New test commands in README
+
+* **Terminal panel** with context header for the last command executed.
+* Artifact utilities for improved file handling.
+* Test commands in README.
 
 ### Changed
-- Refactored terminal panel functionality
-- Updated icon assets
-- Enhanced contribution guidelines
-- Improved UI elements
+
+* Refactored terminal panel functionality and UI polish.
 
 ### Removed
-- Deprecated run panel
+
+* Deprecated run panel.
 
 ## [0.2.3] - 2025-12-14
 
 ### Fixed
-- Icon visibility in VS Code marketplace
+
+* Icon visibility in VS Code Marketplace.
 
 ### Changed
-- Updated VSIX build instructions to include output directory
-- Automated package-lock.json updates in GitHub Actions
+
+* Updated VSIX build instructions and automated `package-lock.json` updates in CI.
 
 ## [0.2.2] - 2025-12-14
 
 ### Added
-- Icon to documentation
-- Updated tests and documentation
+
+* Documentation icon and refreshed tests/docs.
 
 ### Changed
-- Revised installation section and badge links
-- Updated documentation links
+
+* Revised installation section and badge/documentation links.
 
 ## [0.2.1] - 2025-12-14
 
 ### Added
-- Extension icon
-- Updated documentation
-- Deeplinks for better integration
+
+* Extension icon, deeplinks, and documentation updates.
 
 ### Changed
-- Refactored environment variable names for MCP command consistency
-- Updated package.json for versioning and sponsorship
+
+* Refactored env var names for MCP command consistency; updated `package.json` metadata.
 
 ## [0.2.0] - 2025-12-14
 
 ### Added
-- **Custom working directory setting** - Users can now configure a custom working directory for .do files
-- Configurable working directory support in MCP client
-- New CONTRIBUTING.md guidelines
+
+* **Custom working directory** setting for `.do` files.
+* CONTRIBUTING guidelines.
 
 ### Changed
-- Updated README with working directory configuration instructions
-- Updated package.json with new configuration options
+
+* Updated README and `package.json` for the new configuration.
 
 ## [0.1.1] - 2025-12-13
 
 ### Added
-- Syntax highlighting feature for Stata code
+
+* **Syntax highlighting** for Stata code.
 
 ### Changed
-- Updated documentation in README and package.json
-- Improved package description
-- Clarified installation instructions for better accessibility
-- Added workflow_dispatch trigger to release packaging workflow
+
+* Documentation and packaging workflow improvements.
 
 ## [0.1.0] - 2025-12-13
 
 ### Added
-- Initial release of Stata Workbench
-- Publishing support for Open VSX Registry
-- Publishing support for VS Code Marketplace
-- GitHub Actions workflow for packaging VSIX on release
-- Basic Stata integration features
-- Installation instructions and documentation
 
-[0.3.1]: https://github.com/tmonk/stata-workbench/compare/v.0.3.0...v0.3.1
+* Initial release of **Stata Workbench**.
+* Publishing support for Open VSX + VS Code Marketplace.
+* GitHub Actions workflow for VSIX packaging on release.
+
+[Unreleased]: https://github.com/tmonk/stata-workbench/compare/v0.8.2...HEAD
+[0.8.2]: https://github.com/tmonk/stata-workbench/compare/v0.8.1...v0.8.2
+[0.8.1]: https://github.com/tmonk/stata-workbench/compare/v0.8.0...v0.8.1
+[0.8.0]: https://github.com/tmonk/stata-workbench/compare/v0.7.3...v0.8.0
+[0.7.3]: https://github.com/tmonk/stata-workbench/compare/v0.7.2...v0.7.3
+[0.7.2]: https://github.com/tmonk/stata-workbench/compare/v0.7.1...v0.7.2
+[0.7.1]: https://github.com/tmonk/stata-workbench/compare/v0.7.0...v0.7.1
+[0.7.0]: https://github.com/tmonk/stata-workbench/compare/v0.6.0...v0.7.0
+[0.6.0]: https://github.com/tmonk/stata-workbench/compare/v0.5.0...v0.6.0
+[0.5.0]: https://github.com/tmonk/stata-workbench/compare/v0.4.4...v0.5.0
+[0.4.4]: https://github.com/tmonk/stata-workbench/compare/v0.4.3...v0.4.4
+[0.4.3]: https://github.com/tmonk/stata-workbench/compare/v0.4.2...v0.4.3
+[0.4.2]: https://github.com/tmonk/stata-workbench/compare/v0.4.1...v0.4.2
+[0.4.1]: https://github.com/tmonk/stata-workbench/compare/v0.4.0...v0.4.1
+[0.4.0]: https://github.com/tmonk/stata-workbench/compare/v0.3.2...v0.4.0
+[0.3.2]: https://github.com/tmonk/stata-workbench/compare/v0.3.1...v0.3.2
+[0.3.1]: https://github.com/tmonk/stata-workbench/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/tmonk/stata-workbench/compare/v.0.2.3...v0.3.0
 [0.2.3]: https://github.com/tmonk/stata-workbench/compare/v0.2.2...v.0.2.3
 [0.2.2]: https://github.com/tmonk/stata-workbench/compare/v0.2.1...v0.2.2
@@ -105,3 +210,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [0.2.0]: https://github.com/tmonk/stata-workbench/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/tmonk/stata-workbench/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/tmonk/stata-workbench/releases/tag/v0.1.0
+[1]: https://github.com/tmonk/stata-workbench/tags
