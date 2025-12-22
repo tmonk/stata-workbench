@@ -1,0 +1,189 @@
+/* Data Browser Specific Styles */
+body {
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    overflow: hidden;
+}
+
+#toolbar {
+    padding: var(--space-xs) var(--space-md);
+    background: var(--bg-panel);
+    border-bottom: 1px solid var(--border-subtle);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-md);
+    flex-shrink: 0;
+}
+
+#filter-container {
+    display: flex;
+    align-items: center;
+    gap: var(--space-xs);
+    flex: 1;
+}
+
+#filter-input {
+    background: var(--bg-surface);
+    border: 1px solid var(--border-subtle);
+    color: var(--text-primary);
+    border-radius: var(--radius-sm);
+    padding: 6px 12px;
+    font-family: var(--font-mono);
+    font-size: 13px;
+    width: 100%;
+    max-width: 400px;
+    transition: all 0.2s ease;
+}
+
+#filter-input:focus {
+    outline: none;
+    border-color: var(--border-focus);
+    box-shadow: 0 0 0 1px var(--border-focus);
+}
+
+#variable-selector {
+    background: var(--bg-surface);
+    border: 1px solid var(--border-subtle);
+    color: var(--text-primary);
+    border-radius: var(--radius-sm);
+    padding: 6px 24px 6px 12px;
+    font-size: 13px;
+    cursor: pointer;
+    appearance: none;
+    background-image: url("data:image/svg+xml;charset=US-ASCII,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22292.4%22%20height%3D%22292.4%22%3E%3Cpath%20fill%3D%22%23a1a1aa%22%20d%3D%22M287%2069.4a17.6%2017.6%200%200%200-13-5.4H18.4c-5%200-9.3%201.8-12.9%205.4A17.6%2017.6%200%200%200%200%2082.2c0%205%201.8%209.3%205.4%2012.9l128%20127.9c3.6%203.6%207.8%205.4%2012.8%205.4s9.2-1.8%2012.8-5.4L287%2095c3.5-3.5%205.4-7.8%205.4-12.8%200-5-1.9-9.2-5.5-12.8z%22%2F%3E%3C%2Fsvg%3E");
+    background-repeat: no-repeat;
+    background-position: right 8px top 50%;
+    background-size: 8px auto;
+}
+
+#data-grid-container {
+    flex: 1;
+    overflow: auto;
+    position: relative;
+    background: var(--bg-app);
+}
+
+table {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    font-family: var(--font-mono);
+    font-size: 13px;
+    white-space: nowrap;
+}
+
+th, td {
+    padding: 6px 12px;
+    border-bottom: 1px solid var(--border-subtle);
+    border-right: 1px solid var(--border-subtle);
+}
+
+th {
+    background: var(--bg-panel);
+    font-weight: 600;
+    color: var(--text-secondary);
+    text-align: left;
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    user-select: none;
+    cursor: default;
+}
+
+th.resize-handle {
+    cursor: col-resize;
+    position: absolute;
+    right: 0;
+    top: 0;
+    bottom: 0;
+    width: 4px;
+    z-index: 3;
+}
+
+th:hover {
+    background: var(--bg-surface);
+}
+
+td {
+    color: var(--text-code);
+}
+
+tr:nth-child(even) td {
+    background: rgba(255, 255, 255, 0.01);
+}
+
+tr:hover td {
+    background: rgba(255, 255, 255, 0.03);
+}
+
+.type-indicator {
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    margin-right: 6px;
+    background: var(--text-tertiary);
+}
+
+.type-str .type-indicator { background: var(--accent-warning); }
+.type-int .type-indicator, .type-long .type-indicator, .type-byte .type-indicator { background: var(--accent-primary); }
+.type-float .type-indicator, .type-double .type-indicator { background: var(--accent-success); }
+
+#statusbar {
+    padding: 4px 12px;
+    background: var(--bg-panel);
+    border-top: 1px solid var(--border-subtle);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 11px;
+    color: var(--text-secondary);
+    flex-shrink: 0;
+}
+
+.pagination-controls {
+    display: flex;
+    gap: var(--space-xs);
+    align-items: center;
+}
+
+.page-info {
+    margin: 0 var(--space-xs);
+    font-family: var(--font-mono);
+}
+
+.loading-overlay {
+    position: absolute;
+    inset: 0;
+    background: rgba(0,0,0,0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 50;
+    backdrop-filter: blur(2px);
+}
+
+.spinner {
+    width: 24px;
+    height: 24px;
+    border: 2px solid var(--border-subtle);
+    border-top-color: var(--accent-primary);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
+.error-banner {
+    background: var(--accent-error);
+    color: white;
+    padding: 8px;
+    text-align: center;
+    font-size: 12px;
+    font-weight: 500;
+}
