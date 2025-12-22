@@ -56,8 +56,17 @@ Offline/VSIX fallback:
    A **Graph** artifact card appears - click it to open the generated graph.
 
 <p align="center">
-  <img src="img/screenshot.png" style="width: 70%;" alt="Stata Terminal panel showing Stata output cards and a graph artifact" />
+  <img src="img/screenshot.png" width="70%" alt="Stata Terminal panel showing Stata output cards and a graph artifact" />
+  <br />
+  <em>Stata Terminal panel showing output cards and a graph artifact (click to enlarge).</em>
 </p>
+
+<p align="center">
+  <img src="img/screenshot-data.png" width="70%" alt="Stata Data Browser panel showing data output." />
+  <br />
+  <em>Data Browser allows for a live view of your data, with filtering and sorting.</em>
+</p>
+
 
 
 ## Requirements
