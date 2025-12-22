@@ -340,6 +340,8 @@ async function applyFilter() {
 // --- Rendering ---
 
 function renderGrid(pageData) {
+    const varCount = pageData.vars?.length || pageData.variables?.length || 0;
+    log(`Render Grid. Vars: ${varCount}, Rows: ${pageData.rows?.length || pageData.data?.length}`);
     // Header
     dom.header.innerHTML = '';
     const obsTh = document.createElement('th');
@@ -374,7 +376,7 @@ function renderGrid(pageData) {
         // but we need to map columns correctly.
         // The API returns 'vars': ["_n", "make", "price"] so we can map indices.
         
-        const returnedVars = pageData.vars || [];
+        const returnedVars = pageData.vars || pageData.variables || [];
         const obsIndex = returnedVars.indexOf('_n'); // Stata obs number
         
         const tdObs = document.createElement('td');

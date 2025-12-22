@@ -323,4 +323,74 @@ describe('Data Browser Frontend (data-browser.js)', () => {
         assert.property(viewBody, 'filterExpr', 'Body should contain filterExpr');
         assert.notProperty(viewBody, 'filter', 'Body should NOT contain "filter" property');
     });
+
+    it('should load page from view endpoint after applying filter', async () => {
+        triggerMessage({ type: 'init', baseUrl: 'http://test', token: 'xyz' });
+        
+        // Init calls
+        const dsReqId = getApiCall('/v1/dataset').args[0].reqId;
+        triggerMessage({ type: 'apiResponse', reqId: dsReqId, success: true, data: { dataset: { id: 'DS1', n: 100 } } });
+        await new Promise(resolve => setTimeout(resolve, 0));
+        
+        const varsReqId = getApiCall('/v1/vars').args[0].reqId;
+        triggerMessage({ type: 'apiResponse', reqId: varsReqId, success: true, data: { vars: [{name: 'v1'}] } });
+        await new Promise(resolve => setTimeout(resolve, 0));
+
+        // Initial loadPage call (clear it)
+        vscodeMock.postMessage.resetHistory();
+
+        // Apply Filter
+        document.getElementById('filter-input').value = 'v1 > 0';
+        document.getElementById('apply-filter').click();
+        await new Promise(resolve => setTimeout(resolve, 0));
+
+        // Validation response
+        const validateReqId = getApiCall('/v1/filters/validate').args[0].reqId;
+        triggerMessage({ type: 'apiResponse', reqId: validateReqId, success: true, data: { ok: true } });
+        await new Promise(resolve => setTimeout(resolve, 0));
+
+        // View creation response
+        const viewReqId = getApiCall('/v1/views').args[0].reqId;
+        triggerMessage({ type: 'apiResponse', reqId: viewReqId, success: true, data: { viewId: 'VIEW_1', n: 50 } });
+        await new Promise(resolve => setTimeout(resolve, 0));
+
+        // Should trigger loadPage with view endpoint
+        const pageCall = getApiCall('/v1/views/VIEW_1/page');
+        assert.ok(pageCall, 'Should have called /v1/views/VIEW_1/page');
+        
+        const body = JSON.parse(pageCall.args[0].options.body);
+        assert.equal(body.datasetId, 'DS1');
+        assert.equal(body.limit, 100);
+    });
+
+    it('should render grid correctly when response uses "variables" instead of "vars"', async () => {
+        // Init
+        triggerMessage({ type: 'init', baseUrl: 'http://test', token: 'xyz' });
+        const dsReqId = getApiCall('/v1/dataset').args[0].reqId;
+        triggerMessage({ type: 'apiResponse', reqId: dsReqId, success: true, data: { dataset: { id: '123', n: 10 } } });
+        await new Promise(resolve => setTimeout(resolve, 0));
+        const varsReqId = getApiCall('/v1/vars').args[0].reqId;
+        triggerMessage({ type: 'apiResponse', reqId: varsReqId, success: true, data: { vars: [{ name: 'v1' }] } });
+        await new Promise(resolve => setTimeout(resolve, 0));
+
+        // Page response with "variables"
+        const pageReqId = getApiCall('/v1/page').args[0].reqId;
+        triggerMessage({
+            type: 'apiResponse',
+            reqId: pageReqId,
+            success: true,
+            data: {
+                datasetId: '123',
+                variables: ['_n', 'v1'], // Using variables here
+                rows: [[1, 'ValueA']]
+            }
+        });
+        await new Promise(resolve => setTimeout(resolve, 0));
+
+        // Verify grid content
+        const rows = document.querySelectorAll('#grid-body tr');
+        assert.equal(rows.length, 1, 'Should render 1 row');
+        const cells = rows[0].querySelectorAll('td');
+        assert.equal(cells[1].textContent, 'ValueA', 'Should find value using "variables" mapping');
+    });
 });
