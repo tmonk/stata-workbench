@@ -195,15 +195,25 @@ async function initBrowser() {
 
         // 2. Get Vars
         const varData = await apiCall('/v1/vars');
-        if (varData && varData.vars) {
-            log(`Loaded ${varData.vars.length} variables`);
-            state.vars = varData.vars;
+        
+        let vars = null;
+        if (Array.isArray(varData)) {
+            vars = varData;
+        } else if (varData) {
+            vars = varData.vars || varData.variables;
+        }
+
+        if (vars) {
+            log(`Loaded ${vars.length} variables`);
+            state.vars = vars;
             if (!state.selectedVars.length) {
                 state.selectedVars = state.vars.slice(0, 50).map(v => v.name);
             } else {
                 state.selectedVars = state.selectedVars.filter(name => state.vars.some(v => v.name === name));
             }
             updateVarSelector();
+        } else {
+            log('No variables found in response', true);
         }
 
         // 3. Initial Load

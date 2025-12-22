@@ -119,6 +119,30 @@ describe('Data Browser Frontend (data-browser.js)', () => {
         assert.include(document.getElementById('status-text').textContent, '100 observations');
     });
 
+    it('should handle /v1/vars response with "variables" property', async () => {
+        triggerMessage({ type: 'init', baseUrl: 'http://test', token: 'xyz' });
+
+        const dsReqId = getApiCall('/v1/dataset').args[0].reqId;
+        triggerMessage({ type: 'apiResponse', reqId: dsReqId, success: true, data: { dataset: { id: '123', n: 100 } } });
+
+        await new Promise(resolve => setTimeout(resolve, 0));
+
+        const varsReqId = getApiCall('/v1/vars').args[0].reqId;
+        // Respond with { variables: [...] } instead of { vars: [...] }
+        triggerMessage({
+            type: 'apiResponse',
+            reqId: varsReqId,
+            success: true,
+            data: { variables: [{ name: 'mpg' }] }
+        });
+
+        await new Promise(resolve => setTimeout(resolve, 0));
+
+        // Verify selector was populated (check dom)
+        const selector = document.getElementById('variable-selector');
+        assert.include(selector.innerHTML, 'mpg', 'Selector should contain variable from "variables" property');
+    });
+
     it('should send integer limit and offset in loadPage', async () => {
         // Setup state via init
         triggerMessage({ type: 'init', baseUrl: 'http://test', token: 'xyz' });
