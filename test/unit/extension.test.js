@@ -16,6 +16,7 @@ describe('extension refreshMcpPackage', () => {
             vscode: vscodeMock,
             './mcp-client': { client: { setLogger: () => { }, onStatusChanged: () => ({ dispose() { } }) } },
             './terminal-panel': { TerminalPanel: { setExtensionUri: () => { }, addEntry: () => { }, show: () => { } } },
+            './data-browser-panel': { DataBrowserPanel: { createOrShow: () => { } } },
             './artifact-utils': { openArtifact: () => { } },
             fs: {
                 mkdirSync: sinon.stub(),
@@ -88,6 +89,7 @@ describe('extension refreshMcpPackage', () => {
             vscode: buildVscodeMock(),
             './mcp-client': { client: { setLogger: () => { }, onStatusChanged: () => ({ dispose() { } }) } },
             './terminal-panel': { TerminalPanel: { setExtensionUri: () => { }, addEntry: () => { }, show: () => { } } },
+            './data-browser-panel': { DataBrowserPanel: { createOrShow: () => { } } },
             './artifact-utils': { openArtifact: () => { } },
             fs: {
                 mkdirSync: sinon.stub(),
@@ -170,6 +172,7 @@ describe('extension refreshMcpPackage', () => {
             vscode: buildVscodeMock(),
             './mcp-client': { client: { setLogger: () => { }, onStatusChanged: () => ({ dispose() { } }) } },
             './terminal-panel': { TerminalPanel: { setExtensionUri: () => { }, addEntry: () => { }, show: () => { } } },
+            './data-browser-panel': { DataBrowserPanel: { createOrShow: () => { } } },
             './artifact-utils': { openArtifact: () => { } },
             fs: {
                 mkdirSync: sinon.stub(),
@@ -276,9 +279,9 @@ describe('extension refreshMcpPackage', () => {
             const extWithFs = proxyquire.noCallThru().load('../../src/extension', {
                 vscode: vscodeMock,
                 './mcp-client': { client: { setLogger: () => { }, onStatusChanged: () => ({ dispose() { } }) } },
-                './terminal-panel': { TerminalPanel: { setExtensionUri: () => { }, addEntry: () => { }, show: () => { } } },
-                './artifact-utils': { openArtifact: () => { } },
-                fs: fsStub,
+                            './terminal-panel': { TerminalPanel: { setExtensionUri: () => { }, addEntry: () => { }, show: () => { } } },
+                            './data-browser-panel': { DataBrowserPanel: { createOrShow: () => { } } },
+                            './artifact-utils': { openArtifact: () => { } },                fs: fsStub,
                 child_process: { spawnSync: sinon.stub() }
             });
 
@@ -307,9 +310,9 @@ describe('extension refreshMcpPackage', () => {
             const extWithFs = proxyquire.noCallThru().load('../../src/extension', {
                 vscode: vscodeMock,
                 './mcp-client': { client: { setLogger: () => { }, onStatusChanged: () => ({ dispose() { } }) } },
-                './terminal-panel': { TerminalPanel: { setExtensionUri: () => { }, addEntry: () => { }, show: () => { } } },
-                './artifact-utils': { openArtifact: () => { } },
-                fs: fsStub,
+                            './terminal-panel': { TerminalPanel: { setExtensionUri: () => { }, addEntry: () => { }, show: () => { } } },
+                            './data-browser-panel': { DataBrowserPanel: { createOrShow: () => { } } },
+                            './artifact-utils': { openArtifact: () => { } },                fs: fsStub,
                 child_process: { spawnSync: spawnSyncStub }
             });
 
@@ -346,9 +349,9 @@ describe('extension refreshMcpPackage', () => {
             const extWithFs = proxyquire.noCallThru().load('../../src/extension', {
                 vscode: vscodeMock,
                 './mcp-client': { client: { setLogger: () => { }, onStatusChanged: () => ({ dispose() { } }) } },
-                './terminal-panel': { TerminalPanel: { setExtensionUri: () => { }, addEntry: () => { }, show: () => { } } },
-                './artifact-utils': { openArtifact: () => { } },
-                fs: fsStub,
+                            './terminal-panel': { TerminalPanel: { setExtensionUri: () => { }, addEntry: () => { }, show: () => { } } },
+                            './data-browser-panel': { DataBrowserPanel: { createOrShow: () => { } } },
+                            './artifact-utils': { openArtifact: () => { } },                fs: fsStub,
                 child_process: { spawnSync: sinon.stub() }
             });
 
@@ -362,9 +365,9 @@ describe('extension refreshMcpPackage', () => {
             const extWithFs = proxyquire.noCallThru().load('../../src/extension', {
                 vscode: buildVscodeMock(),
                 './mcp-client': { client: { setLogger: () => { }, onStatusChanged: () => ({ dispose() { } }) } },
-                './terminal-panel': { TerminalPanel: { setExtensionUri: () => { }, addEntry: () => { }, show: () => { } } },
-                './artifact-utils': { openArtifact: () => { } },
-                fs: {
+                            './terminal-panel': { TerminalPanel: { setExtensionUri: () => { }, addEntry: () => { }, show: () => { } } },
+                            './data-browser-panel': { DataBrowserPanel: { createOrShow: () => { } } },
+                            './artifact-utils': { openArtifact: () => { } },                fs: {
                     mkdirSync: sinon.stub(),
                     writeFileSync: sinon.stub(),
                     existsSync: sinon.stub().returns(false),
@@ -396,9 +399,9 @@ describe('extension refreshMcpPackage', () => {
             const extWithFs = proxyquire.noCallThru().load('../../src/extension', {
                 vscode: cursorMock,
                 './mcp-client': { client: { setLogger: () => { }, onStatusChanged: () => ({ dispose() { } }) } },
-                './terminal-panel': { TerminalPanel: { setExtensionUri: () => { }, addEntry: () => { }, show: () => { } } },
-                './artifact-utils': { openArtifact: () => { } },
-                fs: {
+                            './terminal-panel': { TerminalPanel: { setExtensionUri: () => { }, addEntry: () => { }, show: () => { } } },
+                            './data-browser-panel': { DataBrowserPanel: { createOrShow: () => { } } },
+                            './artifact-utils': { openArtifact: () => { } },                fs: {
                     mkdirSync: sinon.stub(),
                     writeFileSync: sinon.stub(),
                     existsSync: sinon.stub().returns(false),
@@ -422,9 +425,9 @@ describe('extension refreshMcpPackage', () => {
             const extWithFs = proxyquire.noCallThru().load('../../src/extension', {
                 vscode: buildVscodeMock(),
                 './mcp-client': { client: { setLogger: () => { }, onStatusChanged: () => ({ dispose() { } }) } },
-                './terminal-panel': { TerminalPanel: { setExtensionUri: () => { }, addEntry: () => { }, show: () => { } } },
-                './artifact-utils': { openArtifact: () => { } },
-                fs: {
+                            './terminal-panel': { TerminalPanel: { setExtensionUri: () => { }, addEntry: () => { }, show: () => { } } },
+                            './data-browser-panel': { DataBrowserPanel: { createOrShow: () => { } } },
+                            './artifact-utils': { openArtifact: () => { } },                fs: {
                     mkdirSync: sinon.stub(),
                     writeFileSync: sinon.stub(),
                     existsSync: sinon.stub().returns(false),
@@ -449,9 +452,9 @@ describe('extension refreshMcpPackage', () => {
             const extWithFs = proxyquire.noCallThru().load('../../src/extension', {
                 vscode: buildVscodeMock(),
                 './mcp-client': { client: { setLogger: () => { }, onStatusChanged: () => ({ dispose() { } }) } },
-                './terminal-panel': { TerminalPanel: { setExtensionUri: () => { }, addEntry: () => { }, show: () => { } } },
-                './artifact-utils': { openArtifact: () => { } },
-                fs: {
+                            './terminal-panel': { TerminalPanel: { setExtensionUri: () => { }, addEntry: () => { }, show: () => { } } },
+                            './data-browser-panel': { DataBrowserPanel: { createOrShow: () => { } } },
+                            './artifact-utils': { openArtifact: () => { } },                fs: {
                     mkdirSync: sinon.stub(),
                     writeFileSync: sinon.stub(),
                     existsSync: sinon.stub().returns(false),
@@ -481,9 +484,9 @@ describe('extension refreshMcpPackage', () => {
             const extWithFs = proxyquire.noCallThru().load('../../src/extension', {
                 vscode: buildVscodeMock(),
                 './mcp-client': { client: { setLogger: () => { }, onStatusChanged: () => ({ dispose() { } }) } },
-                './terminal-panel': { TerminalPanel: { setExtensionUri: () => { }, addEntry: () => { }, show: () => { } } },
-                './artifact-utils': { openArtifact: () => { } },
-                fs: {
+                            './terminal-panel': { TerminalPanel: { setExtensionUri: () => { }, addEntry: () => { }, show: () => { } } },
+                            './data-browser-panel': { DataBrowserPanel: { createOrShow: () => { } } },
+                            './artifact-utils': { openArtifact: () => { } },                fs: {
                     mkdirSync: sinon.stub(),
                     writeFileSync: sinon.stub(),
                     existsSync: sinon.stub().returns(false),
@@ -508,9 +511,9 @@ describe('extension refreshMcpPackage', () => {
             const extWithFs = proxyquire.noCallThru().load('../../src/extension', {
                 vscode: buildVscodeMock(),
                 './mcp-client': { client: { setLogger: () => { }, onStatusChanged: () => ({ dispose() { } }) } },
-                './terminal-panel': { TerminalPanel: { setExtensionUri: () => { }, addEntry: () => { }, show: () => { } } },
-                './artifact-utils': { openArtifact: () => { } },
-                fs: {
+                            './terminal-panel': { TerminalPanel: { setExtensionUri: () => { }, addEntry: () => { }, show: () => { } } },
+                            './data-browser-panel': { DataBrowserPanel: { createOrShow: () => { } } },
+                            './artifact-utils': { openArtifact: () => { } },                fs: {
                     mkdirSync: sinon.stub(),
                     writeFileSync: sinon.stub(),
                     existsSync: sinon.stub().returns(false),
@@ -530,9 +533,9 @@ describe('extension refreshMcpPackage', () => {
             const extWithFs = proxyquire.noCallThru().load('../../src/extension', {
                 vscode: buildVscodeMock(),
                 './mcp-client': { client: { setLogger: () => { }, onStatusChanged: () => ({ dispose() { } }) } },
-                './terminal-panel': { TerminalPanel: { setExtensionUri: () => { }, addEntry: () => { }, show: () => { } } },
-                './artifact-utils': { openArtifact: () => { } },
-                fs: {
+                            './terminal-panel': { TerminalPanel: { setExtensionUri: () => { }, addEntry: () => { }, show: () => { } } },
+                            './data-browser-panel': { DataBrowserPanel: { createOrShow: () => { } } },
+                            './artifact-utils': { openArtifact: () => { } },                fs: {
                     mkdirSync: sinon.stub(),
                     writeFileSync: sinon.stub(),
                     existsSync: sinon.stub().returns(false),
@@ -562,9 +565,9 @@ describe('extension refreshMcpPackage', () => {
             const extWithFs = proxyquire.noCallThru().load('../../src/extension', {
                 vscode: buildVscodeMock(),
                 './mcp-client': { client: { setLogger: () => { }, onStatusChanged: () => ({ dispose() { } }) } },
-                './terminal-panel': { TerminalPanel: { setExtensionUri: () => { }, addEntry: () => { }, show: () => { } } },
-                './artifact-utils': { openArtifact: () => { } },
-                fs: {
+                            './terminal-panel': { TerminalPanel: { setExtensionUri: () => { }, addEntry: () => { }, show: () => { } } },
+                            './data-browser-panel': { DataBrowserPanel: { createOrShow: () => { } } },
+                            './artifact-utils': { openArtifact: () => { } },                fs: {
                     mkdirSync: sinon.stub(),
                     writeFileSync: sinon.stub(),
                     existsSync: sinon.stub().returns(false),
@@ -582,9 +585,9 @@ describe('extension refreshMcpPackage', () => {
             const extWithFs = proxyquire.noCallThru().load('../../src/extension', {
                 vscode: buildVscodeMock(),
                 './mcp-client': { client: { setLogger: () => { }, onStatusChanged: () => ({ dispose() { } }) } },
-                './terminal-panel': { TerminalPanel: { setExtensionUri: () => { }, addEntry: () => { }, show: () => { } } },
-                './artifact-utils': { openArtifact: () => { } },
-                fs: {
+                            './terminal-panel': { TerminalPanel: { setExtensionUri: () => { }, addEntry: () => { }, show: () => { } } },
+                            './data-browser-panel': { DataBrowserPanel: { createOrShow: () => { } } },
+                            './artifact-utils': { openArtifact: () => { } },                fs: {
                     mkdirSync: sinon.stub(),
                     writeFileSync,
                     existsSync: sinon.stub().returns(false),

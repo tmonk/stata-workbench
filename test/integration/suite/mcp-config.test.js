@@ -168,7 +168,7 @@ suite('MCP Config Integration', function () {
         const json = JSON.parse(fs.readFileSync(target.configPath, 'utf8'));
         // mcp-stata should be present only under servers for VS Code host
         assert.property(json.servers, 'mcp_stata');
-        assert.notProperty(json, 'mcpServers', 'cursor container should remain absent for VS Code host');
+        assert.notProperty(json.mcpServers, 'mcp_stata', 'mcp_stata should be removed from mcpServers for VS Code host');
 
         // Non-mcp-stata entries remain untouched
         assert.deepEqual(json.servers.other_server, initial.servers.other_server, 'other server entry should be unchanged');

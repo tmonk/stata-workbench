@@ -6,11 +6,11 @@ const { spawnSync } = require('child_process');
 const pkg = require('../package.json');
 const { client: mcpClient } = require('./mcp-client');
 const { TerminalPanel } = require('./terminal-panel');
+const { DataBrowserPanel } = require('./data-browser-panel');
 const { openArtifact } = require('./artifact-utils');
 
 let outputChannel;
 let statusBarItem;
-let dataPanel = null;
 let graphPanel = null;
 let missingCli = false;
 let missingCliPrompted = false;
@@ -77,6 +77,7 @@ function activate(context) {
         vscode.commands.registerCommand('stata-workbench.runFile', runFile),
         vscode.commands.registerCommand('stata-workbench.testMcpServer', testConnection),
         vscode.commands.registerCommand('stata-workbench.showGraphs', showGraphs),
+        vscode.commands.registerCommand('stata-workbench.viewData', viewData),
         vscode.commands.registerCommand('stata-workbench.installMcpCli', promptInstallMcpCli),
         vscode.commands.registerCommand('stata-workbench.cancelRequest', cancelRequest),
         mcpClient.onStatusChanged(updateStatusBar)
@@ -98,6 +99,7 @@ function activate(context) {
     if (context.extensionMode === vscode.ExtensionMode.Test) {
         return {
             TerminalPanel,
+            DataBrowserPanel,
             downloadGraphAsPdf
         };
     }
@@ -553,6 +555,28 @@ function updateStatusBar(status) {
     }
 }
 
+async function refreshDatasetSummary() {
+    try {
+        const channel = await mcpClient.getUiChannel();
+        if (channel && channel.baseUrl && channel.token) {
+            const url = `${channel.baseUrl}/v1/dataset`;
+            const result = await DataBrowserPanel._performRequest(url, {
+                method: 'GET',
+                headers: { 'Authorization': `Bearer ${channel.token}` }
+            });
+            const ds = result.dataset || result;
+            if (ds) {
+                TerminalPanel.updateDatasetSummary(ds.n, ds.k);
+            }
+        }
+        // Also refresh the data browser if it's open
+        DataBrowserPanel.refresh();
+    } catch (err) {
+        // Silently fail for summary updates
+        console.error('[Extension] Failed to refresh dataset summary:', err);
+    }
+}
+
 async function runSelection() {
     const editor = vscode.window.activeTextEditor;
     if (!editor) {
@@ -591,6 +615,8 @@ async function runSelection() {
             } else {
                 await presentRunResult(text, result, filePath);
             }
+            // Update summary after run
+            refreshDatasetSummary();
         } catch (error) {
             if (runId) {
                 TerminalPanel.failStreamingEntry(runId, error?.message || String(error));
@@ -634,6 +660,8 @@ async function runFile() {
             } else {
                 await presentRunResult(commandText, result, filePath);
             }
+            // Update summary after run
+            refreshDatasetSummary();
         } catch (error) {
             if (runId) {
                 TerminalPanel.failStreamingEntry(runId, error?.message || String(error));
@@ -665,13 +693,15 @@ function showOutput(content) {
 // Defines the standard run command used by the Terminal Panel
 const terminalRunCommand = async (code, hooks) => {
     try {
-        return await mcpClient.runSelection(code, {
+        const res = await mcpClient.runSelection(code, {
             normalizeResult: true,
             includeGraphs: true,
             cwd: hooks?.cwd,
             onLog: hooks?.onLog,
             onProgress: hooks?.onProgress
         });
+        refreshDatasetSummary();
+        return res;
     } catch (error) {
         return {
             success: false,
@@ -685,10 +715,12 @@ const terminalRunCommand = async (code, hooks) => {
 // Clear-all convenience for terminal UI
 const clearAllCommand = async () => {
     try {
-        return await mcpClient.runSelection('clear all', {
+        const res = await mcpClient.runSelection('clear all', {
             normalizeResult: true,
             includeGraphs: false
         });
+        refreshDatasetSummary();
+        return res;
     } catch (error) {
         return {
             success: false,
@@ -750,10 +782,11 @@ async function showTerminal() {
         cancelRun: cancelRequest,
         clearAll: clearAllCommand
     });
+    refreshDatasetSummary();
 }
 
 async function viewData() {
-    await refreshDataPanel();
+    DataBrowserPanel.createOrShow(globalExtensionUri);
 }
 
 async function showGraphs() {
@@ -884,69 +917,6 @@ function escapeHtml(text) {
         .replace(/>/g, '&gt;')
         .replace(/"/g, '&quot;')
         .replace(/'/g, '&#039;');
-}
-
-function openDataPanel(table) {
-    if (!dataPanel) {
-        dataPanel = vscode.window.createWebviewPanel(
-            'stataData',
-            'Stata Data',
-            vscode.ViewColumn.Beside,
-            {
-                enableScripts: true,
-                retainContextWhenHidden: true,
-                localResourceRoots: [vscode.Uri.joinPath(globalExtensionUri, 'src', 'ui-shared')]
-            }
-        );
-        dataPanel.onDidDispose(() => { dataPanel = null; });
-        dataPanel.webview.onDidReceiveMessage(async (message) => {
-            if (message?.command === 'applyFilter') {
-                currentDataFilter = message.filter || '';
-                await refreshDataPanel();
-            }
-        });
-    }
-
-    const html = renderDataHtml(table, dataPanel.webview);
-    dataPanel.webview.html = html;
-}
-
-function renderDataHtml(table, webview) {
-    const designUri = webview.asWebviewUri(vscode.Uri.joinPath(globalExtensionUri, 'src', 'ui-shared', 'design.css'));
-    const columns = table?.columns || [];
-    const data = table?.dataRows || [];
-    const rows = table?.count || 0;
-    const header = columns.map(c => `<th>${escapeHtml(c)}</th>`).join('');
-    const body = data.map(row => `<tr>${row.map(cell => `<td>${escapeHtml(String(cell ?? '.'))}</td>`).join('')}</tr>`).join('');
-
-    return `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <link rel="stylesheet" href="${designUri}">
-  <title>Stata Data</title>
-  <style>
-    body { padding: var(--space-md); }
-    table { width: 100%; border-collapse: separate; border-spacing: 0; border: 1px solid var(--border-subtle); border-radius: var(--radius-md); overflow: hidden; }
-    th, td { padding: 8px 12px; border-bottom: 1px solid var(--border-subtle); border-right: 1px solid var(--border-subtle); font-family: var(--font-mono); font-size: 12px; }
-    th { background: var(--bg-secondary); font-weight: 600; position: sticky; top: 0; }
-    tr:last-child td { border-bottom: none; }
-    tr:nth-child(even) { background: rgba(255,255,255,0.01); }
-    td:last-child, th:last-child { border-right: none; }
-    .meta-bar { margin-bottom: var(--space-md); display: flex; justify-content: space-between; align-items: center; }
-  </style>
-</head>
-<body>
-  <div class="meta-bar">
-    <span class="badge" style="font-weight:normal;">${rows} observations</span>
-  </div>
-  <div style="overflow-x: auto; border-radius: var(--radius-md); border: 1px solid var(--border-subtle);">
-    <table style="border:none;">
-        <thead><tr>${header}</tr></thead>
-        <tbody>${body}</tbody>
-    </table>
-  </div>
-</body></html>`;
 }
 
 function openGraphPanel(graphDetails) {
@@ -1199,23 +1169,6 @@ function renderGraphHtml(graphDetails, webview, extensionUri) {
      }
   </script>
 </body></html>`;
-}
-
-async function refreshDataPanel() {
-    try {
-        const response = await mcpClient.viewData(0, 50);
-        const table = buildTable(response);
-        openDataPanel(table);
-    } catch (error) {
-        vscode.window.showErrorMessage(`Failed to view data: ${error.message}`);
-    }
-}
-
-function buildTable(dataResponse) {
-    const rows = Array.isArray(dataResponse?.data) ? dataResponse.data : [];
-    const columns = rows.length > 0 ? Object.keys(rows[0]) : [];
-    const dataRows = rows.map(row => columns.map(col => row[col]));
-    return { columns, dataRows, count: rows.length };
 }
 
 async function withStataProgress(title, task, sample) {

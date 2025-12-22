@@ -250,6 +250,26 @@ describe('McpClient', () => {
         });
     });
 
+    describe('getUiChannel', () => {
+        it('enqueues get_ui_channel and returns parsed result', async () => {
+            const enqueueStub = sinon.stub(client, '_enqueue').callsFake(async (label, options, task) => {
+                assert.equal(label, 'get_ui_channel');
+                assert.deepEqual(options, {});
+                const result = await task();
+                return result;
+            });
+
+            client._callTool.callsFake(async (c, name) => {
+                assert.equal(name, 'get_ui_channel');
+                return { baseUrl: 'http://localhost:1234', token: 'xyz' };
+            });
+
+            const result = await client.getUiChannel();
+            assert.deepEqual(result, { baseUrl: 'http://localhost:1234', token: 'xyz' });
+            enqueueStub.restore();
+        });
+    });
+
     describe('runFile', () => {
         it('should honor resolved cwd when no workspace folders exist', async () => {
             const originalFolders = vscodeMock.workspace.workspaceFolders;
