@@ -205,6 +205,9 @@ class DataBrowserPanel {
                 <link rel="stylesheet" href="${designUri}">
                 <link rel="stylesheet" href="${styleUri}">
                 <title>Stata Data Browser</title>
+                <style nonce="${nonce}">
+                    @import url('https://unpkg.com/@vscode/codicons@0.0.44/dist/codicon.css');
+                </style>
             </head>
             <body>
                 <div id="error-banner" class="error-banner hidden"></div>
@@ -213,17 +216,24 @@ class DataBrowserPanel {
                     <div class="context-container">
                         <div class="context-info">
                             <div class="context-row">
-                                <span class="context-label">Dataset:</span>
-                                <span class="context-value" id="status-text">Connecting...</span>
+                                <span class="context-label">Frame:</span>
+                                <span class="context-value" id="frame-name">default</span>
                             </div>
                             <div class="context-row">
+                                <span class="context-label">Filter:</span>
                                 <div id="filter-container">
-                                    <input type="text" id="filter-input" placeholder="Filter expression (e.g. price > 5000 & mpg > 20)">
-                                    <button id="apply-filter" class="btn btn-primary btn-sm">Filter</button>
+                                    <input type="text" id="filter-input" placeholder="e.g. price > 5000">
+                                    <button id="apply-filter" class="btn btn-ghost btn-icon" title="Apply Filter">
+                                        <i class="codicon codicon-filter"></i>
+                                    </button>
                                 </div>
                             </div>
                         </div>
                         <div class="context-right">
+                            <div class="data-summary" id="data-summary">
+                                <span class="summary-item">n: <span id="obs-count">0</span></span>
+                                <span class="summary-item">v: <span id="var-count">0</span></span>
+                            </div>
                             <div class="pagination-controls">
                                 <button id="btn-prev" class="btn btn-sm btn-ghost" title="Previous Page" disabled>
                                     <i class="codicon codicon-chevron-left"></i>
@@ -237,9 +247,11 @@ class DataBrowserPanel {
                                 <button id="btn-refresh" class="btn btn-sm btn-ghost" title="Refresh Data">
                                     <i class="codicon codicon-refresh"></i>
                                 </button>
-                                <select id="variable-selector" class="btn btn-sm" style="max-width: 120px;">
-                                    <option value="">Variables...</option>
-                                </select>
+                                <div class="var-selector-wrapper">
+                                    <select id="variable-selector" class="btn btn-sm btn-ghost">
+                                        <option value="">Variables...</option>
+                                    </select>
+                                </div>
                             </div>
                         </div>
                     </div>

@@ -32,7 +32,9 @@ const dom = {
     refreshBtn: document.getElementById('btn-refresh'),
     varSelector: document.getElementById('variable-selector'),
     pageInfo: document.getElementById('page-info'),
-    statusText: document.getElementById('status-text'),
+    frameName: document.getElementById('frame-name'),
+    obsCount: document.getElementById('obs-count'),
+    varCount: document.getElementById('var-count'),
     loading: document.getElementById('loading-overlay'),
     error: document.getElementById('error-banner')
 };
@@ -178,7 +180,9 @@ async function initBrowser() {
                 log('No data in memory - showing empty state');
                 state.datasetId = 'empty';
                 state.totalObs = 0;
-                dom.statusText.textContent = 'No data in memory';
+                if (dom.obsCount) dom.obsCount.textContent = '0';
+                if (dom.varCount) dom.varCount.textContent = '0';
+                if (dom.frameName) dom.frameName.textContent = 'none';
                 dom.grid.innerHTML = '<tr><td colspan="100%" style="text-align:center; padding: 20px; color: var(--text-tertiary);">No dataset loaded in Stata</td></tr>';
                 updatePagination({ rows: [] });
                 if (dom.varSelector) dom.varSelector.innerHTML = '<option value="">No Variables</option>';
@@ -196,7 +200,10 @@ async function initBrowser() {
         const dsInfo = dsResp.dataset || dsResp;
         state.datasetId = dsInfo.id;
         state.totalObs = dsInfo.n;
-        dom.statusText.textContent = `${(dsInfo.n || 0).toLocaleString()} observations, ${dsInfo.k} variables (Frame: ${dsInfo.frame})`;
+        
+        if (dom.obsCount) dom.obsCount.textContent = (dsInfo.n || 0).toLocaleString();
+        if (dom.varCount) dom.varCount.textContent = (dsInfo.k || 0).toLocaleString();
+        if (dom.frameName) dom.frameName.textContent = dsInfo.frame || 'default';
 
         // 2. Get Vars
         const varData = await apiCall('/v1/vars');
@@ -335,9 +342,9 @@ async function applyFilter() {
             state.viewId = viewData.id;
             state.offset = 0;
             if (viewData.filteredN !== undefined) {
-                dom.statusText.textContent = `Filtered: ${viewData.filteredN.toLocaleString()} observations`;
+                if (dom.obsCount) dom.obsCount.textContent = viewData.filteredN.toLocaleString();
             } else if (viewData.n !== undefined) {
-                dom.statusText.textContent = `Filtered: ${viewData.n.toLocaleString()} observations`;
+                if (dom.obsCount) dom.obsCount.textContent = viewData.n.toLocaleString();
             }
             await loadPage();
         }
