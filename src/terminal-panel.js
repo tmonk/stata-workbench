@@ -82,6 +82,11 @@ class TerminalPanel {
           return;
         }
 
+        if (message.type === 'openDataBrowser') {
+          vscode.commands.executeCommand('stata-workbench.viewData');
+          return;
+        }
+
         if (message.type === 'run' && typeof message.code === 'string') {
           await TerminalPanel.handleRun(message.code, runCommand);
         }
@@ -183,6 +188,10 @@ class TerminalPanel {
     for (const msg of pending) {
       TerminalPanel._postMessage(msg);
     }
+  }
+
+  static updateDatasetSummary(n, k) {
+    TerminalPanel._postMessage({ type: 'datasetSummary', n, k });
   }
 
   static async handleRun(code, runCommand) {
@@ -431,20 +440,81 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
   </script>
   <style nonce="${nonce}">
     @import url('https://unpkg.com/@vscode/codicons@0.0.44/dist/codicon.css');
+
+    .context-container {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      max-width: 900px;
+      margin: 0 auto;
+      width: 100%;
+    }
+
+    .context-info {
+      margin: 0 !important;
+      max-width: none !important;
+      flex: 1;
+    }
+
+    .context-right {
+      display: flex;
+      align-items: center;
+      gap: var(--space-md);
+    }
+
+    .data-summary {
+      display: flex;
+      gap: var(--space-sm);
+      font-size: 11px;
+      font-family: var(--font-mono);
+      color: var(--text-secondary);
+      background: rgba(255, 255, 255, 0.03);
+      padding: 2px 8px;
+      border-radius: var(--radius-pill);
+      border: 1px solid var(--border-subtle);
+    }
+
+    .summary-item {
+      display: flex;
+      gap: 4px;
+    }
+
+    .summary-item span {
+      color: var(--text-primary);
+      font-weight: 600;
+    }
+
+    #btn-open-browser {
+      padding: 4px;
+      height: 24px;
+      width: 24px;
+      justify-content: center;
+    }
   </style>
 </head>
 <body>
 
   <!-- Context Header -->
   <div class="context-header" id="context-header">
-    <div class="context-info">
-      <div class="context-row">
-        <span class="context-label">File:</span>
-        <span class="context-value" id="context-file">${escapedTitle}</span>
+    <div class="context-container">
+      <div class="context-info">
+        <div class="context-row">
+          <span class="context-label">File:</span>
+          <span class="context-value" id="context-file">${escapedTitle}</span>
+        </div>
+        <div class="context-row">
+          <span class="context-label">Last command:</span>
+          <span class="context-value context-command" id="last-command">—</span>
+        </div>
       </div>
-      <div class="context-row">
-        <span class="context-label">Last command:</span>
-        <span class="context-value context-command" id="last-command">—</span>
+      <div class="context-right">
+        <div class="data-summary" id="data-summary" style="display: none;">
+          <span class="summary-item">n: <span id="obs-count">0</span></span>
+          <span class="summary-item">v: <span id="var-count">0</span></span>
+        </div>
+        <button class="btn btn-ghost btn-icon" id="btn-open-browser" title="Open Data Browser">
+          <i class="codicon codicon-table"></i>
+        </button>
       </div>
     </div>
   </div>
@@ -545,7 +615,17 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
     const runBtn = document.getElementById('run-btn');
     const stopBtn = document.getElementById('stop-btn');
     const clearBtn = document.getElementById('clear-btn');
+    const btnOpenBrowser = document.getElementById('btn-open-browser');
+    const dataSummary = document.getElementById('data-summary');
+    const obsCount = document.getElementById('obs-count');
+    const varCount = document.getElementById('var-count');
     
+    if (btnOpenBrowser) {
+        btnOpenBrowser.addEventListener('click', () => {
+            vscode.postMessage({ type: 'openDataBrowser' });
+        });
+    }
+
     // Initial history embedded from server
     const initialEntries = window.initialEntries || [];
     const history = [];
@@ -1102,6 +1182,18 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
         appendEntry(msg.entry);
       }
       if (msg.type === 'busy') setBusy(msg.value);
+
+      if (msg.type === 'datasetSummary') {
+        if (dataSummary && obsCount && varCount) {
+            if (msg.n === 0 && msg.k === 0) {
+                dataSummary.style.display = 'none';
+            } else {
+                dataSummary.style.display = 'flex';
+                obsCount.textContent = (msg.n || 0).toLocaleString();
+                varCount.textContent = (msg.k || 0).toLocaleString();
+            }
+        }
+      }
 
       if (msg.type === 'runStarted') {
         const runId = msg.runId;

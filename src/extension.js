@@ -555,6 +555,26 @@ function updateStatusBar(status) {
     }
 }
 
+async function refreshDatasetSummary() {
+    try {
+        const channel = await mcpClient.getUiChannel();
+        if (channel && channel.baseUrl && channel.token) {
+            const url = `${channel.baseUrl}/v1/dataset`;
+            const result = await DataBrowserPanel._performRequest(url, {
+                method: 'GET',
+                headers: { 'Authorization': `Bearer ${channel.token}` }
+            });
+            const ds = result.dataset || result;
+            if (ds) {
+                TerminalPanel.updateDatasetSummary(ds.n, ds.k);
+            }
+        }
+    } catch (err) {
+        // Silently fail for summary updates
+        console.error('[Extension] Failed to refresh dataset summary:', err);
+    }
+}
+
 async function runSelection() {
     const editor = vscode.window.activeTextEditor;
     if (!editor) {
@@ -593,6 +613,8 @@ async function runSelection() {
             } else {
                 await presentRunResult(text, result, filePath);
             }
+            // Update summary after run
+            refreshDatasetSummary();
         } catch (error) {
             if (runId) {
                 TerminalPanel.failStreamingEntry(runId, error?.message || String(error));
@@ -636,6 +658,8 @@ async function runFile() {
             } else {
                 await presentRunResult(commandText, result, filePath);
             }
+            // Update summary after run
+            refreshDatasetSummary();
         } catch (error) {
             if (runId) {
                 TerminalPanel.failStreamingEntry(runId, error?.message || String(error));
@@ -667,13 +691,15 @@ function showOutput(content) {
 // Defines the standard run command used by the Terminal Panel
 const terminalRunCommand = async (code, hooks) => {
     try {
-        return await mcpClient.runSelection(code, {
+        const res = await mcpClient.runSelection(code, {
             normalizeResult: true,
             includeGraphs: true,
             cwd: hooks?.cwd,
             onLog: hooks?.onLog,
             onProgress: hooks?.onProgress
         });
+        refreshDatasetSummary();
+        return res;
     } catch (error) {
         return {
             success: false,
@@ -687,10 +713,12 @@ const terminalRunCommand = async (code, hooks) => {
 // Clear-all convenience for terminal UI
 const clearAllCommand = async () => {
     try {
-        return await mcpClient.runSelection('clear all', {
+        const res = await mcpClient.runSelection('clear all', {
             normalizeResult: true,
             includeGraphs: false
         });
+        refreshDatasetSummary();
+        return res;
     } catch (error) {
         return {
             success: false,
@@ -752,6 +780,7 @@ async function showTerminal() {
         cancelRun: cancelRequest,
         clearAll: clearAllCommand
     });
+    refreshDatasetSummary();
 }
 
 async function viewData() {
