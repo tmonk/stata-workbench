@@ -22,7 +22,7 @@ body {
 .context-container {
     display: flex;
     justify-content: space-between;
-    align-items: center;
+    align-items: flex-end; /* Align all pills to the same bottom level */
     width: 100%;
     margin: 0 auto;
 }
@@ -32,13 +32,16 @@ body {
     flex-direction: column;
     gap: 4px;
     flex: 1;
+    margin-right: var(--space-lg); /* More space after the filter */
 }
 
 .context-label {
     min-width: 48px;
     color: var(--text-tertiary);
     font-weight: 500;
-    font-size: 12px;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
 }
 
 .context-row {
@@ -51,7 +54,8 @@ body {
 .context-right {
     display: flex;
     align-items: center;
-    gap: var(--space-sm);
+    gap: var(--space-md); /* Increased gap between right-side pills */
+    padding-bottom: 0;
 }
 
 #filter-container {
@@ -63,8 +67,8 @@ body {
     height: 24px;
     padding: 0 2px 0 10px;
     width: 100%;
-    max-width: 400px;
-    transition: border-color 0.2s ease;
+    max-width: 420px;
+    transition: all 0.2s ease;
 }
 
 #filter-container:focus-within {
