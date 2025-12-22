@@ -57,26 +57,45 @@ body {
 #filter-container {
     display: flex;
     align-items: center;
-    gap: 4px;
-    flex: 1;
+    background: rgba(255, 255, 255, 0.03);
+    border-radius: var(--radius-pill);
+    border: 1px solid var(--border-subtle);
+    height: 24px;
+    padding: 0 2px 0 10px;
+    width: 100%;
+    max-width: 400px;
+    transition: border-color 0.2s ease;
+}
+
+#filter-container:focus-within {
+    border-color: var(--border-focus);
+    background: rgba(255, 255, 255, 0.05);
 }
 
 #filter-input {
     background: transparent;
     border: none;
-    color: var(--text-secondary);
+    color: var(--text-primary);
     font-family: var(--font-mono);
     font-size: 11px;
     padding: 0;
     margin: 0;
-    width: 100%;
-    max-width: 450px;
-    transition: all 0.2s ease;
+    flex: 1;
+    height: 100%;
+    outline: none;
 }
 
-#filter-input:focus {
-    outline: none;
-    color: var(--text-primary);
+#filter-input::placeholder {
+    color: var(--text-tertiary);
+}
+
+#apply-filter {
+    opacity: 0.6;
+    transition: opacity 0.2s ease;
+}
+
+#apply-filter:hover {
+    opacity: 1;
 }
 
 .data-summary {
