@@ -38,7 +38,7 @@ Offline/VSIX fallback:
 
 1. Install the **Stata Workbench** extension.
 2. Open a `.do` file in VS Code (or a compatible editor).
-3. Run **Stata: Run Selection/Line** (press the play button on the top right). The **Stata Terminal** panel opens automatically the first time you run a command.
+3. Run **Stata: Run Selection/Line** (press the play button on the top right). The **Stata Terminal** panel opens automatically the first time you run a command. You can interact with this as you would a standard Stata terminal.
 4. Run:
 
    ```stata
@@ -46,7 +46,7 @@ Offline/VSIX fallback:
    summarize
    ```
 
-   Output appears as “Stata Output” cards (with return code + timing) in the panel.
+   Output appears as output cards in the panel.
 5. Run:
 
    ```stata
@@ -54,6 +54,8 @@ Offline/VSIX fallback:
    ```
 
    A **Graph** artifact card appears - click it to open the generated graph.
+
+6. Open the **Data Browser** panel to view your data live.
 
 <p align="center">
   <img src="img/screenshot.png" width="70%" alt="Stata Terminal panel showing Stata output cards and a graph artifact" />
@@ -92,15 +94,27 @@ Offline/VSIX fallback:
 - `stataMcp.maxOutputLines` (default `0`): limit Stata output to N lines (0 = unlimited). Useful for reducing token usage with AI agents.
 - `stataMcp.useBase64Graphs` (default `false`): if true, export graphs as base64 strings; otherwise use file paths. NOT RECOMMENDED: Base64 consumes many more tokens but may be more robust in some remote environments.
 
-## Agent MCP configs (optional)
-When uv is available, the extension writes a user-level `mcp.json` inside your editor's user data. Example locations:
-- macOS: VS Code `~/Library/Application Support/Code/User/mcp.json`; VS Code Insiders `~/Library/Application Support/Code - Insiders/User/mcp.json`; Cursor `~/.cursor/mcp.json`; Windsurf `~/.codeium/mcp_config.json`; Antigravity `~/Library/Application Support/Antigravity/User/mcp.json`
-- Windows: VS Code `%APPDATA%/Code/User/mcp.json`; VS Code Insiders `%APPDATA%/Code - Insiders/User/mcp.json`; Cursor `%USERPROFILE%/.cursor/mcp.json`; Windsurf `%USERPROFILE%/.codeium/mcp_config.json`; Antigravity `%APPDATA%/Antigravity/User/mcp.json`
-- Linux: VS Code `~/.config/Code/User/mcp.json`; VS Code Insiders `~/.config/Code - Insiders/User/mcp.json`; Cursor `~/.cursor/mcp.json`; Windsurf `~/.codeium/mcp_config.json`; Antigravity `~/.antigravity/mcp.json`
 
-If you want to manage the file yourself, use the snippets below.
+## AI Assistant Integration
 
-User-level `mcp.json`:
+### Automatic Configuration
+
+Stata Workbench **automatically writes** your MCP configuration when you first run it. The extension detects your editor and creates the appropriate config file.
+- User-level `mcp.json` with Stata MCP server entry
+- Uses `uvx --from mcp-stata@latest --refresh` for auto-updates
+- Works for: Claude Code, Cursor, Cline, Windsurf, Antigravity
+
+**Config file locations:**
+
+| Editor | macOS | Windows | Linux |
+|--------|-------|---------|-------|
+| **VS Code** | `~/Library/Application Support/Code/User/mcp.json` | `%APPDATA%/Code/User/mcp.json` | `~/.config/Code/User/mcp.json` |
+| **VS Code Insiders** | `~/Library/Application Support/Code - Insiders/User/mcp.json` | `%APPDATA%/Code - Insiders/User/mcp.json` | `~/.config/Code - Insiders/User/mcp.json` |
+| **Cursor** | `~/.cursor/mcp.json` | `%USERPROFILE%/.cursor/mcp.json` | `~/.cursor/mcp.json` |
+| **Windsurf** | `~/.codeium/mcp_config.json` | `%USERPROFILE%/.codeium/mcp_config.json` | `~/.codeium/mcp_config.json` |
+| **Antigravity** | `~/Library/Application Support/Antigravity/User/mcp.json` | `%APPDATA%/Antigravity/User/mcp.json` | `~/.antigravity/mcp.json` |
+
+If you want to manage the file yourself, here is the content to add. User-level `mcp.json`:
 ```json
 {
   "servers": {
