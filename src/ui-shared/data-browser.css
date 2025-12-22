@@ -187,3 +187,25 @@ tr:hover td {
     font-size: 12px;
     font-weight: 500;
 }
+
+th.sortable {
+    cursor: pointer;
+    transition: background 0.2s ease;
+}
+
+th.sortable:hover {
+    background: var(--bg-surface-hover);
+}
+
+.sort-icon {
+    font-size: 10px;
+    color: var(--text-primary);
+    margin-left: 6px;
+    font-family: var(--font-sans);
+}
+
+th.sorted {
+    background: rgba(59, 130, 246, 0.1);
+    color: var(--text-primary);
+    border-bottom-color: var(--accent-primary);
+}

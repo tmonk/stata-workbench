@@ -14,6 +14,7 @@ let state = {
     viewId: null,
     vars: [], // [{name, type, label, format}]
     selectedVars: [],
+    sortBy: [], // ["price", "-mpg"]
     offset: 0,
     limit: 100,
     totalObs: 0,
@@ -256,6 +257,7 @@ async function loadPage() {
             offset: safeOffset,
             limit: safeLimit,
             vars: state.selectedVars,
+            sortBy: state.sortBy,
             includeObsNo: true
         };
 
@@ -339,6 +341,47 @@ async function applyFilter() {
 
 // --- Rendering ---
 
+function handleSort(varName, isMulti = false) {
+    const currentSort = state.sortBy || [];
+    let newSort = [];
+
+    // Check if var is already sorted
+    const existingIdx = currentSort.findIndex(s => s === varName || s === `-${varName}` || s === `+${varName}`);
+    
+    if (existingIdx === -1) {
+        // Not sorted -> Sort Ascending
+        if (isMulti) {
+            newSort = [...currentSort, varName];
+        } else {
+            newSort = [varName];
+        }
+    } else {
+        const existing = currentSort[existingIdx];
+        const isDesc = existing.startsWith('-');
+        
+        if (!isDesc) {
+            // Asc -> Desc
+            if (isMulti) {
+                newSort = [...currentSort];
+                newSort[existingIdx] = `-${varName}`;
+            } else {
+                newSort = [`-${varName}`];
+            }
+        } else {
+            // Desc -> Remove (or default)
+            if (isMulti) {
+                newSort = currentSort.filter((_, i) => i !== existingIdx);
+            } else {
+                newSort = [];
+            }
+        }
+    }
+    
+    state.sortBy = newSort;
+    state.offset = 0; // Reset pagination
+    loadPage();
+}
+
 function renderGrid(pageData) {
     const varCount = pageData.vars?.length || pageData.variables?.length || 0;
     log(`Render Grid. Vars: ${varCount}, Rows: ${pageData.rows?.length || pageData.data?.length}`);
@@ -353,10 +396,24 @@ function renderGrid(pageData) {
 
     displayVars.forEach(v => {
         const th = document.createElement('th');
+        th.classList.add('sortable');
+        th.onclick = (e) => handleSort(v.name, e.shiftKey || e.metaKey || e.ctrlKey);
+        
+        let sortIcon = '';
+        const sortState = (state.sortBy || []).find(s => s === v.name || s === `-${v.name}` || s === `+${v.name}`);
+        if (sortState) {
+            const isDesc = sortState.startsWith('-');
+            sortIcon = `<span class="sort-icon">${isDesc ? '↓' : '↑'}</span>`;
+            th.classList.add('sorted');
+        }
+
         th.innerHTML = `
-            <div style="display:flex; align-items:center;">
-                <span class="type-indicator type-${getTypeClass(v.type)}"></span>
-                <span title="${v.label || v.name}">${v.name}</span>
+            <div style="display:flex; align-items:center; justify-content: space-between;">
+                <div style="display:flex; align-items:center;">
+                    <span class="type-indicator type-${getTypeClass(v.type)}"></span>
+                    <span title="${v.label || v.name}">${v.name}</span>
+                </div>
+                ${sortIcon}
             </div>
         `;
         dom.header.appendChild(th);

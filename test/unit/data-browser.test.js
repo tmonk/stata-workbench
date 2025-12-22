@@ -393,4 +393,55 @@ describe('Data Browser Frontend (data-browser.js)', () => {
         const cells = rows[0].querySelectorAll('td');
         assert.equal(cells[1].textContent, 'ValueA', 'Should find value using "variables" mapping');
     });
+
+    it('should handle sorting interactions', async () => {
+        // Init
+        triggerMessage({ type: 'init', baseUrl: 'http://test', token: 'xyz' });
+        const dsReqId = getApiCall('/v1/dataset').args[0].reqId;
+        triggerMessage({ type: 'apiResponse', reqId: dsReqId, success: true, data: { dataset: { id: '123', n: 10 } } });
+        await new Promise(resolve => setTimeout(resolve, 0));
+        const varsReqId = getApiCall('/v1/vars').args[0].reqId;
+        triggerMessage({ type: 'apiResponse', reqId: varsReqId, success: true, data: { vars: [{ name: 'price' }, { name: 'mpg' }] } });
+        await new Promise(resolve => setTimeout(resolve, 0));
+
+        // Respond to initial page load to render grid
+        const initPageReqId = getApiCall('/v1/page').args[0].reqId;
+        triggerMessage({ 
+            type: 'apiResponse', 
+            reqId: initPageReqId, 
+            success: true, 
+            data: { rows: [] } 
+        });
+        await new Promise(resolve => setTimeout(resolve, 0));
+
+        // Wait for initial load
+        vscodeMock.postMessage.resetHistory();
+
+        // Click 'price' header (Asc)
+        const priceHeader = Array.from(document.querySelectorAll('th')).find(th => th.textContent.includes('price'));
+        priceHeader.click();
+        await new Promise(resolve => setTimeout(resolve, 0));
+
+        const pageCall1 = getApiCall('/v1/page');
+        assert.ok(pageCall1, 'Should call /v1/page on sort');
+        assert.deepEqual(JSON.parse(pageCall1.args[0].options.body).sortBy, ['price']);
+
+        vscodeMock.postMessage.resetHistory();
+
+        // Click 'price' header again (Desc)
+        priceHeader.click();
+        await new Promise(resolve => setTimeout(resolve, 0));
+
+        const pageCall2 = getApiCall('/v1/page');
+        assert.deepEqual(JSON.parse(pageCall2.args[0].options.body).sortBy, ['-price']);
+
+        vscodeMock.postMessage.resetHistory();
+
+        // Click 'price' header again (Clear)
+        priceHeader.click();
+        await new Promise(resolve => setTimeout(resolve, 0));
+
+        const pageCall3 = getApiCall('/v1/page');
+        assert.deepEqual(JSON.parse(pageCall3.args[0].options.body).sortBy, []);
+    });
 });
