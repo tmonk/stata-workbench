@@ -569,6 +569,8 @@ async function refreshDatasetSummary() {
                 TerminalPanel.updateDatasetSummary(ds.n, ds.k);
             }
         }
+        // Also refresh the data browser if it's open
+        DataBrowserPanel.refresh();
     } catch (err) {
         // Silently fail for summary updates
         console.error('[Extension] Failed to refresh dataset summary:', err);

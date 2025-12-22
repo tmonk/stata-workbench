@@ -48,6 +48,10 @@ window.addEventListener('message', event => {
             state.token = message.token;
             initBrowser();
             break;
+        case 'refresh':
+            log('Received refresh message.');
+            initBrowser();
+            break;
         case 'apiResponse':
             handleApiResponse(message);
             break;

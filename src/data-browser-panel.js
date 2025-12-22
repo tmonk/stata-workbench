@@ -107,6 +107,12 @@ class DataBrowserPanel {
         }
     }
 
+    static refresh() {
+        if (DataBrowserPanel.currentPanel) {
+            DataBrowserPanel.currentPanel.webview.postMessage({ type: 'refresh' });
+        }
+    }
+
     static _performRequest(urlStr, options) {
         return new Promise((resolve, reject) => {
             try {
@@ -203,12 +209,38 @@ class DataBrowserPanel {
             <body>
                 <div id="error-banner" class="error-banner hidden"></div>
 
-                <div id="toolbar">
-                        <span id="status-text">Not connected</span>
-                        <div class="pagination-controls">
-                            <button id="btn-prev" class="btn btn-sm btn-ghost" disabled>Prev</button>
-                            <span id="page-info" class="page-info">0 - 0</span>
-                            <button id="btn-next" class="btn btn-sm btn-ghost" disabled>Next</button>
+                <div class="context-header">
+                    <div class="context-container">
+                        <div class="context-info">
+                            <div class="context-row">
+                                <span class="context-label">Dataset:</span>
+                                <span class="context-value" id="status-text">Connecting...</span>
+                            </div>
+                            <div class="context-row">
+                                <div id="filter-container">
+                                    <input type="text" id="filter-input" placeholder="Filter expression (e.g. price > 5000 & mpg > 20)">
+                                    <button id="apply-filter" class="btn btn-primary btn-sm">Filter</button>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="context-right">
+                            <div class="pagination-controls">
+                                <button id="btn-prev" class="btn btn-sm btn-ghost" title="Previous Page" disabled>
+                                    <i class="codicon codicon-chevron-left"></i>
+                                </button>
+                                <span id="page-info" class="page-info">0 - 0</span>
+                                <button id="btn-next" class="btn btn-sm btn-ghost" title="Next Page" disabled>
+                                    <i class="codicon codicon-chevron-right"></i>
+                                </button>
+                            </div>
+                            <div class="input-actions">
+                                <button id="btn-refresh" class="btn btn-sm btn-ghost" title="Refresh Data">
+                                    <i class="codicon codicon-refresh"></i>
+                                </button>
+                                <select id="variable-selector" class="btn btn-sm" style="max-width: 120px;">
+                                    <option value="">Variables...</option>
+                                </select>
+                            </div>
                         </div>
                     </div>
                 </div>
