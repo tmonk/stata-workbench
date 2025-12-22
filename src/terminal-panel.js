@@ -87,6 +87,11 @@ class TerminalPanel {
           return;
         }
 
+        if (message.type === 'showGraphs') {
+          vscode.commands.executeCommand('stata-workbench.showGraphs');
+          return;
+        }
+
         if (message.type === 'run' && typeof message.code === 'string') {
           await TerminalPanel.handleRun(message.code, runCommand);
         }
@@ -515,6 +520,9 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
         <button class="btn btn-ghost btn-icon" id="btn-open-browser" title="Open Data Browser">
           <i class="codicon codicon-table"></i>
         </button>
+        <button class="btn btn-ghost btn-icon" id="btn-show-graphs" title="Show Graphs">
+          <i class="codicon codicon-graph"></i>
+        </button>
       </div>
     </div>
   </div>
@@ -616,6 +624,7 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
     const stopBtn = document.getElementById('stop-btn');
     const clearBtn = document.getElementById('clear-btn');
     const btnOpenBrowser = document.getElementById('btn-open-browser');
+    const btnShowGraphs = document.getElementById('btn-show-graphs');
     const dataSummary = document.getElementById('data-summary');
     const obsCount = document.getElementById('obs-count');
     const varCount = document.getElementById('var-count');
@@ -623,6 +632,12 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
     if (btnOpenBrowser) {
         btnOpenBrowser.addEventListener('click', () => {
             vscode.postMessage({ type: 'openDataBrowser' });
+        });
+    }
+
+    if (btnShowGraphs) {
+        btnShowGraphs.addEventListener('click', () => {
+            vscode.postMessage({ type: 'showGraphs' });
         });
     }
 

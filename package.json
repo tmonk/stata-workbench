@@ -86,11 +86,6 @@
           "when": "resourceExtname == .do || resourceExtname == .ado || resourceExtname == .mata || editorLangId == stata",
           "command": "stata-workbench.runFile",
           "group": "navigation@2"
-        },
-        {
-          "when": "resourceExtname == .do || resourceExtname == .ado || resourceExtname == .mata || editorLangId == stata",
-          "command": "stata-workbench.showGraphs",
-          "group": "navigation@3"
         }
       ],
       "editor/context": [
@@ -102,11 +97,6 @@
         {
           "when": "resourceExtname == .do || resourceExtname == .ado || resourceExtname == .mata || editorLangId == stata",
           "command": "stata-workbench.runFile",
-          "group": "1_stata"
-        },
-        {
-          "when": "resourceExtname == .do || resourceExtname == .ado || resourceExtname == .mata || editorLangId == stata",
-          "command": "stata-workbench.showGraphs",
           "group": "1_stata"
         }
       ]

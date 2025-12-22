@@ -492,7 +492,7 @@ function updatePagination(data) {
 
     const start = state.offset + 1;
     const end = state.offset + returnedCount;
-    dom.pageInfo.textContent = returnedCount > 0 ? `${start} - ${end}` : '0 - 0';
+    dom.pageInfo.textContent = returnedCount > 0 ? `rows ${start} - ${end}` : '0 - 0';
 }
 
 // --- Event Listeners ---
