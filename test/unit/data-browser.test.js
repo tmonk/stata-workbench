@@ -312,8 +312,8 @@ describe('Data Browser Frontend (data-browser.js)', () => {
         assert.notProperty(valBody, 'filter', 'Body should NOT contain "filter" property');
         assert.equal(valBody.filterExpr, 'price > 5000');
 
-        // Respond valid
-        triggerMessage({ type: 'apiResponse', reqId: validateCall.args[0].reqId, success: true, data: { isValid: true } });
+        // Respond valid (using "ok" property as per latest finding)
+        triggerMessage({ type: 'apiResponse', reqId: validateCall.args[0].reqId, success: true, data: { ok: true } });
         await new Promise(resolve => setTimeout(resolve, 0));
 
         // Check create view call

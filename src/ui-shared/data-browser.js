@@ -308,8 +308,8 @@ async function applyFilter() {
             filterExpr: filterExpr
         });
         
-        // Accept valid or isValid property
-        const isOk = valid && (valid.isValid === true || valid.valid === true);
+        // Accept ok, valid, or isValid property
+        const isOk = valid && (valid.ok === true || valid.isValid === true || valid.valid === true);
 
         if (!isOk) {
             throw new Error(valid?.error || `Invalid filter expression (Response: ${JSON.stringify(valid)})`);
