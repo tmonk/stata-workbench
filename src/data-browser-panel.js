@@ -189,11 +189,11 @@ class DataBrowserPanel {
         // CSP: Allow scripts from our extension, styles from extension, and connect to localhost (for API)
         const csp = `
             default-src 'none';
-            style-src ${webview.cspSource} 'unsafe-inline';
+            style-src ${webview.cspSource} 'unsafe-inline' https://unpkg.com;
             script-src 'nonce-${nonce}';
             connect-src http://127.0.0.1:* ws://127.0.0.1:*;
             img-src ${webview.cspSource} data:;
-            font-src ${webview.cspSource};
+            font-src ${webview.cspSource} https://unpkg.com;
         `;
 
         return `<!DOCTYPE html>
