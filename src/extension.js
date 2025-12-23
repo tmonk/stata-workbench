@@ -65,8 +65,6 @@ function activate(context) {
     }
     if (typeof mcpClient.setLogger === 'function') {
         mcpClient.setLogger((msg) => outputChannel.appendLine(msg));
-        // Test that the logger is working
-        mcpClient._log('[mcp-stata] Logger initialized and working');
     }
 
     statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);

@@ -77,24 +77,24 @@ window.addEventListener('message', (event) => {
 
 function handleApiResponse(msg) {
     const { reqId, success, data, error } = msg;
-    
+
     if (pendingRequests.has(reqId)) {
         const { resolve, reject } = pendingRequests.get(reqId);
         pendingRequests.delete(reqId);
-        
+
         if (success) {
             resolve(data);
         } else {
             // Check for Dataset ID conflict
             if (error && (error.includes('409') || error.includes('datasetId') || error.includes('identity'))) {
                 console.warn('[DataBrowser] Dataset changed detected. Re-initializing...');
-                
+
                 // Re-initialize with existing credentials
                 if (state.baseUrl && state.token) {
                     initBrowser(state.baseUrl, state.token);  // ✅ Pass credentials
                 }
             }
-            
+
             reject(new Error(error));
         }
     }
@@ -143,6 +143,11 @@ function hideLoading() {
 function updateDataSummary(nObs, nVars) {
     if (dom.obsCount) dom.obsCount.textContent = nObs.toLocaleString();
     if (dom.varCount) dom.varCount.textContent = nVars.toLocaleString();
+    if (dom.statusText) {
+        const obsText = `${nObs.toLocaleString()} observation${nObs !== 1 ? 's' : ''}`;
+        const varText = nVars > 0 ? `, ${nVars.toLocaleString()} variable${nVars !== 1 ? 's' : ''}` : '';
+        dom.statusText.textContent = obsText + varText;
+    }
 }
 
 function populateVariableSelector(variables) {
@@ -167,12 +172,12 @@ class ApiError extends Error {
 async function apiCall(endpoint, method = 'GET', body = null) {
     const url = `${state.baseUrl}${endpoint}`;
     log(`API Call (Proxy): ${method} ${url}`);
-    
+
     const reqId = `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-    
+
     return new Promise((resolve, reject) => {
         pendingRequests.set(reqId, { resolve, reject });
-        
+
         vscode.postMessage({
             type: 'apiCall',
             reqId,
@@ -225,7 +230,7 @@ function initBrowser(baseUrl, token) {
     }
 
     console.log('[DataBrowser Webview] Initializing Browser...');
-    
+
     state.baseUrl = baseUrl;
     state.token = token;
     isInitialized = true;
@@ -234,30 +239,30 @@ function initBrowser(baseUrl, token) {
     hideError();
     showLoading();
 
-    apiCall('/v1/dataset', 'GET') 
+    apiCall('/v1/dataset', 'GET')
         .then(response => {
             const datasetInfo = response.dataset || response;
             state.datasetId = datasetInfo.id;
             state.totalObs = datasetInfo.n || 0;
-            
+
             log(`Dataset Info: ${JSON.stringify(response)}`);
             updateDataSummary(state.totalObs, 0);
-            
+
             return apiCall('/v1/vars', 'GET');
         })
         .then(response => {
             const variables = response.vars || response.variables || [];
             log(`Loaded ${variables.length} variables`);
-            
+
             populateVariableSelector(variables);
             updateDataSummary(state.totalObs, variables.length);
-            
+
             return loadPage();
         })
         .then(() => {
             hideLoading();
             console.log('[DataBrowser Webview] Initialization complete');
-            
+
             if (pendingRefresh) {
                 console.log('[DataBrowser Webview] Pending refresh completed');
                 pendingRefresh = false;
@@ -295,7 +300,7 @@ async function loadPage() {
         const safeLimit = Number.isFinite(parsedLimit) && parsedLimit > 0 ? parsedLimit : 100;
         state.offset = safeOffset;
         state.limit = safeLimit;
-        
+
         let body = {
             datasetId: state.datasetId,
             offset: safeOffset,
@@ -314,7 +319,7 @@ async function loadPage() {
             log(`Page loaded. Records: ${data.rows?.length || data.data?.length}`);
             renderGrid(data);
             updatePagination(data);
-            
+
             if (data.datasetId && data.datasetId !== state.datasetId) {
                 log('Response datasetId mismatch. Re-initializing.', true);
                 if (state.baseUrl && state.token) {
@@ -324,8 +329,8 @@ async function loadPage() {
         }
     } catch (err) {
         if (err instanceof ApiError && err.code === 'no_data_in_memory') {
-             // Handle race condition where data was cleared after init
-             if (state.baseUrl && state.token) {
+            // Handle race condition where data was cleared after init
+            if (state.baseUrl && state.token) {
                 console.log('Re-initializing after no_data_in_memory error');
                 initBrowser(state.baseUrl, state.token);
             }
@@ -340,10 +345,10 @@ async function loadPage() {
 async function applyFilter() {
     const filterExpr = dom.filterInput.value.trim();
     log(`Applying filter: "${filterExpr}"`);
-    
+
     if (!filterExpr) {
         if (state.viewId) {
-            await apiCall(`/v1/views/${state.viewId}`, 'DELETE').catch(() => {});
+            await apiCall(`/v1/views/${state.viewId}`, 'DELETE').catch(() => { });
             state.viewId = null;
         }
         state.offset = 0;
@@ -358,7 +363,7 @@ async function applyFilter() {
             datasetId: state.datasetId,
             filterExpr: filterExpr
         });
-        
+
         // Accept ok, valid, or isValid property
         const isOk = valid && (valid.ok === true || valid.isValid === true || valid.valid === true);
 
@@ -401,7 +406,7 @@ function handleSort(varName, isMulti = false) {
 
     // Check if var is already sorted
     const existingIdx = currentSort.findIndex(s => s === varName || s === `-${varName}` || s === `+${varName}`);
-    
+
     if (existingIdx === -1) {
         // Not sorted -> Sort Ascending
         if (isMulti) {
@@ -412,7 +417,7 @@ function handleSort(varName, isMulti = false) {
     } else {
         const existing = currentSort[existingIdx];
         const isDesc = existing.startsWith('-');
-        
+
         if (!isDesc) {
             // Asc -> Desc
             if (isMulti) {
@@ -430,7 +435,7 @@ function handleSort(varName, isMulti = false) {
             }
         }
     }
-    
+
     state.sortBy = newSort;
     state.offset = 0; // Reset pagination
     loadPage();
@@ -452,7 +457,7 @@ function renderGrid(pageData) {
         const th = document.createElement('th');
         th.classList.add('sortable');
         th.onclick = (e) => handleSort(v.name, e.shiftKey || e.metaKey || e.ctrlKey);
-        
+
         let sortIcon = '';
         const sortState = (state.sortBy || []).find(s => s === v.name || s === `-${v.name}` || s === `+${v.name}`);
         if (sortState) {
@@ -475,21 +480,21 @@ function renderGrid(pageData) {
 
     // Body
     dom.grid.innerHTML = '';
-    
+
     // API returns "rows" as array of arrays.
     // The first element is usually observation number if includeObsNo=true
     const rows = pageData.rows || pageData.data || [];
-    
+
     rows.forEach(row => {
         const tr = document.createElement('tr');
-        
+
         // Obs No is usually the first element in the row array if requested
         // but we need to map columns correctly.
         // The API returns 'vars': ["_n", "make", "price"] so we can map indices.
-        
+
         const returnedVars = pageData.vars || pageData.variables || [];
         const obsIndex = returnedVars.indexOf('_n'); // Stata obs number
-        
+
         const tdObs = document.createElement('td');
         tdObs.textContent = (obsIndex !== -1 ? row[obsIndex] : '') || '';
         tdObs.style.color = 'var(--text-tertiary)';
@@ -500,7 +505,7 @@ function renderGrid(pageData) {
             // Find index of this var in the returned row
             const idx = returnedVars.indexOf(v.name);
             const val = (idx !== -1) ? row[idx] : null;
-            
+
             td.textContent = formatValue(val, v);
             tr.appendChild(td);
         });
@@ -522,7 +527,7 @@ function formatValue(val, meta) {
 
 function updatePagination(data) {
     dom.prevBtn.disabled = state.offset <= 0;
-    
+
     const rows = data.rows || data.data || [];
     const returnedCount = rows.length;
     const isEnd = returnedCount < state.limit;
@@ -561,13 +566,13 @@ if (dom.varSelector) {
     dom.varSelector.addEventListener('change', (e) => {
         const name = e.target.value;
         if (!name) return;
-        
+
         if (state.selectedVars.includes(name)) {
             state.selectedVars = state.selectedVars.filter(v => v !== name);
         } else {
             state.selectedVars.push(name);
         }
-        
+
         updateVarSelector();
         e.target.value = ''; // Reset select
         state.offset = 0;
