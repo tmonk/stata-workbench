@@ -13,7 +13,7 @@
   "bugs": {
     "url": "https://github.com/tmonk/stata-workbench/issues"
   },
-  "version": "0.8.3",
+  "version": "0.8.4",
   "engines": {
     "vscode": "^1.75.0"
   },
@@ -127,6 +127,11 @@
           "type": "boolean",
           "default": true,
           "description": "Automatically show the Stata output channel after runs."
+        },
+        "stataMcp.autoConfigureMcp": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically add/update the mcp-stata server entry in your host MCP config (mcp.json). Disable if you manage MCP servers manually."
         },
         "stataMcp.runFileWorkingDirectory": {
           "type": "string",

@@ -57,6 +57,14 @@ class StataMcpClient {
 
     setLogger(logger) {
         this._log = typeof logger === 'function' ? logger : () => { };
+        // Immediately test that logging works
+        if (typeof logger === 'function') {
+            try {
+                logger('[mcp-stata] setLogger called - logger is now active');
+            } catch (e) {
+                console.error('[mcp-stata] Logger test failed:', e);
+            }
+        }
     }
 
     onStatusChanged(listener) {
@@ -369,16 +377,30 @@ class StataMcpClient {
         })();
 
         const uvCommand = process.env.MCP_STATA_UVX_CMD || 'uvx';
-        const configuredEnv = this._loadConfiguredEnv();
+        const serverConfig = this._loadServerConfig();
+        
+        // Use command/args from config if available, otherwise fall back to uvx with --refresh
+        const finalCommand = serverConfig.command || uvCommand;
+        const finalArgs = serverConfig.args || ['--refresh', '--from', `${MCP_PACKAGE_NAME}@latest`, MCP_PACKAGE_NAME];
+        const configuredEnv = serverConfig.env || {};
+        
+        // Log that we're creating the transport
+        this._log(`[mcp-stata] Creating StdioClientTransport`);
+        this._log(`[mcp-stata] Config source: ${serverConfig.configPath || 'defaults (uvx --refresh)'}`);
+        this._log(`[mcp-stata] Command: ${finalCommand}`);
+        this._log(`[mcp-stata] Args: ${JSON.stringify(finalArgs)}`);
+        
         const transport = new StdioClientTransport({
-            command: uvCommand,
-            args: ['--from', MCP_PACKAGE_SPEC, MCP_PACKAGE_NAME],
+            command: finalCommand,
+            args: finalArgs,
             stderr: 'pipe',
             cwd: this._resolveWorkspaceRoot(),
             env: {
                 ...process.env,
                 ...configuredEnv,
-                STATA_SETUP_TIMEOUT: setupTimeoutSeconds
+                STATA_SETUP_TIMEOUT: setupTimeoutSeconds,
+                // Force Python to not buffer output
+                PYTHONUNBUFFERED: '1'
             }
         });
 
@@ -394,9 +416,34 @@ class StataMcpClient {
             transport.on('error', transportErrorHandler);
         }
 
-        // Capture stderr from the MCP process for debugging.
+        // Debug: check what properties transport has
+        this._log(`[mcp-stata] Transport created. Has stderr: ${!!transport.stderr}, type: ${typeof transport.stderr}`);
+        this._log(`[mcp-stata] Transport keys: ${Object.keys(transport || {}).join(', ')}`);
+        
+        // Try to access the underlying process if available
+        const proc = transport._process || transport.process || transport._serverProcess;
+        if (proc) {
+            this._log(`[mcp-stata] Found underlying process, setting up stderr capture`);
+            if (proc.stderr && typeof proc.stderr.on === 'function') {
+                proc.stderr.setEncoding?.('utf8');
+                proc.stderr.on('data', (chunk) => {
+                    const text = typeof chunk === 'string' ? chunk : chunk.toString('utf8');
+                    if (text?.trim()) {
+                        const trimmed = text.trimEnd();
+                        this._log(`[mcp-stata stderr] ${trimmed}`);
+                        this._recentStderr.push(trimmed);
+                        if (this._recentStderr.length > 10) {
+                            this._recentStderr.shift();
+                        }
+                    }
+                });
+            }
+        }
+
+        // Capture stderr from the MCP process for debugging (original approach as fallback).
         const stderrStream = transport.stderr;
         if (stderrStream && typeof stderrStream.on === 'function') {
+            this._log(`[mcp-stata] Setting up transport.stderr listener`);
             stderrStream.setEncoding?.('utf8');
             stderrStream.on('data', (chunk) => {
                 const text = typeof chunk === 'string' ? chunk : chunk.toString('utf8');
@@ -410,6 +457,8 @@ class StataMcpClient {
                     }
                 }
             });
+        } else {
+            this._log(`[mcp-stata] WARNING: transport.stderr not available for capture`);
         }
 
         this._log(`Starting mcp-stata via ${uvCommand} --from ${MCP_PACKAGE_SPEC} ${MCP_PACKAGE_NAME} (ext v${this._clientVersion})`);
@@ -459,6 +508,26 @@ class StataMcpClient {
         }
         await client.connect(transport);
         this._log(`mcp-stata connected (pid=${transport.pid ?? 'unknown'})`);
+
+        // After connect, try again to capture stderr from the underlying process
+        // The process might only be available after start()/connect()
+        const postConnectProc = transport._process || transport.process || transport._serverProcess;
+        if (postConnectProc && postConnectProc.stderr && !postConnectProc.stderr._stataListenerAttached) {
+            this._log(`[mcp-stata] Post-connect: Found process stderr, attaching listener`);
+            postConnectProc.stderr._stataListenerAttached = true;
+            postConnectProc.stderr.setEncoding?.('utf8');
+            postConnectProc.stderr.on('data', (chunk) => {
+                const text = typeof chunk === 'string' ? chunk : chunk.toString('utf8');
+                if (text?.trim()) {
+                    const trimmed = text.trimEnd();
+                    this._log(`[mcp-stata stderr] ${trimmed}`);
+                    this._recentStderr.push(trimmed);
+                    if (this._recentStderr.length > 10) {
+                        this._recentStderr.shift();
+                    }
+                }
+            });
+        }
 
         // Discover available tools so downstream calls choose the right names.
         await this._refreshToolList(client);
@@ -1381,6 +1450,31 @@ class StataMcpClient {
         return env;
     }
 
+    _loadServerConfig() {
+        // Load full server configuration (command, args, env) from MCP config files
+        for (const configPath of this._candidateMcpConfigPaths()) {
+            if (!configPath) continue;
+            try {
+                if (!fs.existsSync(configPath)) continue;
+                const raw = fs.readFileSync(configPath, 'utf8');
+                const parsed = this._safeParseJson(raw);
+                const entry = parsed?.servers?.[MCP_SERVER_ID] || parsed?.mcpServers?.[MCP_SERVER_ID];
+                if (entry) {
+                    this._log(`[mcp-stata] Found server config in ${configPath}`);
+                    return {
+                        command: entry.command || null,
+                        args: Array.isArray(entry.args) ? entry.args : null,
+                        env: (typeof entry.env === 'object' && entry.env !== null) ? entry.env : {},
+                        configPath
+                    };
+                }
+            } catch (err) {
+                this._log(`[mcp-stata] Failed to read MCP config from ${configPath}: ${err?.message || err}`);
+            }
+        }
+        return { command: null, args: null, env: {}, configPath: null };
+    }
+
     _candidateMcpConfigPaths() {
         const paths = new Set();
         const workspaceRoot = this._resolveWorkspaceRoot();
@@ -1459,8 +1553,21 @@ class StataMcpClient {
     }
 }
 
-// Export the class for testing and the singleton for the extension
+let _sharedClient = null;
+
+function getClient(options = {}) {
+    if (!_sharedClient) {
+        _sharedClient = new StataMcpClient();
+    }
+    if (options.logger) {
+        _sharedClient.setLogger(options.logger);
+    }
+    return _sharedClient;
+}
+
 module.exports = {
     StataMcpClient,
-    client: new StataMcpClient()
+    getClient,
+    // Keep backward compat but with lazy init
+    get client() { return getClient(); }
 };

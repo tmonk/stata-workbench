@@ -247,6 +247,36 @@ describe('extension unit tests', () => {
     });
 
     describe('existing mcp config', () => {
+        it('respects opt-out setting and skips auto config', async () => {
+            fs.existsSync.mockReturnValue(false);
+            fs.readFileSync.mockReturnValue('');
+
+            const configuration = {
+                get: jest.fn().mockImplementation((key, defaultValue) => {
+                    if (key === 'autoConfigureMcp') return false;
+                    return defaultValue;
+                })
+            };
+
+            // Override the mocked vscode for this test only
+            const vscodeMock = require('../../test/mocks/vscode');
+            vscodeMock.workspace.getConfiguration.mockReturnValue(configuration);
+
+            const globalState = { get: jest.fn().mockReturnValue(false), update: jest.fn().mockResolvedValue() };
+            const context = {
+                subscriptions: [],
+                globalState,
+                globalStoragePath: '/tmp/globalStorage',
+                extensionUri: {},
+                extensionPath: '/workspace'
+            };
+
+            await extension.activate(context);
+
+            expect(configuration.get).toHaveBeenCalledWith('autoConfigureMcp', true);
+            expect(fs.writeFileSync).not.toHaveBeenCalled();
+        });
+
         it('detects existing servers in config files', () => {
             fs.existsSync.mockReturnValue(true);
             fs.readFileSync.mockReturnValue(JSON.stringify({

@@ -2,6 +2,81 @@ const { openArtifact, revealArtifact, copyToClipboard, resolveArtifactUri } = re
 const path = require('path');
 const vscode = require('vscode');
 
+
+/**
+ * Parse SMCL text and extract formatted error information
+ * @param {string} smclText - Raw SMCL text
+ * @returns {{rc: number|null, formattedText: string}}
+ */
+function parseSMCL(smclText) {
+  if (!smclText) return { rc: null, formattedText: '' };
+  
+  const lines = smclText.split('\n');
+  const formatted = [];
+  let extractedRC = null;
+  let lastErrIndex = -1;
+  
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    
+    // Extract RC from error messages like r(601) or rc=601
+    if (!extractedRC) {
+      const rcMatch = line.match(/r\((\d+)\)|rc[=\s]+(\d+)/i);
+      if (rcMatch) {
+        extractedRC = parseInt(rcMatch[1] || rcMatch[2], 10);
+      }
+    }
+    
+    // Keep only {com} and {err} lines
+    const comMatch = line.match(/^\{com\}(.+)$/);
+    const errMatch = line.match(/^\{err\}(.+)$/);
+    
+    if (comMatch) {
+      // Extract content and remove any other tags
+      const content = comMatch[1].trim().replace(/\{[^}]+\}/g, '');
+      formatted.push(content);
+    } else if (errMatch) {
+      // Extract content and remove any other tags
+      const content = errMatch[1].trim().replace(/\{[^}]+\}/g, '');
+      formatted.push(content);
+      lastErrIndex = formatted.length - 1;
+    }
+  }
+  
+  // Drop any com lines after the last err line
+  if (lastErrIndex >= 0 && lastErrIndex < formatted.length - 1) {
+    formatted.splice(lastErrIndex + 1);
+  }
+  
+  // Join the formatted lines with newlines
+  const formattedText = formatted.join('\n');
+  
+  return {
+    rc: extractedRC,
+    formattedText: formattedText
+  };
+}
+
+/**
+ * Convert SMCL markup to HTML for display
+ * @param {string} text - SMCL formatted text
+ * @returns {string} HTML formatted text
+ */
+function smclToHtml(text) {
+  if (!text) return '';
+
+  // Remove SMCL tags and convert to plain text with basic formatting
+  let html = text
+    .replace(/\{bf\}/g, '<strong>')
+    .replace(/\{sf\}/g, '')
+    .replace(/\{\/bf\}/g, '</strong>')
+    .replace(/\{\/sf\}/g, '')
+    .replace(/\{[^}]+\}/g, ''); // Remove any other SMCL tags
+
+  return html;
+}
+
+
 class TerminalPanel {
   static currentPanel = null;
   static extensionUri = null;
@@ -222,15 +297,30 @@ class TerminalPanel {
       };
       const result = await runCommand(trimmed, hooks);
       const success = isRunSuccess(result);
+
+      // Parse SMCL stderr to extract RC and format
+      let finalRC = typeof result?.rc === 'number' ? result.rc : null;
+      let finalStderr = result?.stderr || '';
+
+      if (finalStderr) {
+        const parsed = parseSMCL(finalStderr);
+        if (parsed.rc !== null) {
+          finalRC = parsed.rc;
+        }
+        if (parsed.formattedText) {
+          finalStderr = parsed.formattedText;
+        }
+      }
+
       TerminalPanel._postMessage({
         type: 'runFinished',
         runId,
-        rc: typeof result?.rc === 'number' ? result.rc : null,
+        rc: finalRC,
         success,
         durationMs: result?.durationMs ?? null,
         // Do not ship full stdout on failure; rely on stderr/tail.
         stdout: success ? (result?.stdout || result?.contentText || '') : '',
-        stderr: result?.stderr || '',
+        stderr: finalStderr,
         artifacts: normalizeArtifacts(result),
         baseDir: result?.cwd || ''
       });
@@ -328,15 +418,30 @@ class TerminalPanel {
   static finishStreamingEntry(runId, result) {
     if (!TerminalPanel.currentPanel || !runId) return;
     const success = isRunSuccess(result);
+
+    // Parse SMCL stderr to extract RC and format
+    let finalRC = typeof result?.rc === 'number' ? result.rc : null;
+    let finalStderr = result?.stderr || '';
+
+    if (finalStderr) {
+      const parsed = parseSMCL(finalStderr);
+      if (parsed.rc !== null) {
+        finalRC = parsed.rc;
+      }
+      if (parsed.formattedText) {
+        finalStderr = parsed.formattedText;
+      }
+    }
+
     TerminalPanel._postMessage({
       type: 'runFinished',
       runId,
-      rc: typeof result?.rc === 'number' ? result.rc : null,
+      rc: finalRC,
       success,
       durationMs: result?.durationMs ?? null,
       // Do not ship full stdout on failure; rely on stderr/tail.
       stdout: success ? (result?.stdout || result?.contentText || '') : '',
-      stderr: result?.stderr || '',
+      stderr: finalStderr,
       artifacts: normalizeArtifacts(result),
       baseDir: result?.cwd || ''
     });
@@ -395,32 +500,32 @@ class TerminalPanel {
   }
 
   static async _handleClearAll() {
-  if (typeof TerminalPanel._clearHandler === 'function') {
-    try {
-      // Clear UI first, before running command
-      TerminalPanel._postMessage({ type: 'cleared' });
-      TerminalPanel._postMessage({ type: 'busy', value: true });
-      await TerminalPanel._clearHandler();
-      // Success - UI already cleared, no need to show anything
-    } catch (error) {
-      console.error('[TerminalPanel] clearAll failed:', error);
-      TerminalPanel._postMessage({ type: 'error', message: 'Failed to clear: ' + error.message });
-    } finally {
-      TerminalPanel._postMessage({ type: 'busy', value: false });
+    if (typeof TerminalPanel._clearHandler === 'function') {
+      try {
+        // Clear UI first, before running command
+        TerminalPanel._postMessage({ type: 'cleared' });
+        TerminalPanel._postMessage({ type: 'busy', value: true });
+        await TerminalPanel._clearHandler();
+        // Success - UI already cleared, no need to show anything
+      } catch (error) {
+        console.error('[TerminalPanel] clearAll failed:', error);
+        TerminalPanel._postMessage({ type: 'error', message: 'Failed to clear: ' + error.message });
+      } finally {
+        TerminalPanel._postMessage({ type: 'busy', value: false });
+      }
+      return;
     }
-    return;
-  }
-  // Fallback: clear UI first, then run command silently
-  TerminalPanel._postMessage({ type: 'cleared' });
-  if (typeof TerminalPanel._defaultRunCommand === 'function') {
-    // Run silently in background without showing in terminal
-    try {
-      await TerminalPanel._defaultRunCommand('clear all', {});
-    } catch (error) {
-      TerminalPanel._postMessage({ type: 'error', message: 'Failed to clear: ' + error.message });
+    // Fallback: clear UI first, then run command silently
+    TerminalPanel._postMessage({ type: 'cleared' });
+    if (typeof TerminalPanel._defaultRunCommand === 'function') {
+      // Run silently in background without showing in terminal
+      try {
+        await TerminalPanel._defaultRunCommand('clear all', {});
+      } catch (error) {
+        TerminalPanel._postMessage({ type: 'error', message: 'Failed to clear: ' + error.message });
+      }
     }
   }
-}
 
 }
 
@@ -429,7 +534,7 @@ module.exports = { TerminalPanel, toEntry, normalizeArtifacts };
 function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = []) {
   const designUri = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'src', 'ui-shared', 'design.css'));
   const mainJsUri = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'src', 'ui-shared', 'main.js'));
-  
+
   const fileName = filePath ? path.basename(filePath) : 'Terminal Session';
   const escapedTitle = escapeHtml(fileName);
   const initialJson = JSON.stringify(initialEntries).replace(/</g, '\\u003c');
@@ -1604,18 +1709,31 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
 
 function toEntry(code, result) {
   const success = isRunSuccess(result);
+
+  // Parse SMCL stderr to extract RC and format
+  let finalRC = typeof result?.rc === 'number' ? result.rc : null;
+  let finalStderr = result?.stderr || '';
+
+  if (finalStderr) {
+    const parsed = parseSMCL(finalStderr);
+    if (parsed.rc !== null) {
+      finalRC = parsed.rc;
+    }
+    if (parsed.formattedText) {
+      finalStderr = parsed.formattedText;
+    }
+  }
+
+  // Return the complete entry object
   return {
     code,
-    stdout: success
-      ? ((typeof result?.stdout === 'string') ? result.stdout : (result?.contentText || ''))
-      : '',
-    stderr: result?.stderr || '',
-    rc: typeof result?.rc === 'number' ? result.rc : null,
     success,
+    rc: finalRC,
     durationMs: result?.durationMs ?? null,
-    timestamp: Date.now(),
+    stdout: success ? (result?.stdout || result?.contentText || '') : '',
+    stderr: finalStderr,
     artifacts: normalizeArtifacts(result),
-    baseDir: result?.cwd || (result?.filePath ? path.dirname(result.filePath) : '')
+    timestamp: Date.now()
   };
 }
 

@@ -55,6 +55,7 @@ function getUvInstallCommand(platform = process.platform) {
 function activate(context) {
     globalContext = context;
     outputChannel = vscode.window.createOutputChannel('Stata Workbench');
+    const settings = vscode.workspace.getConfiguration('stataMcp');
     const version = pkg?.version || 'unknown';
     outputChannel.appendLine(`Stata Workbench ready (extension v${version})`);
     revealOutput();
@@ -65,6 +66,8 @@ function activate(context) {
     }
     if (typeof mcpClient.setLogger === 'function') {
         mcpClient.setLogger((msg) => outputChannel.appendLine(msg));
+        // Test that the logger is working
+        mcpClient._log('[mcp-stata] Logger initialized and working');
     }
 
     statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
@@ -88,7 +91,12 @@ function activate(context) {
     TerminalPanel.setExtensionUri(context.extensionUri);
     missingCli = !ensureMcpCliAvailable(context);
     if (!missingCli) {
-        ensureMcpConfigs(context);
+        const autoConfigureMcp = settings.get('autoConfigureMcp', true);
+        if (autoConfigureMcp) {
+            ensureMcpConfigs(context);
+        } else {
+            outputChannel?.appendLine?.('Skipping MCP config update: stataMcp.autoConfigureMcp is disabled');
+        }
         const refreshed = refreshMcpPackage();
         mcpPackageVersion = refreshed || getMcpPackageVersion();
         outputChannel.appendLine(`mcp-stata version: ${mcpPackageVersion}`);
@@ -796,7 +804,7 @@ async function showGraphs() {
         // Use exportAllGraphs to get actual exported files with data URIs
         const result = await mcpClient.exportAllGraphs();
         const items = Array.isArray(result?.graphs) ? result.graphs : [];
-        
+
         // Items already have dataUri from _collectGraphArtifacts -> _fileToDataUri conversion
         const detailed = items.map((g) => {
             return {
@@ -816,17 +824,17 @@ async function downloadGraphAsPdf(graphName) {
     try {
         revealOutput();
         outputChannel.appendLine(`[Download] Starting PDF export for: ${graphName}`);
-        
+
         // Request PDF export from MCP server
         outputChannel.appendLine('[Download] Calling mcpClient.fetchGraph...');
         const response = await mcpClient.fetchGraph(graphName, { format: 'pdf' });
         outputChannel.appendLine(`[Download] Response received: ${JSON.stringify(response, null, 2)}`);
-        
+
         // Extract the PDF data
         let pdfData = null;
         let pdfPath = null;
         let savedPath = null;
-        
+
         // Check if response has base64 data
         if (response?.data && response?.mimeType === 'application/pdf') {
             pdfData = response.data;
@@ -846,22 +854,22 @@ async function downloadGraphAsPdf(graphName) {
             pdfPath = response.path || response.file_path;
             outputChannel.appendLine(`[Download] Found file path: ${pdfPath}`);
         }
-        
+
         // If we have base64 data, convert to buffer and save
         if (pdfData) {
             outputChannel.appendLine('[Download] Converting base64 to buffer...');
             const buffer = Buffer.from(pdfData, 'base64');
             outputChannel.appendLine(`[Download] Buffer created: ${buffer.length} bytes`);
-            
+
             const defaultUri = vscode.Uri.file(path.join(os.homedir(), 'Downloads', `${graphName}.pdf`));
-            
+
             outputChannel.appendLine('[Download] Showing save dialog...');
             const saveUri = await vscode.window.showSaveDialog({
                 defaultUri,
                 filters: { 'PDF Files': ['pdf'] },
                 saveLabel: 'Save Graph'
             });
-            
+
             if (saveUri) {
                 outputChannel.appendLine(`[Download] Saving to: ${saveUri.fsPath}`);
                 await vscode.workspace.fs.writeFile(saveUri, buffer);
@@ -875,13 +883,13 @@ async function downloadGraphAsPdf(graphName) {
             outputChannel.appendLine(`[Download] Reading file from: ${pdfPath}`);
             // If we have a file path, copy it
             const defaultUri = vscode.Uri.file(path.join(os.homedir(), 'Downloads', `${graphName}.pdf`));
-            
+
             const saveUri = await vscode.window.showSaveDialog({
                 defaultUri,
                 filters: { 'PDF Files': ['pdf'] },
                 saveLabel: 'Save Graph'
             });
-            
+
             if (saveUri) {
                 outputChannel.appendLine(`[Download] Copying to: ${saveUri.fsPath}`);
                 const buffer = fs.readFileSync(pdfPath);
@@ -939,7 +947,7 @@ function openGraphPanel(graphDetails) {
         graphPanel.webview.onDidReceiveMessage(async (message) => {
             try {
                 outputChannel.appendLine(`[Graph Panel] Received message: ${JSON.stringify(message)}`);
-                
+
                 if (!message || typeof message !== 'object') {
                     outputChannel.appendLine('[Graph Panel] Invalid message format');
                     return;
@@ -975,11 +983,11 @@ function renderGraphHtml(graphDetails, webview, extensionUri) {
         // Use dataUri directly - it's already a base64 data URI from Node.js conversion
         const preview = g.dataUri || g.previewDataUri || g.path || '';
         const canPreview = preview && preview.indexOf('data:image/') !== -1;
-        
-        const error = g.error 
-            ? `<div class="artifact-tile-error">Error: ${escapeHtml(g.error)}</div>` 
+
+        const error = g.error
+            ? `<div class="artifact-tile-error">Error: ${escapeHtml(g.error)}</div>`
             : '';
-        
+
         const thumbHtml = canPreview
             ? `<div class="artifact-thumb">
                  <img src="${preview}" class="artifact-thumb-img" alt="${name}">
@@ -987,11 +995,11 @@ function renderGraphHtml(graphDetails, webview, extensionUri) {
             : `<div class="artifact-thumb">
                  <div class="artifact-thumb-fallback">PDF</div>
                </div>`;
-        
+
         // Make tile clickable to open modal
         const dataPath = escapeHtml(preview);
         const baseDir = g.baseDir || '';
-        
+
         return `<div class="artifact-tile" data-action="open-modal" data-path="${dataPath}" data-basedir="${escapeHtml(baseDir)}" data-label="${name}">
           ${thumbHtml}
           <div class="artifact-tile-label">${name}</div>
@@ -1291,18 +1299,18 @@ function isRunSuccess(result) {
 }
 
 async function cancelRequest() {
-  console.log('[Extension] cancelRequest called');
-  try {
-    const cancelled = await mcpClient.cancelAll();
-    // Suppress toast notifications; rely on panel status/logs instead.
-    if (!cancelled) {
-      console.log('[Extension] No running Stata requests to cancel.');
+    console.log('[Extension] cancelRequest called');
+    try {
+        const cancelled = await mcpClient.cancelAll();
+        // Suppress toast notifications; rely on panel status/logs instead.
+        if (!cancelled) {
+            console.log('[Extension] No running Stata requests to cancel.');
+        }
+    } catch (error) {
+        console.error('[Extension] Cancel failed:', error);
+        // Keep error visible to aid debugging, but avoid duplicate info toasts.
+        vscode.window.showErrorMessage('Failed to cancel: ' + error.message);
     }
-  } catch (error) {
-    console.error('[Extension] Cancel failed:', error);
-    // Keep error visible to aid debugging, but avoid duplicate info toasts.
-    vscode.window.showErrorMessage('Failed to cancel: ' + error.message);
-  }
 }
 
 module.exports = {
