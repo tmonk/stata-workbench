@@ -58,7 +58,6 @@ function activate(context) {
     const settings = vscode.workspace.getConfiguration('stataMcp');
     const version = pkg?.version || 'unknown';
     outputChannel.appendLine(`Stata Workbench ready (extension v${version})`);
-    revealOutput();
     missingCliPrompted = !!context.globalState?.get?.(MISSING_CLI_PROMPT_KEY);
     if (!missingCliPrompted && hasExistingMcpConfig(context)) {
         missingCliPrompted = true;
