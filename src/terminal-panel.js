@@ -986,6 +986,7 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
         \`;
 
         let outputContent = '';
+        const statusLabel = entry.success ? 'Stata Output' : 'Stata Output (error)';
         if (entry.stderr) {
             outputContent += \`<div class="output-content error">\${window.stataUI.escapeHtml(entry.stderr)}</div>\`;
         }
@@ -1002,7 +1003,7 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
             +     '<div class="output-header">'
             +       '<div class="flex items-center gap-xs">'
             +         '<span class="' + (entry.success ? 'text-muted' : 'text-error') + '" style="color: ' + (entry.success ? 'var(--accent-success)' : 'var(--accent-error)') + '; font-size:16px;">●</span>'
-            +         '<span>Stata Output</span>'
+            +         '<span>' + statusLabel + '</span>'
             +       '</div>'
             +       '<div class="flex items-center gap-sm">'
             +         (entry.rc !== null ? ('<span>RC ' + entry.rc + '</span>') : '')
@@ -1302,12 +1303,24 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
         if (stderr && run.stderrEl) {
             run.stderrEl.style.display = 'block';
             run.stderrEl.textContent = stderr;
+        } else if (!success && run.stderrEl) {
+            const fallback = msg.rc != null ? ('Run failed (RC ' + msg.rc + ')') : 'Run failed';
+            run.stderrEl.style.display = 'block';
+            run.stderrEl.textContent = fallback;
         }
 
-        // Only backfill stdout if nothing was streamed (streamed transcript is canonical).
+        // If the run failed, prioritize showing the error and hide the bulky stdout content.
+        // When successful, prefer the final stdout if it is longer than the streamed transcript.
         const finalStdout = String(msg.stdout || '');
-        if (finalStdout && run.stdoutEl && !run.stdoutEl.textContent) {
-            run.stdoutEl.textContent = finalStdout;
+        if (!success && run.stdoutEl) {
+            run.stdoutEl.textContent = '';
+            run.stdoutEl.style.display = 'none';
+        } else if (finalStdout && run.stdoutEl) {
+            const current = run.stdoutEl.textContent || '';
+            if (!current || finalStdout.length >= current.length) {
+                run.stdoutEl.textContent = finalStdout;
+            }
+            run.stdoutEl.style.display = 'block';
         }
 
         if (run.progressWrap) {

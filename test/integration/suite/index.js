@@ -3,6 +3,9 @@ const Mocha = require('mocha');
 
 function run() {
     const mocha = new Mocha({ ui: 'tdd', color: true, timeout: 120000 });
+    if (process.env.MOCHA_GREP) {
+        mocha.grep(new RegExp(process.env.MOCHA_GREP, 'i'));
+    }
     const fs = require('fs');
     const files = fs.readdirSync(__dirname);
 

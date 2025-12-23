@@ -1,9 +1,44 @@
-const assert = require('chai').assert;
+const { expect, assert } = require('chai');
 const sinon = require('sinon');
 const proxyquire = require('proxyquire');
 const path = require('path');
 const vscodeMock = require('../mocks/vscode');
 
+describe('mcp-client normalizeResponse', () => {
+  it('keeps longest stdout including logText tail', () => {
+    const { StataMcpClient } = proxyquire('../../src/mcp-client', {
+      vscode: { workspace: { getConfiguration: () => ({ get: () => 0 }) } },
+      fs: {},
+      path: require('path'),
+      os: require('os')
+    });
+    const client = new StataMcpClient();
+
+    const meta = { logText: 'live stream tail', command: 'do foo' };
+    const response = { stdout: 'short', rc: 1 };
+    const normalized = client._normalizeResponse(response, meta);
+
+    expect(normalized.stdout).to.equal('live stream tail');
+  });
+
+  it('falls back to log tail for stderr on non-zero rc', () => {
+    const { StataMcpClient } = proxyquire('../../src/mcp-client', {
+      vscode: { workspace: { getConfiguration: () => ({ get: () => 0 }) } },
+      fs: {},
+      path: require('path'),
+      os: require('os')
+    });
+    const client = new StataMcpClient();
+
+    const meta = { logText: '... type mismatch\nr(109);\n', command: 'do foo' };
+    const response = { rc: 109 };
+    const normalized = client._normalizeResponse(response, meta);
+
+    expect(normalized.stderr).to.contain('type mismatch');
+    expect(normalized.stderr).to.contain('r(109)');
+    expect(normalized.success).to.equal(false);
+  });
+});
 // Mock MCP SDK
 const ClientMock = class {
     constructor() {

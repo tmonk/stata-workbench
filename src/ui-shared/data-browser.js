@@ -32,6 +32,7 @@ const dom = {
     refreshBtn: document.getElementById('btn-refresh'),
     varSelector: document.getElementById('variable-selector'),
     pageInfo: document.getElementById('page-info'),
+    statusText: document.getElementById('status-text'),
     frameName: document.getElementById('frame-name'),
     obsCount: document.getElementById('obs-count'),
     varCount: document.getElementById('var-count'),
@@ -204,6 +205,11 @@ async function initBrowser() {
         if (dom.obsCount) dom.obsCount.textContent = (dsInfo.n || 0).toLocaleString();
         if (dom.varCount) dom.varCount.textContent = (dsInfo.k || 0).toLocaleString();
         if (dom.frameName) dom.frameName.textContent = dsInfo.frame || 'default';
+        if (dom.statusText) {
+            const obsText = `${(dsInfo.n || 0).toLocaleString()} observations`;
+            const varText = typeof dsInfo.k === 'number' ? `, ${dsInfo.k.toLocaleString()} variables` : '';
+            dom.statusText.textContent = `${obsText}${varText}`;
+        }
 
         // 2. Get Vars
         const varData = await apiCall('/v1/vars');

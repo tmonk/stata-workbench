@@ -50,7 +50,8 @@ class StataMcpClient {
         this._recentStderr = [];
         this._workspaceRoot = null;
         this._activeRun = null;
-        this._maxLogBufferChars = 500_000;
+        // Allow larger captured logs so long .do files and errors are preserved.
+        this._maxLogBufferChars = 500_000_000; // 500 MB
         this._clientVersion = pkg?.version || 'dev';
     }
 
@@ -557,7 +558,8 @@ class StataMcpClient {
     _appendBounded(existing, chunk, maxChars) {
         const next = `${existing || ''}${chunk || ''}`;
         if (maxChars && next.length > maxChars) {
-            return next.slice(next.length - maxChars);
+            // Trim from the front so the newest output/error is retained.
+            return next.slice(-maxChars);
         }
         return next;
     }
@@ -776,11 +778,13 @@ class StataMcpClient {
         const hasStructuredContent = !!(parsedFromContent || parsedFromString);
         const safeContentText = hasStructuredContent ? '' : flattenedContent;
 
+        const logText = typeof meta.logText === 'string' ? meta.logText : '';
+
         const normalized = {
             success: true,
             rc: firstNumber([payload?.error?.rc, parsed?.error?.rc, payload.rc, parsed.rc]),
             command: meta.command || payload.command || parsed.command || meta.label,
-            stdout: typeof meta.logText === 'string' ? meta.logText : '',
+            stdout: '',
             stderr: '',
             startedAt,
             endedAt,
@@ -796,17 +800,46 @@ class StataMcpClient {
         if (payload.success === false || parsed.success === false) normalized.success = false;
         if (typeof normalized.rc === 'number' && normalized.rc !== 0) normalized.success = false;
 
-        if (typeof parsed.stdout === 'string' && parsed.stdout.trim()) {
-            normalized.stdout = parsed.stdout;
-        } else if (typeof payload.stdout === 'string' && payload.stdout.trim()) {
-            normalized.stdout = payload.stdout;
-        } else {
-            const stdoutCandidate = firstText([safeContentText, typeof response === 'string' && !hasStructuredContent ? response : null, payload.result, parsed.result]);
-            if (stdoutCandidate) normalized.stdout = stdoutCandidate;
+        const stdoutCandidate = firstText([
+            parsed.stdout,
+            payload.stdout,
+            safeContentText,
+            (typeof response === 'string' && !hasStructuredContent) ? response : null,
+            payload.result,
+            parsed.result
+        ]);
+
+        const stdoutCandidates = [logText, stdoutCandidate].filter((s) => typeof s === 'string' && s.trim());
+        if (stdoutCandidates.length) {
+            stdoutCandidates.sort((a, b) => b.length - a.length);
+            normalized.stdout = stdoutCandidates[0];
         }
 
-        const stderrCandidate = firstText([payload.stderr, parsed.stderr, payload.error?.snippet, parsed.error?.snippet]);
+        const stderrCandidate = firstText([
+            payload.stderr,
+            parsed.stderr,
+            payload.error?.snippet,
+            parsed.error?.snippet,
+            payload.error?.message,
+            parsed.error?.message
+        ]);
         if (stderrCandidate) normalized.stderr = stderrCandidate;
+
+        // If we still have no stderr but received a non-zero RC, fall back to the log tail
+        // so the user can see the actual Stata error (e.g., type mismatch, r(109)).
+        if (!normalized.stderr && typeof normalized.rc === 'number' && normalized.rc !== 0) {
+            const tailSource = firstText([
+                logText,
+                stdoutCandidate,
+                safeContentText,
+                parsed.result,
+                payload.result
+            ]);
+            if (tailSource) {
+                const tail = tailSource.slice(-8000); // keep the recent context, bounded
+                normalized.stderr = tail;
+            }
+        }
 
         if (payload.error || parsed.error) {
             normalized.success = false;
