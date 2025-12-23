@@ -396,6 +396,31 @@ textarea#command-input:focus {
   background: rgba(127, 29, 29, 0.1);
 }
 
+/* SMCL rendering */
+.smcl-block {
+  font-family: var(--font-mono);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.smcl a {
+  color: var(--accent-primary);
+  text-decoration: underline;
+}
+
+.smcl .err {
+  color: #fca5a5;
+}
+
+.smcl .res {
+  color: #fbbf24;
+  font-weight: 600;
+}
+
+.smcl .txt {
+  color: var(--text-code);
+}
+
  .output-progress {
   padding: 8px 12px;
   border-bottom: 1px solid var(--border-subtle);
