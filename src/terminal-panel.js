@@ -228,7 +228,8 @@ class TerminalPanel {
         rc: typeof result?.rc === 'number' ? result.rc : null,
         success,
         durationMs: result?.durationMs ?? null,
-        stdout: success ? (result?.stdout || result?.contentText || '') : (result?.stdout || ''),
+        // Do not ship full stdout on failure; rely on stderr/tail.
+        stdout: success ? (result?.stdout || result?.contentText || '') : '',
         stderr: result?.stderr || '',
         artifacts: normalizeArtifacts(result),
         baseDir: result?.cwd || ''
@@ -333,7 +334,8 @@ class TerminalPanel {
       rc: typeof result?.rc === 'number' ? result.rc : null,
       success,
       durationMs: result?.durationMs ?? null,
-      stdout: success ? (result?.stdout || result?.contentText || '') : (result?.stdout || ''),
+      // Do not ship full stdout on failure; rely on stderr/tail.
+      stdout: success ? (result?.stdout || result?.contentText || '') : '',
       stderr: result?.stderr || '',
       artifacts: normalizeArtifacts(result),
       baseDir: result?.cwd || ''
@@ -1252,7 +1254,12 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
         const shouldStick = autoScrollPinned;
         const chunk = String(msg.text ?? '');
         if (!chunk) return;
+        const MAX_STREAM_CHARS = 200_000; // keep a bounded tail while streaming
         run.stdoutEl.textContent += chunk;
+        const currentLen = run.stdoutEl.textContent.length;
+        if (currentLen > MAX_STREAM_CHARS) {
+            run.stdoutEl.textContent = run.stdoutEl.textContent.slice(-MAX_STREAM_CHARS);
+        }
         if (shouldStick) scheduleScrollToBottom();
       }
 
@@ -1310,17 +1317,30 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
         }
 
         // If the run failed, prioritize showing the error and hide the bulky stdout content.
-        // When successful, prefer the final stdout if it is longer than the streamed transcript.
+        // When successful, only backfill stdout when it is small or the delta is small to avoid massive reflows.
         const finalStdout = String(msg.stdout || '');
+        const MAX_STDOUT_DISPLAY = 200_000; // show at most the tail of large stdout
+        const MAX_BACKFILL_DELTA = 5_000; // avoid replacing huge content if streaming already filled most
         if (!success && run.stdoutEl) {
-            run.stdoutEl.textContent = '';
-            run.stdoutEl.style.display = 'none';
-        } else if (finalStdout && run.stdoutEl) {
+            const tail = finalStdout ? finalStdout.slice(-MAX_STDOUT_DISPLAY) : '';
+            run.stdoutEl.textContent = tail;
+            run.stdoutEl.style.display = tail ? 'block' : 'none';
+        } else if (run.stdoutEl && finalStdout) {
             const current = run.stdoutEl.textContent || '';
-            if (!current || finalStdout.length >= current.length) {
-                run.stdoutEl.textContent = finalStdout;
+            const normalizedFinal = finalStdout.length > MAX_STDOUT_DISPLAY
+                ? finalStdout.slice(-MAX_STDOUT_DISPLAY)
+                : finalStdout;
+
+            const needsInitial = !current && normalizedFinal;
+            const needsSmallDelta = normalizedFinal.length > current.length &&
+                (normalizedFinal.length - current.length) <= MAX_BACKFILL_DELTA;
+
+            if (needsInitial || needsSmallDelta) {
+                run.stdoutEl.textContent = normalizedFinal;
             }
-            run.stdoutEl.style.display = 'block';
+            if (run.stdoutEl.textContent) {
+                run.stdoutEl.style.display = 'block';
+            }
         }
 
         if (run.progressWrap) {
