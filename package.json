@@ -213,7 +213,7 @@
     "compile": "node ./build/esbuild.js",
     "bundle": "node ./build/esbuild.js --production",
     "watch": "node ./build/esbuild.js --watch",
-    "test": "mocha test/unit/**/*.test.js",
+    "test": "jest test/unit",
     "pretest:integration": "npm run compile",
     "test:integration": "node -e \"process.env.MCP_STATA_INTEGRATION='1'; require('./test/integration/runTest');\"",
     "vscode:prepublish": "npm run bundle",
@@ -234,9 +234,12 @@
     "@vscode/vsce": "^3.7.1"
   },
   "devDependencies": {
+    "@types/jest": "^30.0.0",
     "@vscode/test-electron": "^2.4.0",
     "chai": "^6.2.1",
     "esbuild": "^0.27.1",
+    "jest": "^30.2.0",
+    "jest-environment-jsdom": "^30.2.0",
     "jsdom": "^24.0.0",
     "mocha": "^11.7.5",
     "ovsx": "^0.8.4",

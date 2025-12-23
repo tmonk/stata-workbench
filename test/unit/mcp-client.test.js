@@ -1,43 +1,38 @@
-const { expect, assert } = require('chai');
+const { describe, it, beforeEach, expect } = require('@jest/globals');
 const sinon = require('sinon');
-const proxyquire = require('proxyquire');
 const path = require('path');
+const proxyquire = require('proxyquire');
 const vscodeMock = require('../mocks/vscode');
 
 describe('mcp-client normalizeResponse', () => {
-  it('keeps longest stdout including logText tail', () => {
-    const { StataMcpClient } = proxyquire('../../src/mcp-client', {
-      vscode: { workspace: { getConfiguration: () => ({ get: () => 0 }) } },
-      fs: {},
-      path: require('path'),
-      os: require('os')
+    it('keeps longest stdout including logText tail', () => {
+        const { StataMcpClient } = require('../../src/mcp-client');
+        const client = new StataMcpClient();
+
+        const meta = { logText: 'live stream tail', command: 'do foo' };
+        const response = { stdout: 'short', rc: 1 };
+        const normalized = client._normalizeResponse(response, meta);
+
+        expect(normalized.stdout).toEqual('live stream tail');
     });
-    const client = new StataMcpClient();
 
-    const meta = { logText: 'live stream tail', command: 'do foo' };
-    const response = { stdout: 'short', rc: 1 };
-    const normalized = client._normalizeResponse(response, meta);
+    it('falls back to log tail for stderr on non-zero rc', () => {
+        const { StataMcpClient } = proxyquire('../../src/mcp-client', {
+            vscode: { workspace: { getConfiguration: () => ({ get: () => 0 }) } },
+            fs: {},
+            path: require('path'),
+            os: require('os')
+        });
+        const client = new StataMcpClient();
 
-    expect(normalized.stdout).to.equal('live stream tail');
-  });
+        const meta = { logText: '... type mismatch\nr(109);\n', command: 'do foo' };
+        const response = { rc: 109 };
+        const normalized = client._normalizeResponse(response, meta);
 
-  it('falls back to log tail for stderr on non-zero rc', () => {
-    const { StataMcpClient } = proxyquire('../../src/mcp-client', {
-      vscode: { workspace: { getConfiguration: () => ({ get: () => 0 }) } },
-      fs: {},
-      path: require('path'),
-      os: require('os')
+        expect(normalized.stderr).toContain('type mismatch');
+        expect(normalized.stderr).toContain('r(109)');
+        expect(normalized.success).toEqual(false);
     });
-    const client = new StataMcpClient();
-
-    const meta = { logText: '... type mismatch\nr(109);\n', command: 'do foo' };
-    const response = { rc: 109 };
-    const normalized = client._normalizeResponse(response, meta);
-
-    expect(normalized.stderr).to.contain('type mismatch');
-    expect(normalized.stderr).to.contain('r(109)');
-    expect(normalized.success).to.equal(false);
-  });
 });
 // Mock MCP SDK
 const ClientMock = class {
@@ -83,8 +78,8 @@ describe('McpClient', () => {
         vscodeMock.workspace.workspaceFolders = [{ uri: { fsPath: '/mock/workspace' } }];
 
         const config = vscodeMock.workspace.getConfiguration();
-        config.get.resetBehavior();
-        config.get.callsFake((key, def) => {
+        config.get.mockReset();
+        config.get.mockImplementation((key, def) => {
             if (key === 'requestTimeoutMs') return 1000;
             if (key === 'runFileWorkingDirectory') return '';
             if (key === 'autoRevealOutput') return true;
@@ -130,23 +125,23 @@ describe('McpClient', () => {
 
             const artifacts = await client._resolveArtifactsFromList(mockResponse, '/tmp', mockClient);
 
-            assert.lengthOf(artifacts, 3);
+            expect(artifacts.length).toBe(3);
 
             // Check simple_graph
             const simple = artifacts.find(a => a.label === 'simple_graph');
-            assert.exists(simple);
-            assert.equal(simple.path, '/tmp/simple_graph.pdf');
+            expect(simple).toBeDefined();
+            expect(simple.path).toEqual('/tmp/simple_graph.pdf');
 
             // Check named_graph
             const named = artifacts.find(a => a.label === 'named_graph');
-            assert.exists(named);
-            assert.equal(named.path, '/tmp/named_graph.pdf');
+            expect(named).toBeDefined();
+            expect(named.path).toEqual('/tmp/named_graph.pdf');
 
 
             // Check existing_graph
             const existing = artifacts.find(a => a.label === 'existing_graph');
-            assert.exists(existing);
-            assert.equal(existing.path, '/tmp/graph.pdf'); // Should preserve original
+            expect(existing).toBeDefined();
+            expect(existing.path).toEqual('/tmp/graph.pdf'); // Should preserve original
         });
 
         it('should handle export failures gracefully', async () => {
@@ -158,13 +153,28 @@ describe('McpClient', () => {
             const artifacts = await client._resolveArtifactsFromList(mockResponse, '/tmp', mockClient);
 
             // verifiable behavior: it falls back to direct artifact conversion or error placeholder
-            assert.lengthOf(artifacts, 1);
-            assert.equal(artifacts[0].label, 'bad_graph');
-            assert.include(artifacts[0].error, 'Export failed');
+            expect(artifacts.length).toBe(1);
+            expect(artifacts[0].label).toEqual('bad_graph');
+            expect(artifacts[0].error).toContain('Export failed');
         });
     });
 
     describe('_normalizeResponse', () => {
+        it('prefers scml stderr payloads for errors', () => {
+            const response = {
+                error: {
+                    rc: 111,
+                    stderr: { scml: '{err}variable {bf}compl_gloves{sf} not found' }
+                }
+            };
+
+            const normalized = client._normalizeResponse(response, { command: 'reg price compl_gloves' });
+
+            expect(normalized.success).toBe(false);
+            expect(normalized.rc).toEqual(111);
+            expect(normalized.stderr).toContain('{err}variable {bf}compl_gloves{sf} not found');
+        });
+
         it('should not treat structured JSON content as stdout/contentText and should prefer error fields', () => {
             const response = {
                 content: [{
@@ -183,11 +193,11 @@ describe('McpClient', () => {
 
             const normalized = client._normalizeResponse(response, { command: 'reg y x' });
 
-            assert.isFalse(normalized.success);
-            assert.equal(normalized.rc, 111);
-            assert.equal(normalized.stdout, '');
-            assert.equal(normalized.contentText, '');
-            assert.include(normalized.stderr, 'variable y not found');
+            expect(normalized.success).toBe(false);
+            expect(normalized.rc).toEqual(111);
+            expect(normalized.stdout).toEqual('');
+            expect(normalized.contentText).toEqual('');
+            expect(normalized.stderr).toContain('variable y not found');
         });
     });
 
@@ -195,21 +205,21 @@ describe('McpClient', () => {
         it('_parseArtifactLikeJson should handle graph objects', () => {
             const input = JSON.stringify({ graph: { name: 'g1', path: 'p1.png' } });
             const art = client._parseArtifactLikeJson(input);
-            assert.equal(art.label, 'g1');
-            assert.equal(art.path, 'p1.png');
+            expect(art.label).toEqual('g1');
+            expect(art.path).toEqual('p1.png');
         });
 
         it('_parseArtifactLikeJson should handle flat objects', () => {
             const input = JSON.stringify({ name: 'g2', url: 'https://example.com/image.png' });
             const art = client._parseArtifactLikeJson(input);
-            assert.equal(art.label, 'g2');
-            assert.equal(art.path, 'https://example.com/image.png');
-            assert.isNull(art.dataUri);
+            expect(art.label).toEqual('g2');
+            expect(art.path).toEqual('https://example.com/image.png');
+            expect(art.dataUri).toBeNull();
         });
 
         it('_parseArtifactLikeJson should return null for invalid json', () => {
             const art = client._parseArtifactLikeJson('invalid json');
-            assert.isNull(art);
+            expect(art).toBeNull();
         });
     });
 
@@ -219,10 +229,10 @@ describe('McpClient', () => {
 
             await client.run('sysuse auto');
 
-            assert.isTrue(enqueueSpy.calledOnce);
+            expect(enqueueSpy.calledOnce).toBe(true);
             const args = enqueueSpy.firstCall.args;
-            assert.equal(args[0], 'run_command');
-            assert.equal(args[5], true); // collectArtifacts flag
+            expect(args[0]).toEqual('run_command');
+            expect(args[5]).toEqual(true); // collectArtifacts flag
         });
     });
 
@@ -233,28 +243,28 @@ describe('McpClient', () => {
 
             const callToolStub = client._callTool;
             callToolStub.callsFake(async (c, name, args) => {
-                assert.equal(name, 'export_graph');
-                assert.equal(args.graph_name, 'g1');
-                assert.isUndefined(args.format, 'default format should be omitted unless requested');
+                expect(name).toEqual('export_graph');
+                expect(args.graph_name).toEqual('g1');
+                expect(args.format).not.toBeDefined();
                 return { content: [{ type: 'text', text: '/tmp/g1.pdf' }] };
             });
             client._graphResponseToArtifact = sinon.stub().returns(taskResult);
 
             const result = await client.fetchGraph('g1');
 
-            assert.strictEqual(result, taskResult);
-            assert.isTrue(enqueueSpy.calledOnce);
+            expect(result).toBe(taskResult);
+            expect(enqueueSpy.calledOnce).toBe(true);
             const [label, options] = enqueueSpy.firstCall.args;
-            assert.equal(label, 'fetch_graph');
-            assert.deepEqual(options, {});
+            expect(label).toEqual('fetch_graph');
+            expect(options).toEqual({});
         });
     });
 
     describe('getVariableList', () => {
         it('enqueues get_variable_list and returns normalized list', async () => {
             const enqueueStub = sinon.stub(client, '_enqueue').callsFake(async (label, options, task) => {
-                assert.equal(label, 'get_variable_list');
-                assert.deepEqual(options, {});
+                expect(label).toEqual('get_variable_list');
+                expect(options).toEqual({});
                 const normalized = await task();
                 return normalized;
             });
@@ -263,7 +273,7 @@ describe('McpClient', () => {
 
             const result = await client.getVariableList();
 
-            assert.deepEqual(result, [
+            expect(result).toEqual([
                 { name: 'price', label: 'Price' },
                 { name: 'mpg', label: '' }
             ]);
@@ -272,35 +282,35 @@ describe('McpClient', () => {
 
         it('_normalizeVariableList handles strings, objects, and nested content', () => {
             const strings = client._normalizeVariableList(['price', 'mpg']);
-            assert.deepEqual(strings, [
+            expect(strings).toEqual([
                 { name: 'price', label: '' },
                 { name: 'mpg', label: '' }
             ]);
 
             const objects = client._normalizeVariableList({ variables: [{ variable: 'weight', desc: 'Weight' }] });
-            assert.deepEqual(objects, [{ name: 'weight', label: 'Weight' }]);
+            expect(objects).toEqual([{ name: 'weight', label: 'Weight' }]);
 
             const nested = client._normalizeVariableList({ content: [{ text: JSON.stringify({ vars: [{ var: 'turn' }] }) }] });
-            assert.deepEqual(nested, [{ name: 'turn', label: '' }]);
+            expect(nested).toEqual([{ name: 'turn', label: '' }]);
         });
     });
 
     describe('getUiChannel', () => {
         it('enqueues get_ui_channel and returns parsed result', async () => {
             const enqueueStub = sinon.stub(client, '_enqueue').callsFake(async (label, options, task) => {
-                assert.equal(label, 'get_ui_channel');
-                assert.deepEqual(options, {});
+                expect(label).toEqual('get_ui_channel');
+                expect(options).toEqual({});
                 const result = await task();
                 return result;
             });
 
             client._callTool.callsFake(async (c, name) => {
-                assert.equal(name, 'get_ui_channel');
+                expect(name).toEqual('get_ui_channel');
                 return { baseUrl: 'http://localhost:1234', token: 'xyz' };
             });
 
             const result = await client.getUiChannel();
-            assert.deepEqual(result, { baseUrl: 'http://localhost:1234', token: 'xyz' });
+            expect(result).toEqual({ baseUrl: 'http://localhost:1234', token: 'xyz' });
             enqueueStub.restore();
         });
     });
@@ -311,7 +321,7 @@ describe('McpClient', () => {
             vscodeMock.workspace.workspaceFolders = [];
 
             const config = vscodeMock.workspace.getConfiguration();
-            config.get.callsFake((key, def) => {
+            config.get.mockImplementation((key, def) => {
                 if (key === 'runFileWorkingDirectory') return 'relative/run';
                 if (key === 'requestTimeoutMs') return 1000;
                 return def;
@@ -328,21 +338,21 @@ describe('McpClient', () => {
 
             const result = await client.runFile('/tmp/project/script.do');
 
-            assert.isTrue(enqueueStub.calledOnce);
+            expect(enqueueStub.calledOnce).toBe(true);
             const [label, rest, , meta, normalizeFlag, collectFlag] = enqueueStub.firstCall.args;
-            assert.equal(label, 'run_file');
-            assert.property(rest, 'cancellationToken');
-            assert.equal(normalizeFlag, false);
-            assert.equal(collectFlag, false);
+            expect(label).toEqual('run_file');
+            expect('cancellationToken' in rest).toBeTruthy();
+            expect(normalizeFlag).toEqual(false);
+            expect(collectFlag).toEqual(false);
 
             const expectedCwd = path.normalize(path.resolve('relative/run'));
-            assert.equal(meta.cwd, expectedCwd);
-            assert.equal(meta.filePath, '/tmp/project/script.do');
-            assert.equal(meta.command, 'do "/tmp/project/script.do"');
+            expect(meta.cwd).toEqual(expectedCwd);
+            expect(meta.filePath).toEqual('/tmp/project/script.do');
+            expect(meta.command).toEqual('do "/tmp/project/script.do"');
 
-            assert.equal(result.taskResult.name, 'run_do_file');
-            assert.equal(result.taskResult.args.cwd, expectedCwd);
-            assert.equal(result.taskResult.args.path, '/tmp/project/script.do');
+            expect(result.taskResult.name).toEqual('run_do_file');
+            expect(result.taskResult.args.cwd).toEqual(expectedCwd);
+            expect(result.taskResult.args.path).toEqual('/tmp/project/script.do');
 
             enqueueStub.restore();
             vscodeMock.workspace.workspaceFolders = originalFolders;
@@ -362,12 +372,12 @@ describe('McpClient', () => {
 
             const result = await client.runSelection('display "hi"', { cwd: '/tmp/project', normalizeResult: false, includeGraphs: false });
 
-            assert.isTrue(enqueueStub.calledOnce);
-            assert.equal(result.label, 'run_selection');
-            assert.equal(result.meta.cwd, '/tmp/project');
-            assert.equal(result.taskResult.name, 'run_command');
-            assert.equal(result.taskResult.args.cwd, '/tmp/project');
-            assert.equal(result.taskResult.args.code, 'display "hi"');
+            expect(enqueueStub.calledOnce).toBe(true);
+            expect(result.label).toEqual('run_selection');
+            expect(result.meta.cwd).toEqual('/tmp/project');
+            expect(result.taskResult.name).toEqual('run_command');
+            expect(result.taskResult.args.cwd).toEqual('/tmp/project');
+            expect(result.taskResult.args.code).toEqual('display "hi"');
 
             enqueueStub.restore();
         });
@@ -387,11 +397,11 @@ describe('McpClient', () => {
 
             await client._callTool(clientMock, 'run_command', { code: 'sleep 10' }, { progressToken: 'p_tok', signal: abort.signal });
 
-            assert.isTrue(requestStub.calledOnce, 'client.request should be used when progressToken exists');
+            expect(requestStub.calledOnce).toBe(true);
             const [reqPayload, , options] = requestStub.firstCall.args;
-            assert.deepEqual(reqPayload.params._meta, { progressToken: 'p_tok' });
-            assert.strictEqual(options.signal, abort.signal);
-            assert.isTrue(callToolStub.notCalled, 'callTool should not be used when request path is taken');
+            expect(reqPayload.params._meta).toEqual({ progressToken: 'p_tok' });
+            expect(options.signal).toBe(abort.signal);
+            expect(callToolStub.notCalled).toBe(true);
         });
 
         it('treats AbortError as cancellation and surfaces a friendly message', async () => {
@@ -408,8 +418,8 @@ describe('McpClient', () => {
                 thrown = err;
             }
 
-            assert.isNotNull(thrown, 'error should be thrown');
-            assert.match(String(thrown?.message || thrown), /(cancel|abort)/i);
+            expect(thrown).not.toBeNull();
+            expect(String(thrown?.message || thrown)).toMatch(/(cancel|abort)/i);
             emitSpy.restore();
         });
 
@@ -418,9 +428,9 @@ describe('McpClient', () => {
             client._activeCancellation = { cancel: cancelSpy };
             client._pending = 1;
             const result = await client.cancelAll();
-            assert.isTrue(result, 'cancelAll should report true');
-            assert.isTrue(cancelSpy.calledOnce);
-            assert.match(String(cancelSpy.firstCall.args[0] || ''), /user cancelled/);
+            expect(result).toBe(true);
+            expect(cancelSpy.calledOnce).toBe(true);
+            expect(String(cancelSpy.firstCall.args[0] || '')).toMatch(/user cancelled/);
             client._pending = 0;
         });
     });
@@ -444,9 +454,9 @@ describe('McpClient', () => {
 
             await client._drainActiveRunLog({}, run);
 
-            assert.equal(run._logBuffer, 'abc');
-            assert.equal(run.logOffset, 3);
-            assert.isTrue(client._readLogSlice.called);
+            expect(run._logBuffer).toEqual('abc');
+            expect(run.logOffset).toEqual(3);
+            expect(client._readLogSlice.called).toBe(true);
         });
 
         it('_tailLogLoop should forward read_log data to onLog until cancelled', async () => {
@@ -467,9 +477,9 @@ describe('McpClient', () => {
 
             await client._tailLogLoop({}, run);
 
-            assert.isTrue(run.onLog.calledOnce);
-            assert.equal(run._logBuffer, 'hi');
-            assert.equal(run.logOffset, 2);
+            expect(run.onLog.calledOnce).toBe(true);
+            expect(run._logBuffer).toEqual('hi');
+            expect(run.logOffset).toEqual(2);
         });
 
         it('runSelection should drain read_log when log_path is only present in tool response', async () => {
@@ -522,41 +532,41 @@ describe('McpClient', () => {
             });
 
             // Critical behavior: stdout comes from drained log, not the empty stdout from structured content.
-            assert.isTrue(result.success);
-            assert.equal(result.rc, 0);
-            assert.equal(result.logPath, '/tmp/mcp_stata_test.log');
-            assert.equal(result.stdout, 'abc');
+            expect(result.success).toBe(true);
+            expect(result.rc).toEqual(0);
+            expect(result.logPath).toEqual('/tmp/mcp_stata_test.log');
+            expect(result.stdout).toEqual('abc');
         });
     });
 
     describe('_resolveRunFileCwd', () => {
         it('should default to the file directory when unset', () => {
             const cwd = client._resolveRunFileCwd('/tmp/project/script.do');
-            assert.equal(cwd, path.normalize('/tmp/project'));
+            expect(cwd).toEqual(path.normalize('/tmp/project'));
         });
 
         it('should expand workspace and fileDir tokens', () => {
             const config = vscodeMock.workspace.getConfiguration();
-            config.get.callsFake((key, def) => {
+            config.get.mockImplementation((key, def) => {
                 if (key === 'runFileWorkingDirectory') return '${workspaceFolder}/sub/${fileDir}';
                 if (key === 'requestTimeoutMs') return 1000;
                 return def;
             });
 
             const cwd = client._resolveRunFileCwd('/tmp/project/script.do');
-            assert.equal(cwd, path.normalize('/mock/workspace/sub//tmp/project'));
+            expect(cwd).toEqual(path.normalize('/mock/workspace/sub//tmp/project'));
         });
 
         it('should honor absolute paths', () => {
             const config = vscodeMock.workspace.getConfiguration();
-            config.get.callsFake((key, def) => {
+            config.get.mockImplementation((key, def) => {
                 if (key === 'runFileWorkingDirectory') return '/abs/path';
                 if (key === 'requestTimeoutMs') return 1000;
                 return def;
             });
 
             const cwd = client._resolveRunFileCwd('/tmp/project/script.do');
-            assert.equal(cwd, path.normalize('/abs/path'));
+            expect(cwd).toEqual(path.normalize('/abs/path'));
         });
 
         it('should expand tilde to home directory', () => {
@@ -564,40 +574,40 @@ describe('McpClient', () => {
             const originalHome = process.env.HOME;
             process.env.HOME = '/home/tester';
 
-            config.get.callsFake((key, def) => {
+            config.get.mockImplementation((key, def) => {
                 if (key === 'runFileWorkingDirectory') return '~/stata/runs';
                 if (key === 'requestTimeoutMs') return 1000;
                 return def;
             });
 
             const cwd = client._resolveRunFileCwd('/tmp/project/script.do');
-            assert.equal(cwd, path.normalize('/home/tester/stata/runs'));
+            expect(cwd).toEqual(path.normalize('/home/tester/stata/runs'));
 
             process.env.HOME = originalHome;
         });
 
         it('should fall back to file directory when tokens are unknown', () => {
             const config = vscodeMock.workspace.getConfiguration();
-            config.get.callsFake((key, def) => {
+            config.get.mockImplementation((key, def) => {
                 if (key === 'runFileWorkingDirectory') return '${unknownToken}';
                 if (key === 'requestTimeoutMs') return 1000;
                 return def;
             });
 
             const cwd = client._resolveRunFileCwd('/tmp/project/script.do');
-            assert.equal(cwd, path.normalize('/tmp/project'));
+            expect(cwd).toEqual(path.normalize('/tmp/project'));
         });
 
         it('should resolve relative paths against workspace root when available', () => {
             const config = vscodeMock.workspace.getConfiguration();
-            config.get.callsFake((key, def) => {
+            config.get.mockImplementation((key, def) => {
                 if (key === 'runFileWorkingDirectory') return 'relative/run';
                 if (key === 'requestTimeoutMs') return 1000;
                 return def;
             });
 
             const cwd = client._resolveRunFileCwd('/tmp/project/script.do');
-            assert.equal(cwd, path.normalize('/mock/workspace/relative/run'));
+            expect(cwd).toEqual(path.normalize('/mock/workspace/relative/run'));
         });
 
         it('should resolve relative paths against process cwd when workspace is missing', () => {
@@ -605,14 +615,14 @@ describe('McpClient', () => {
             const originalFolders = vscodeMock.workspace.workspaceFolders;
             vscodeMock.workspace.workspaceFolders = [];
 
-            config.get.callsFake((key, def) => {
+            config.get.mockImplementation((key, def) => {
                 if (key === 'runFileWorkingDirectory') return 'relative/run';
                 if (key === 'requestTimeoutMs') return 1000;
                 return def;
             });
 
             const cwd = client._resolveRunFileCwd('/tmp/project/script.do');
-            assert.equal(cwd, path.normalize(path.resolve('relative/run')));
+            expect(cwd).toEqual(path.normalize(path.resolve('relative/run')));
 
             vscodeMock.workspace.workspaceFolders = originalFolders;
         });
@@ -634,10 +644,10 @@ describe('McpClient', () => {
 
             const result = await client.listGraphs({ baseDir: '/tmp' });
 
-            assert.isArray(result.graphs);
-            assert.lengthOf(result.graphs, 1);
-            assert.equal(result.graphs[0].label, 'g1');
-            assert.equal(result.graphs[0].path, '/tmp/g1.pdf');
+            expect(Array.isArray(result.graphs)).toBe(true);
+            expect(result.graphs.length).toBe(1);
+            expect(result.graphs[0].label).toEqual('g1');
+            expect(result.graphs[0].path).toEqual('/tmp/g1.pdf');
         });
 
         it('should aggregate graph lists across multiple content chunks', async () => {
@@ -664,11 +674,11 @@ describe('McpClient', () => {
 
             const result = await client.listGraphs({ baseDir: '/tmp' });
 
-            assert.isArray(result.graphs);
-            assert.lengthOf(result.graphs, 2);
+            expect(Array.isArray(result.graphs)).toBe(true);
+            expect(result.graphs.length).toBe(2);
 
             const labels = result.graphs.map((g) => g.label);
-            assert.includeMembers(labels, ['g1', 'g2']);
+            expect(labels).toEqual(expect.arrayContaining(['g1', 'g2']));
         });
 
         it('should handle text-wrapped graph lists', async () => {
@@ -691,8 +701,8 @@ describe('McpClient', () => {
 
             const result = await client.listGraphs({ baseDir: '/tmp' });
 
-            assert.lengthOf(result.graphs, 1);
-            assert.equal(result.graphs[0].label, 'g_wrapped');
+            expect(result.graphs.length).toBe(1);
+            expect(result.graphs[0].label).toEqual('g_wrapped');
         });
     });
 });

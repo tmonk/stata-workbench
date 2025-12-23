@@ -1606,7 +1606,9 @@ function toEntry(code, result) {
   const success = isRunSuccess(result);
   return {
     code,
-    stdout: (typeof result?.stdout === 'string') ? result.stdout : (success ? (result?.contentText || '') : ''),
+    stdout: success
+      ? ((typeof result?.stdout === 'string') ? result.stdout : (result?.contentText || ''))
+      : '',
     stderr: result?.stderr || '',
     rc: typeof result?.rc === 'number' ? result.rc : null,
     success,

@@ -281,7 +281,6 @@ class StataMcpClient {
         if (this._activeCancellation) {
             this._activeCancellation.cancel('user cancelled');
         }
-        this._pending = 0;
         // Stop log tailing on any active run
         if (this._activeRun) {
             this._activeRun._tailCancelled = true;
@@ -685,8 +684,11 @@ class StataMcpClient {
         const work = async () => {
             const startedAt = Date.now();
             if (this._cancelSignal || options?.cancellationToken?.isCancellationRequested) {
-                this._cancelSignal = false;
+                const wasGlobal = this._cancelSignal;
                 this._pending = Math.max(0, this._pending - 1);
+                if (this._pending === 0) {
+                    this._cancelSignal = false;
+                }
                 throw new Error('Request cancelled');
             }
 
@@ -719,6 +721,9 @@ class StataMcpClient {
             } finally {
                 this._active = false;
                 this._pending = Math.max(0, this._pending - 1);
+                if (this._pending === 0) {
+                    this._cancelSignal = false;
+                }
                 if (this._pending > 0) {
                     this._statusEmitter.emit('status', 'queued');
                 } else {
@@ -815,9 +820,11 @@ class StataMcpClient {
             normalized.stdout = stdoutCandidates[0];
         }
 
-        const stderrCandidate = firstText([
+        const stderrCandidate = firstTextish([
             payload.stderr,
             parsed.stderr,
+            payload.error?.stderr,
+            parsed.error?.stderr,
             payload.error?.snippet,
             parsed.error?.snippet,
             payload.error?.message,
@@ -862,6 +869,18 @@ class StataMcpClient {
         function firstText(candidates) {
             for (const v of candidates) {
                 if (typeof v === 'string' && v.trim()) return v;
+            }
+            return '';
+        }
+
+        // Like firstText, but also understands objects that carry SCML/text payloads.
+        function firstTextish(candidates) {
+            for (const v of candidates) {
+                if (typeof v === 'string' && v.trim()) return v;
+                if (v && typeof v === 'object') {
+                    const maybe = v.scml || v.text || v.value;
+                    if (typeof maybe === 'string' && maybe.trim()) return maybe;
+                }
             }
             return '';
         }
@@ -1029,16 +1048,16 @@ class StataMcpClient {
         for (const g of graphs) {
             // Check if graph already has file_path or dataUri
             const hasData = g && typeof g === 'object' && (g.file_path || g.dataUri || g.data);
-            
+
             if (hasData) {
                 // Graph already has data, just convert it
                 const artifact = this._graphToArtifact(g, baseDir, response);
                 if (artifact) {
                     artifacts.push(artifact);
-                    
+
                     // Deep copy and sanitize for logging
                     const artifact_log = JSON.parse(JSON.stringify(artifact));
-                    
+
                     // Remove base64 data from all locations
                     const sanitize = (obj) => {
                         for (const key in obj) {
@@ -1054,20 +1073,20 @@ class StataMcpClient {
                             }
                         }
                     };
-                    
+
                     sanitize(artifact_log);
                     this._log(`[mcp-stata graphs] parsed artifact: ${this._stringifySafe(artifact_log)}`);
                 }
             } else {
                 // Graph needs to be exported - it only has metadata (name, active, etc)
                 const graphName = (typeof g === 'string') ? g : (g?.name || g?.graph_name || g?.label);
-                
+
                 if (graphName && client) {
                     try {
                         // Export the graph to get actual file data
                         const exportResponse = await this._exportGraphPreferred(client, graphName);
                         const artifact = this._graphResponseToArtifact(exportResponse, graphName, baseDir);
-                        
+
                         if (artifact) {
                             artifacts.push(artifact);
                             this._log(`[mcp-stata graphs] exported artifact: ${this._stringifySafe(artifact)}`);
@@ -1086,7 +1105,7 @@ class StataMcpClient {
                 }
             }
         }
-        
+
         return artifacts;
     }
 
@@ -1111,12 +1130,12 @@ class StataMcpClient {
         const base = graph.baseDir || graph.base_dir || baseDir || response?.baseDir || response?.base_dir || null;
         const href = graph.file_path || graph.url || graph.href || graph.link || graph.path || graph.file || graph.filename || null;
         let dataUri = this._toDataUri(graph) || (href && href.startsWith('data:') ? href : null);
-        
+
         // If we have a file path but no dataUri, read the file and convert it to base64
         if (!dataUri && href && !href.startsWith('http') && !href.startsWith('data:')) {
             dataUri = this._fileToDataUri(href);
         }
-        
+
         const pathOrData = href || dataUri;
         if (!pathOrData) return null;
         return {
@@ -1133,10 +1152,10 @@ class StataMcpClient {
                 this._log(`[mcp-stata] File not found for data URI: ${filePath}`);
                 return null;
             }
-            
+
             const buffer = fs.readFileSync(filePath);
             const ext = path.extname(filePath).toLowerCase();
-            
+
             const mimeTypes = {
                 '.svg': 'image/svg+xml',
                 '.png': 'image/png',
@@ -1145,7 +1164,7 @@ class StataMcpClient {
                 '.pdf': 'application/pdf'
             };
             const mimeType = mimeTypes[ext] || 'application/octet-stream';
-            
+
             const dataUri = `data:${mimeType};base64,${buffer.toString('base64')}`;
             this._log(`[mcp-stata] Converted file to data URI: ${filePath} (${buffer.length} bytes)`);
             return dataUri;

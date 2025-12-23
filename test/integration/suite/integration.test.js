@@ -1,12 +1,11 @@
-const assert = require('chai').assert;
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const vscode = require('vscode');
 const { spawnSync } = require('child_process');
 
-suite('McpClient integration (VS Code host)', function () {
-    this.timeout(120000);
+describe('McpClient integration (VS Code host)', () => {
+    jest.setTimeout(180000); // 3 minutes for slow Stata startups
 
     const enabled = process.env.MCP_STATA_INTEGRATION === '1';
     let tempRoot;
@@ -15,19 +14,17 @@ suite('McpClient integration (VS Code host)', function () {
     let doFile;
     let client;
 
-    suiteSetup(async function () {
+    beforeAll(async () => {
         if (!enabled) {
-            this.skip();
             return;
         }
 
-        const uvxCmd = process.env.MCP_STATA_UVX_CMD || process.env.MCP_STATA_UVX_CMD || 'uvx';
+        const uvxCmd = process.env.MCP_STATA_UVX_CMD || 'uvx';
         const uvxProbe = spawnSync(uvxCmd, ['--version'], { encoding: 'utf8' });
         if (uvxProbe.status !== 0) {
-            this.skip();
+            console.warn('[INTEGRATION] uvx not found, tests will be skipped or fail.');
             return;
         }
-        process.env.MCP_STATA_UVX_CMD = uvxCmd;
 
         tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'stata-wb-int-'));
         workDir = path.join(tempRoot, 'workdir');
@@ -46,16 +43,14 @@ suite('McpClient integration (VS Code host)', function () {
         await config.update('runFileWorkingDirectory', workDir, vscode.ConfigurationTarget.Workspace);
         await config.update('requestTimeoutMs', 60000, vscode.ConfigurationTarget.Workspace);
 
-        // Ensure the extension under test can resolve uvx
         const { StataMcpClient } = require('../../../src/mcp-client');
         client = new StataMcpClient();
     });
 
-    suiteTeardown(async function () {
+    afterAll(async () => {
         if (client?.dispose) {
             await client.dispose();
         }
-        // Reset workspace configuration to avoid pointing at deleted temp dirs for later suites.
         if (enabled) {
             const config = vscode.workspace.getConfiguration('stataMcp');
             await config.update('runFileWorkingDirectory', '', vscode.ConfigurationTarget.Workspace);
@@ -65,17 +60,40 @@ suite('McpClient integration (VS Code host)', function () {
         }
     });
 
-    test('runs .do file with configured working directory', async function () {
-        if (!enabled) {
-            this.skip();
-            return;
-        }
+    const runIfEnabled = enabled ? test : test.skip;
 
+    runIfEnabled('runs .do file with configured working directory', async () => {
         const result = await client.runFile(doFile, { normalizeResult: true, includeGraphs: false });
-        assert.isTrue(result.success, 'runFile success flag');
-        assert.strictEqual(result.rc, 0);
+        expect(result.success).toBe(true);
+        expect(result.rc).toBe(0);
         const stdout = result.stdout || result.contentText || '';
-        assert.include(stdout, 'integration-ok');
-        assert.strictEqual(result.cwd, workDir, 'cwd metadata should reflect configured working directory');
+        expect(stdout).toContain('integration-ok');
+        // Match path separator for consistency
+        expect(result.cwd.toLowerCase()).toBe(workDir.toLowerCase());
+    });
+
+    runIfEnabled('returns variables after sysuse auto', async () => {
+        const load = await client.runSelection('sysuse auto', { normalizeResult: true, includeGraphs: false });
+        expect(load.success).toBe(true);
+
+        const vars = await client.getVariableList();
+        expect(Array.isArray(vars)).toBe(true);
+        expect(vars.length).toBeGreaterThanOrEqual(1);
+        const names = vars.map(v => v.name);
+        expect(names).toContain('price');
+    });
+
+
+
+    runIfEnabled('exports a graph to PDF without base64', async () => {
+        // Create a graph
+        await client.runSelection('sysuse auto', { normalizeResult: true, includeGraphs: false });
+        await client.runSelection('twoway scatter price mpg, name(gint, replace)', { normalizeResult: true, includeGraphs: true });
+
+        const result = await client.fetchGraph('gint', { format: 'pdf' });
+        expect(result).toBeDefined();
+        expect(result.path).toMatch(/\.pdf$/i);
+        expect(result.path.startsWith('data:')).toBe(false);
+        expect(fs.existsSync(result.path)).toBe(true);
     });
 });

@@ -1,24 +1,23 @@
-const assert = require('chai').assert;
 const vscode = require('vscode');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
 
-suite('Tab Completion Integration', function () {
-    this.timeout(60000);
+describe('Tab Completion Integration', () => {
+    jest.setTimeout(60000);
 
     const enabled = process.env.MCP_STATA_INTEGRATION === '1';
 
     let tempFile;
 
-    suiteSetup(() => {
+    beforeAll(() => {
         // Create a temporary .do file
         const tempDir = os.tmpdir();
         tempFile = path.join(tempDir, 'tab_completion.do');
         fs.writeFileSync(tempFile, 'display "TAB-COMPLETION"');
     });
 
-    suiteTeardown(() => {
+    afterAll(() => {
         if (fs.existsSync(tempFile)) {
             fs.unlinkSync(tempFile);
         }
@@ -29,14 +28,14 @@ suite('Tab Completion Integration', function () {
             return;
         }
         const extension = vscode.extensions.getExtension('tmonk.stata-workbench');
-        assert.ok(extension, 'Extension should be available');
+        expect(extension).toBeTruthy();
 
         if (!extension.isActive) {
             await extension.activate();
         }
 
         const api = extension.exports;
-        assert.ok(api && api.TerminalPanel, 'TerminalPanel API should be exposed');
+        expect(api && api.TerminalPanel).toBeTruthy();
 
         let requestSeen = false;
         let variablesSent = false;
@@ -69,8 +68,8 @@ suite('Tab Completion Integration', function () {
             await delay(500);
         }
 
-        assert.isTrue(requestSeen, 'webview should request variables');
-        assert.isTrue(variablesSent, 'variables response should be sent to webview');
+        expect(requestSeen).toBe(true);
+        expect(variablesSent).toBe(true);
     });
 });
 

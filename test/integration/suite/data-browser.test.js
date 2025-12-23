@@ -1,16 +1,15 @@
-const assert = require('chai').assert;
 const vscode = require('vscode');
 const http = require('http');
 
-suite('Data Browser Integration', function () {
-    this.timeout(60000);
+describe('Data Browser Integration', () => {
+    jest.setTimeout(60000);
 
     const enabled = process.env.MCP_STATA_INTEGRATION === '1';
 
     let dummyServer;
     let dummyUrl;
 
-    setup(async () => {
+    beforeEach(async () => {
         // Start a dummy HTTP server to act as the Stata API for proxy tests
         // This ensures the test is reliable even if Stata isn't running
         await new Promise(resolve => {
@@ -41,7 +40,7 @@ suite('Data Browser Integration', function () {
         });
     });
 
-    teardown(() => {
+    afterEach(() => {
         if (dummyServer) dummyServer.close();
     });
 
@@ -53,27 +52,30 @@ suite('Data Browser Integration', function () {
         // Open the panel
         await vscode.commands.executeCommand('stata-workbench.viewData');
         const panel = api.DataBrowserPanel.currentPanel;
-        assert.ok(panel, 'Panel should be open');
+        expect(panel).toBeTruthy();
 
         const result = await api.DataBrowserPanel._performRequest(`${dummyUrl}/v1/dataset`, { method: 'GET' });
-        assert.deepEqual(result, { dataset: { id: 'test-id', n: 50, frame: 'default' } });
+        expect(result).toEqual({ dataset: { id: 'test-id', n: 50, frame: 'default' } });
     });
 
-    test('DataBrowserPanel proxy should handle POST requests with body', async () => {
-        const extension = vscode.extensions.getExtension('tmonk.stata-workbench');
-        const api = extension.exports;
+    test(
+        'DataBrowserPanel proxy should handle POST requests with body',
+        async () => {
+            const extension = vscode.extensions.getExtension('tmonk.stata-workbench');
+            const api = extension.exports;
 
-        const bodyObj = { foo: 'bar', limit: 100 };
-        const bodyStr = JSON.stringify(bodyObj);
+            const bodyObj = { foo: 'bar', limit: 100 };
+            const bodyStr = JSON.stringify(bodyObj);
 
-        const result = await api.DataBrowserPanel._performRequest(`${dummyUrl}/v1/echo`, { 
-            method: 'POST',
-            body: bodyStr,
-            headers: { 'Content-Type': 'application/json' }
-        });
-        
-        assert.deepEqual(result, bodyObj);
-    });
+            const result = await api.DataBrowserPanel._performRequest(`${dummyUrl}/v1/echo`, {
+                method: 'POST',
+                body: bodyStr,
+                headers: { 'Content-Type': 'application/json' }
+            });
+
+            expect(result).toEqual(bodyObj);
+        }
+    );
 
     test('DataBrowserPanel proxy should handle errors', async () => {
         const extension = vscode.extensions.getExtension('tmonk.stata-workbench');
@@ -81,9 +83,9 @@ suite('Data Browser Integration', function () {
 
         try {
             await api.DataBrowserPanel._performRequest(`${dummyUrl}/v1/error`, { method: 'GET' });
-            assert.fail('Should have thrown an error');
+            expect(false).toBe(true);
         } catch (err) {
-            assert.include(err.message, 'API Request Failed (400)');
+            expect(err.message).toContain('API Request Failed (400)');
         }
     });
 });

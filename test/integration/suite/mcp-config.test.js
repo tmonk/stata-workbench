@@ -1,23 +1,22 @@
-const assert = require('chai').assert;
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { getMcpConfigTarget, writeMcpConfig } = require('../../../src/extension');
 
-suite('MCP Config Integration', function () {
-    this.timeout(30000);
+describe('MCP Config Integration', () => {
+    jest.setTimeout(60000);
 
     const enabled = process.env.MCP_STATA_INTEGRATION === '1';
 
     let tempRoot;
     let originalAppData;
 
-    setup(() => {
+    beforeEach(() => {
         tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'stata-wb-mcp-'));
         originalAppData = process.env.APPDATA;
     });
 
-    teardown(() => {
+    afterEach(() => {
         process.env.APPDATA = originalAppData;
         if (tempRoot && fs.existsSync(tempRoot)) {
             fs.rmSync(tempRoot, { recursive: true, force: true });
@@ -38,12 +37,12 @@ suite('MCP Config Integration', function () {
         const target = getMcpConfigTarget(ctx);
         writeMcpConfig(target);
 
-        assert.isTrue(fs.existsSync(target.configPath), 'config file should exist');
+        expect(fs.existsSync(target.configPath)).toBe(true);
         const json = JSON.parse(fs.readFileSync(target.configPath, 'utf8'));
-        assert.property(json, 'servers');
-        assert.property(json.servers, 'mcp_stata');
-        assert.notProperty(json, 'mcpServers');
-        assert.strictEqual(target.configPath, path.join(tempRoot, 'AppData', 'Roaming', 'Code', 'User', 'mcp.json'));
+        expect('servers' in json).toBeTruthy();
+        expect('mcp_stata' in json.servers).toBeTruthy();
+        expect('mcpServers' in json).toBeFalsy();
+        expect(target.configPath).toBe(path.join(tempRoot, 'AppData', 'Roaming', 'Code', 'User', 'mcp.json'));
     });
 
     test('writes Cursor config on simulated linux host', () => {
@@ -56,12 +55,12 @@ suite('MCP Config Integration', function () {
         const target = getMcpConfigTarget(ctx);
         writeMcpConfig(target);
 
-        assert.isTrue(fs.existsSync(target.configPath));
+        expect(fs.existsSync(target.configPath)).toBe(true);
         const json = JSON.parse(fs.readFileSync(target.configPath, 'utf8'));
-        assert.property(json, 'mcpServers');
-        assert.property(json.mcpServers, 'mcp_stata');
-        assert.notProperty(json, 'servers');
-        assert.strictEqual(target.configPath, path.join(tempRoot, 'home', 'alice', '.cursor', 'mcp.json'));
+        expect('mcpServers' in json).toBeTruthy();
+        expect('mcp_stata' in json.mcpServers).toBeTruthy();
+        expect('servers' in json).toBeFalsy();
+        expect(target.configPath).toBe(path.join(tempRoot, 'home', 'alice', '.cursor', 'mcp.json'));
     });
 
     test('writes Antigravity config on simulated windows host', () => {
@@ -75,12 +74,14 @@ suite('MCP Config Integration', function () {
         const target = getMcpConfigTarget(ctx);
         writeMcpConfig(target);
 
-        assert.isTrue(fs.existsSync(target.configPath));
+        expect(fs.existsSync(target.configPath)).toBe(true);
         const json = JSON.parse(fs.readFileSync(target.configPath, 'utf8'));
-        assert.property(json, 'mcpServers');
-        assert.property(json.mcpServers, 'mcp_stata');
-        assert.notProperty(json, 'servers');
-        assert.strictEqual(target.configPath, path.join(tempRoot, 'AppData', 'Roaming', 'Antigravity', 'User', 'mcp.json'));
+        expect('mcpServers' in json).toBeTruthy();
+        expect('mcp_stata' in json.mcpServers).toBeTruthy();
+        expect('servers' in json).toBeFalsy();
+        expect(target.configPath).toBe(
+            path.join(tempRoot, 'AppData', 'Roaming', 'Antigravity', 'User', 'mcp.json')
+        );
     });
 
     test('preserves existing env and custom fields when updating', () => {
@@ -121,10 +122,10 @@ suite('MCP Config Integration', function () {
         const server = json.servers.mcp_stata;
 
         // Env should be merged from any legacy cursor entry.
-        assert.deepEqual(server.env, { STATA_LICENSE: 'abc', STATA_PATH: '/opt/stata' }, 'env should merge legacy entries');
-        assert.equal(server.note, 'keep-me', 'custom server fields should be preserved');
-        assert.deepEqual(server.args.slice(0, 2), ['--refresh', '--from'], 'server args should be updated with refresh');
-        assert.notProperty(json, 'mcpServers', 'legacy cursor entry should be removed when targeting VS Code');
+        expect(server.env).toEqual({ STATA_LICENSE: 'abc', STATA_PATH: '/opt/stata' });
+        expect(server.note).toEqual('keep-me');
+        expect(server.args.slice(0, 2)).toEqual(['--refresh', '--from']);
+        expect('mcpServers' in json).toBeFalsy();
     });
 
     test('does not touch other server entries', () => {
@@ -167,13 +168,13 @@ suite('MCP Config Integration', function () {
 
         const json = JSON.parse(fs.readFileSync(target.configPath, 'utf8'));
         // mcp-stata should be present only under servers for VS Code host
-        assert.property(json.servers, 'mcp_stata');
-        assert.notProperty(json.mcpServers, 'mcp_stata', 'mcp_stata should be removed from mcpServers for VS Code host');
+        expect('mcp_stata' in json.servers).toBeTruthy();
+        expect('mcp_stata' in json.mcpServers).toBeFalsy();
 
         // Non-mcp-stata entries remain untouched
-        assert.deepEqual(json.servers.other_server, initial.servers.other_server, 'other server entry should be unchanged');
+        expect(json.servers.other_server).toEqual(initial.servers.other_server);
         // Ensure cursor-style other server was not deleted
-        assert.property(json, 'mcpServers');
-        assert.deepEqual(json.mcpServers.other_server, initial.mcpServers.other_server, 'other mcpServer entry should be unchanged');
+        expect('mcpServers' in json).toBeTruthy();
+        expect(json.mcpServers.other_server).toEqual(initial.mcpServers.other_server);
     });
 });

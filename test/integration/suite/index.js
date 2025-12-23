@@ -1,31 +1,34 @@
 const path = require('path');
-const Mocha = require('mocha');
+const { runCLI } = require('jest');
 
-function run() {
-    const mocha = new Mocha({ ui: 'tdd', color: true, timeout: 120000 });
-    if (process.env.MOCHA_GREP) {
-        mocha.grep(new RegExp(process.env.MOCHA_GREP, 'i'));
-    }
-    const fs = require('fs');
-    const files = fs.readdirSync(__dirname);
+async function run() {
+    const projectRootPath = path.resolve(__dirname, '../../../');
+    const configPath = path.resolve(projectRootPath, 'jest.config.js');
 
-    files.filter(f => f.endsWith('.test.js')).forEach(f => {
-        mocha.addFile(path.resolve(__dirname, f));
-    });
+    // Set environment variable to indicate integration test mode
+    process.env.MCP_STATA_INTEGRATION = '1';
+    global.realVscode = require('vscode');
+    console.log('[INTEGRATION] MCP_STATA_INTEGRATION:', process.env.MCP_STATA_INTEGRATION);
 
-    return new Promise((resolve, reject) => {
-        try {
-            mocha.run((failures) => {
-                if (failures > 0) {
-                    reject(new Error(`${failures} integration tests failed.`));
-                } else {
-                    resolve();
-                }
-            });
-        } catch (err) {
-            reject(err);
+    try {
+        const result = await runCLI(
+            {
+                config: configPath,
+                testMatch: ['<rootDir>/test/integration/suite/*.test.js'],
+                runInBand: true, // Required for VS Code integration tests
+                testEnvironment: 'node',
+                setupFilesAfterEnv: [],
+            },
+            [projectRootPath]
+        );
+
+        if (result.results && result.results.numFailedTests > 0) {
+            throw new Error(`${result.results.numFailedTests} integration tests failed.`);
         }
-    });
+    } catch (error) {
+        console.error('Jest integration test run failed:', error);
+        throw error;
+    }
 }
 
 module.exports = { run };

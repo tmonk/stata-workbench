@@ -1,94 +1,93 @@
-const assert = require('chai').assert;
 const vscode = require('vscode');
 
-suite('UI Integration', function () {
-    this.timeout(60000);
+describe('UI Integration', () => {
+    jest.setTimeout(60000);
 
     const enabled = process.env.MCP_STATA_INTEGRATION === '1';
 
     test('Extension should activate and register commands', async () => {
         const extension = vscode.extensions.getExtension('tmonk.stata-workbench');
-        assert.ok(extension, 'Extension should be present');
+        expect(extension).toBeTruthy();
 
         if (!extension.isActive) {
             await extension.activate();
         }
-        assert.isTrue(extension.isActive, 'Extension should be active');
+        expect(extension.isActive).toBe(true);
 
         const commands = await vscode.commands.getCommands(true);
-        assert.include(commands, 'stata-workbench.runSelection');
-        assert.include(commands, 'stata-workbench.runFile');
+        expect(commands).toContain('stata-workbench.runSelection');
+        expect(commands).toContain('stata-workbench.runFile');
     });
 
-    test('runSelection should stream output to Terminal Panel (requires Stata)', async () => {
-        if (!enabled) {
-            return;
-        }
-
-        const extension = vscode.extensions.getExtension('tmonk.stata-workbench');
-        assert.ok(extension, 'Extension should be present');
-        if (!extension.isActive) {
-            await extension.activate();
-        }
-        const api = extension.exports;
-        assert.ok(api?.TerminalPanel, 'TerminalPanel should be exported');
-
-        const doc = await vscode.workspace.openTextDocument({ language: 'stata', content: 'display "STREAM-SELECTION"' });
-        const editor = await vscode.window.showTextDocument(doc);
-        editor.selection = new vscode.Selection(0, 0, 0, doc.lineAt(0).text.length);
-
-        let receivedError = null;
-        const outgoing = [];
-        api.TerminalPanel._testOutgoingCapture = (msg) => {
-            outgoing.push(msg);
-        };
-        api.TerminalPanel._testCapture = (msg) => {
-            if (msg.type === 'log' && msg.level === 'error') receivedError = msg.message;
-        };
-
-        await vscode.commands.executeCommand('stata-workbench.runSelection');
-
-        let runStarted = null;
-        let runFinished = null;
-        let sawLogAppend = false;
-
-        for (let i = 0; i < 120; i++) {
-            if (receivedError) throw new Error(`Client Script Error: ${receivedError}`);
-
-            for (const m of outgoing) {
-                if (m?.type === 'runStarted') runStarted = m;
-                if (m?.type === 'runLogAppend') sawLogAppend = true;
-                if (m?.type === 'runFinished') runFinished = m;
+    test(
+        'runSelection should stream output to Terminal Panel (requires Stata)',
+        async () => {
+            if (!enabled) {
+                return;
             }
-            if (runStarted && runFinished) break;
-            await new Promise(r => setTimeout(r, 500));
-        }
 
-        assert.ok(api.TerminalPanel.currentPanel, 'Terminal Panel should be open');
-        assert.ok(runStarted, 'should emit runStarted');
-        assert.ok(runFinished, 'should emit runFinished');
-        assert.strictEqual(runStarted.runId, runFinished.runId, 'runId should match');
-        const finalStdout = String(runFinished?.stdout || '');
-        assert.isTrue(
-            sawLogAppend || finalStdout.includes('STREAM-SELECTION'),
-            'should stream logs or include expected output in runFinished'
-        );
+            const extension = vscode.extensions.getExtension('tmonk.stata-workbench');
+            expect(extension).toBeTruthy();
+            if (!extension.isActive) {
+                await extension.activate();
+            }
+            const api = extension.exports;
+            expect(api?.TerminalPanel).toBeTruthy();
 
-        const logMsgs = outgoing.filter(m => m?.type === 'runLogAppend');
-        if (logMsgs.length) {
-            assert.isTrue(logMsgs.every(m => m.runId === runStarted.runId), 'runLogAppend should match runId');
-        }
+            const doc = await vscode.workspace.openTextDocument({ language: 'stata', content: 'display "STREAM-SELECTION"' });
+            const editor = await vscode.window.showTextDocument(doc);
+            editor.selection = new vscode.Selection(0, 0, 0, doc.lineAt(0).text.length);
 
-        // If any log chunk includes the marker, that's great; but do not require it.
-        // Different Stata/MCP setups may stream prompts/noise without the exact displayed text.
-        const combined = logMsgs.map(m => String(m.text || '')).join('');
-        if (combined) {
-            // Not a strict requirement; keep as a sanity check only when present.
-            if (combined.includes('STREAM-SELECTION')) {
-                assert.include(combined, 'STREAM-SELECTION');
+            let receivedError = null;
+            const outgoing = [];
+            api.TerminalPanel._testOutgoingCapture = (msg) => {
+                outgoing.push(msg);
+            };
+            api.TerminalPanel._testCapture = (msg) => {
+                if (msg.type === 'log' && msg.level === 'error') receivedError = msg.message;
+            };
+
+            await vscode.commands.executeCommand('stata-workbench.runSelection');
+
+            let runStarted = null;
+            let runFinished = null;
+            let sawLogAppend = false;
+
+            for (let i = 0; i < 120; i++) {
+                if (receivedError) throw new Error(`Client Script Error: ${receivedError}`);
+
+                for (const m of outgoing) {
+                    if (m?.type === 'runStarted') runStarted = m;
+                    if (m?.type === 'runLogAppend') sawLogAppend = true;
+                    if (m?.type === 'runFinished') runFinished = m;
+                }
+                if (runStarted && runFinished) break;
+                await new Promise(r => setTimeout(r, 500));
+            }
+
+            expect(api.TerminalPanel.currentPanel).toBeTruthy();
+            expect(runStarted).toBeTruthy();
+            expect(runFinished).toBeTruthy();
+            expect(runStarted.runId).toBe(runFinished.runId);
+            const finalStdout = String(runFinished?.stdout || '');
+            expect(sawLogAppend || finalStdout.includes('STREAM-SELECTION')).toBe(true);
+
+            const logMsgs = outgoing.filter(m => m?.type === 'runLogAppend');
+            if (logMsgs.length) {
+                expect(logMsgs.every(m => m.runId === runStarted.runId)).toBe(true);
+            }
+
+            // If any log chunk includes the marker, that's great; but do not require it.
+            // Different Stata/MCP setups may stream prompts/noise without the exact displayed text.
+            const combined = logMsgs.map(m => String(m.text || '')).join('');
+            if (combined) {
+                // Not a strict requirement; keep as a sanity check only when present.
+                if (combined.includes('STREAM-SELECTION')) {
+                    expect(combined).toContain('STREAM-SELECTION');
+                }
             }
         }
-    });
+    );
 
     // test('Download PDF button triggers export_graph and yields PDF path', async () => {
     //     if (!enabled) {
@@ -155,12 +154,12 @@ suite('UI Integration', function () {
         }
 
         const extension = vscode.extensions.getExtension('tmonk.stata-workbench');
-        assert.ok(extension, 'Extension should be present');
+        expect(extension).toBeTruthy();
         if (!extension.isActive) {
             await extension.activate();
         }
         const api = extension.exports;
-        assert.ok(api?.TerminalPanel, 'TerminalPanel should be exported');
+        expect(api?.TerminalPanel).toBeTruthy();
 
         const doc = await vscode.workspace.openTextDocument({ language: 'stata', content: 'sleep 5000' });
         const editor = await vscode.window.showTextDocument(doc);
@@ -173,6 +172,8 @@ suite('UI Integration', function () {
 
         // Kick off a long run
         const runPromise = vscode.commands.executeCommand('stata-workbench.runSelection');
+        // Attach catch immediately to avoid unhandled rejection in case it fails before we await it.
+        runPromise.catch(() => { });
 
         // Wait for runStarted
         let runStarted = null;
@@ -183,7 +184,7 @@ suite('UI Integration', function () {
             if (runStarted) break;
             await new Promise(r => setTimeout(r, 250));
         }
-        assert.ok(runStarted, 'runStarted should arrive');
+        expect(runStarted).toBeTruthy();
 
         // Trigger cancel via handler (simulating stop button)
         await api.TerminalPanel._handleCancelRun();
@@ -205,12 +206,12 @@ suite('UI Integration', function () {
         }
 
         // We accept either an explicit runFinished with error or a thrown cancellation
-        assert.isTrue(cancelledThrown || (!!runFinished && runFinished.success === false), 'run should be cancelled or end unsuccessful');
+        expect(cancelledThrown || (!!runFinished && runFinished.success === false)).toBe(true);
     });
 
     test('viewData should open Data Browser Panel', async () => {
         const extension = vscode.extensions.getExtension('tmonk.stata-workbench');
-        assert.ok(extension, 'Extension should be present');
+        expect(extension).toBeTruthy();
         if (!extension.isActive) {
             await extension.activate();
         }
@@ -233,7 +234,7 @@ suite('UI Integration', function () {
                 let dataLoaded = false;
                 let runOutput = '';
                 const originalCapture = api.TerminalPanel._testOutgoingCapture;
-                
+
                 api.TerminalPanel._testOutgoingCapture = (msg) => {
                     if (originalCapture) originalCapture(msg);
                     if (msg.type === 'runFinished') {
@@ -248,37 +249,37 @@ suite('UI Integration', function () {
                 editor.selection = new vscode.Selection(0, 0, 0, doc.lineAt(0).text.length);
 
                 await vscode.commands.executeCommand('stata-workbench.runSelection');
-                
+
                 // Wait for Stata to finish loading data
                 for (let i = 0; i < 40; i++) { // Increased wait time
                     if (dataLoaded) break;
                     await new Promise(r => setTimeout(r, 500));
                 }
-                
+
                 // Restore capture
                 api.TerminalPanel._testOutgoingCapture = originalCapture;
 
                 if (!dataLoaded) {
-                    assert.fail('Data load (sysuse auto) failed or timed out');
+                    expect(false).toBe(true);
                 }
                 if (!runOutput.includes('1978 automobile data')) {
-                    assert.fail(`Data load output missing confirmation. Output: ${runOutput}`);
+                    expect(false).toBe(true);
                 }
             }
-            
+
             // Execute the command
             await vscode.commands.executeCommand('stata-workbench.viewData');
-            
+
             // Wait for potential init errors
             await new Promise(r => setTimeout(r, 3000));
 
             if (browserError) {
-                assert.fail(`Data Browser reported error: ${browserError}`);
+                expect(false).toBe(true);
             }
-            
+
             // Verify panel is created
-            assert.ok(api.DataBrowserPanel, 'DataBrowserPanel should be exported');
-            assert.ok(api.DataBrowserPanel.currentPanel, 'DataBrowserPanel should be open');
+            expect(api.DataBrowserPanel).toBeTruthy();
+            expect(api.DataBrowserPanel.currentPanel).toBeTruthy();
         } finally {
             console.error = originalError;
             if (api.DataBrowserPanel && api.DataBrowserPanel.currentPanel) {
