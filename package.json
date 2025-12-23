@@ -125,7 +125,7 @@
         },
         "stataMcp.autoRevealOutput": {
           "type": "boolean",
-          "default": true,
+          "default": false,
           "description": "Automatically show the Stata output channel after runs."
         },
         "stataMcp.autoConfigureMcp": {
