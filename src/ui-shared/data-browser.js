@@ -41,41 +41,60 @@ const dom = {
 };
 
 // --- Initialization ---
-
-window.addEventListener('message', event => {
+window.addEventListener('message', (event) => {
     const message = event.data;
+
     switch (message.type) {
         case 'init':
-            log(`Received init message. BaseURL: ${message.baseUrl}`);
-            state.baseUrl = message.baseUrl;
-            state.token = message.token;
-            initBrowser();
+            console.log('[DataBrowser Webview] Received init message. BaseURL:', message.baseUrl);
+            if (message.baseUrl && message.token) {
+                initBrowser(message.baseUrl, message.token);
+            } else {
+                console.error('[DataBrowser Webview] Init message missing credentials');
+                showError('Initialization failed: Missing credentials');
+            }
             break;
+
         case 'refresh':
-            log('Received refresh message.');
-            initBrowser();
+            console.log('[DataBrowser Webview] Received refresh message.');
+            if (isInitialized && state.baseUrl && state.token) {
+                initBrowser(state.baseUrl, state.token);
+            } else {
+                console.log('[DataBrowser] Refresh pending - waiting for init');
+                pendingRefresh = true;
+            }
             break;
+
         case 'apiResponse':
             handleApiResponse(message);
             break;
+
+        default:
+            console.warn('[DataBrowser Webview] Unknown message type:', message.type);
     }
 });
 
-const pendingRequests = new Map();
 
 function handleApiResponse(msg) {
     const { reqId, success, data, error } = msg;
+    
     if (pendingRequests.has(reqId)) {
         const { resolve, reject } = pendingRequests.get(reqId);
         pendingRequests.delete(reqId);
+        
         if (success) {
             resolve(data);
         } else {
-            // Check for Dataset ID conflict (often 409 or specific error message)
+            // Check for Dataset ID conflict
             if (error && (error.includes('409') || error.includes('datasetId') || error.includes('identity'))) {
-                log('Dataset changed detected via API error. Re-initializing...', true);
-                initBrowser();
+                console.warn('[DataBrowser] Dataset changed detected. Re-initializing...');
+                
+                // Re-initialize with existing credentials
+                if (state.baseUrl && state.token) {
+                    initBrowser(state.baseUrl, state.token);  // ✅ Pass credentials
+                }
             }
+            
             reject(new Error(error));
         }
     }
@@ -103,6 +122,36 @@ function setError(msg) {
         dom.error.classList.add('hidden');
     }
 }
+
+function showError(msg) {
+    setError(msg);
+}
+
+function hideError() {
+    setError(null);
+}
+
+function showLoading() {
+    setLoading(true);
+}
+
+function hideLoading() {
+    setLoading(false);
+}
+
+
+function updateDataSummary(nObs, nVars) {
+    if (dom.obsCount) dom.obsCount.textContent = nObs.toLocaleString();
+    if (dom.varCount) dom.varCount.textContent = nVars.toLocaleString();
+}
+
+function populateVariableSelector(variables) {
+    state.vars = variables;
+    state.selectedVars = variables.map(v => v.name);
+    updateVarSelector();
+}
+
+
 
 // --- API Calls ---
 
@@ -164,85 +213,63 @@ async function apiCall(endpoint, method = 'GET', body = null) {
     });
 }
 
-async function initBrowser() {
-    log('Initializing Browser...');
-    setLoading(true);
-    try {
-        // Clear state
-        state.viewId = null;
-        state.offset = 0;
 
-        // 1. Get Dataset Info
-        let dsResp;
-        try {
-            dsResp = await apiCall('/v1/dataset');
-        } catch (err) {
-            if (err instanceof ApiError && err.code === 'no_data_in_memory') {
-                log('No data in memory - showing empty state');
-                state.datasetId = 'empty';
-                state.totalObs = 0;
-                if (dom.obsCount) dom.obsCount.textContent = '0';
-                if (dom.varCount) dom.varCount.textContent = '0';
-                if (dom.frameName) dom.frameName.textContent = 'none';
-                dom.grid.innerHTML = '<tr><td colspan="100%" style="text-align:center; padding: 20px; color: var(--text-tertiary);">No dataset loaded in Stata</td></tr>';
-                updatePagination({ rows: [] });
-                if (dom.varSelector) dom.varSelector.innerHTML = '<option value="">No Variables</option>';
-                return;
-            }
-            throw err;
-        }
-
-        if (!dsResp) {
-            log('Failed to get dataset info', true);
-            return;
-        }
-        log(`Dataset Info: ${JSON.stringify(dsResp)}`);
-        
-        const dsInfo = dsResp.dataset || dsResp;
-        state.datasetId = dsInfo.id;
-        state.totalObs = dsInfo.n;
-        
-        if (dom.obsCount) dom.obsCount.textContent = (dsInfo.n || 0).toLocaleString();
-        if (dom.varCount) dom.varCount.textContent = (dsInfo.k || 0).toLocaleString();
-        if (dom.frameName) dom.frameName.textContent = dsInfo.frame || 'default';
-        if (dom.statusText) {
-            const obsText = `${(dsInfo.n || 0).toLocaleString()} observations`;
-            const varText = typeof dsInfo.k === 'number' ? `, ${dsInfo.k.toLocaleString()} variables` : '';
-            dom.statusText.textContent = `${obsText}${varText}`;
-        }
-
-        // 2. Get Vars
-        const varData = await apiCall('/v1/vars');
-        
-        let vars = null;
-        if (Array.isArray(varData)) {
-            vars = varData;
-        } else if (varData) {
-            vars = varData.vars || varData.variables;
-        }
-
-        if (vars) {
-            log(`Loaded ${vars.length} variables`);
-            state.vars = vars;
-            if (!state.selectedVars.length) {
-                state.selectedVars = state.vars.slice(0, 50).map(v => v.name);
-            } else {
-                state.selectedVars = state.selectedVars.filter(name => state.vars.some(v => v.name === name));
-            }
-            updateVarSelector();
-        } else {
-            log('No variables found in response', true);
-        }
-
-        // 3. Initial Load
-        await loadPage();
-
-    } catch (err) {
-        setError(`Initialization failed: ${err.message}`);
-    } finally {
-        setLoading(false);
+let isInitialized = false;
+let pendingRefresh = false;
+const pendingRequests = new Map();
+function initBrowser(baseUrl, token) {
+    if (!baseUrl || !token) {
+        console.warn('[DataBrowser] Cannot initialize without baseUrl and token');
+        pendingRefresh = true;
+        return;
     }
+
+    console.log('[DataBrowser Webview] Initializing Browser...');
+    
+    state.baseUrl = baseUrl;
+    state.token = token;
+    isInitialized = true;
+    pendingRefresh = false;
+
+    hideError();
+    showLoading();
+
+    apiCall('/v1/dataset', 'GET') 
+        .then(response => {
+            const datasetInfo = response.dataset || response;
+            state.datasetId = datasetInfo.id;
+            state.totalObs = datasetInfo.n || 0;
+            
+            log(`Dataset Info: ${JSON.stringify(response)}`);
+            updateDataSummary(state.totalObs, 0);
+            
+            return apiCall('/v1/vars', 'GET');
+        })
+        .then(response => {
+            const variables = response.vars || response.variables || [];
+            log(`Loaded ${variables.length} variables`);
+            
+            populateVariableSelector(variables);
+            updateDataSummary(state.totalObs, variables.length);
+            
+            return loadPage();
+        })
+        .then(() => {
+            hideLoading();
+            console.log('[DataBrowser Webview] Initialization complete');
+            
+            if (pendingRefresh) {
+                console.log('[DataBrowser Webview] Pending refresh completed');
+                pendingRefresh = false;
+            }
+        })
+        .catch(err => {
+            console.error('[DataBrowser Webview Error]', err);
+            showError(`Initialization failed: ${err.message}`);
+            hideLoading();
+        });
 }
+
 
 function updateVarSelector() {
     if (!dom.varSelector) return;
@@ -290,14 +317,19 @@ async function loadPage() {
             
             if (data.datasetId && data.datasetId !== state.datasetId) {
                 log('Response datasetId mismatch. Re-initializing.', true);
-                initBrowser();
+                if (state.baseUrl && state.token) {
+                    initBrowser(state.baseUrl, state.token);
+                }
             }
         }
     } catch (err) {
         if (err instanceof ApiError && err.code === 'no_data_in_memory') {
              // Handle race condition where data was cleared after init
-             initBrowser();
-             return;
+             if (state.baseUrl && state.token) {
+                console.log('Re-initializing after no_data_in_memory error');
+                initBrowser(state.baseUrl, state.token);
+            }
+            return;
         }
         setError(`Failed to load page: ${err.message}`);
     } finally {
@@ -517,7 +549,11 @@ dom.nextBtn.addEventListener('click', () => {
 
 if (dom.refreshBtn) {
     dom.refreshBtn.addEventListener('click', () => {
-        initBrowser();
+        if (state.baseUrl && state.token) {
+            initBrowser(state.baseUrl, state.token);
+        } else {
+            console.warn('[DataBrowser] Cannot refresh - missing credentials');
+        }
     });
 }
 

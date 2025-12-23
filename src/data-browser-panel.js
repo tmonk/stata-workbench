@@ -21,7 +21,6 @@ class DataBrowserPanel {
 
         DataBrowserPanel.extensionUri = extensionUri;
 
-        // Otherwise, create a new panel.
         const panel = vscode.window.createWebviewPanel(
             'stataDataBrowser',
             'Stata Data Browser',
@@ -39,10 +38,8 @@ class DataBrowserPanel {
             DataBrowserPanel.currentPanel = null;
         });
 
-        // Set the webview's initial html content
         panel.webview.html = DataBrowserPanel._getHtmlForWebview(panel.webview, extensionUri);
 
-        // Handle messages from the webview
         panel.webview.onDidReceiveMessage(
             async message => {
                 switch (message.type) {
@@ -55,27 +52,28 @@ class DataBrowserPanel {
                     case 'apiCall':
                         try {
                             const result = await DataBrowserPanel._performRequest(message.url, message.options);
-                            panel.webview.postMessage({
-                                type: 'apiResponse',
-                                reqId: message.reqId,
-                                success: true,
-                                data: result
-                            });
+                            
+                            // Check if panel is still alive before posting
+                            if (DataBrowserPanel.currentPanel) {
+                                panel.webview.postMessage({
+                                    type: 'apiResponse',
+                                    reqId: message.reqId,
+                                    success: true,
+                                    data: result
+                                });
+                            }
                         } catch (err) {
                             console.error('[DataBrowser Proxy Error]', err);
-                            // If running in integration test, re-throw to fail the test if unhandled
-                            if (process.env.MCP_STATA_INTEGRATION === '1') {
-                                // We can't easily throw across the process boundary to Mocha here,
-                                // but we can ensure it's logged as a critical error that tests might be scanning for.
-                                // However, to truly fail the test, we need the test runner to see this.
-                                // The best way is to let the message post back an error, and have the test client assert on no errors.
+                            
+                            // Check if panel is still alive before posting
+                            if (DataBrowserPanel.currentPanel) {
+                                panel.webview.postMessage({
+                                    type: 'apiResponse',
+                                    reqId: message.reqId,
+                                    success: false,
+                                    error: err.message
+                                });
                             }
-                            panel.webview.postMessage({
-                                type: 'apiResponse',
-                                reqId: message.reqId,
-                                success: false,
-                                error: err.message
-                            });
                         }
                         break;
                 }
@@ -90,13 +88,18 @@ class DataBrowserPanel {
             const channel = await mcpClient.getUiChannel();
             console.log('[DataBrowserPanel] Received channel:', JSON.stringify(channel, null, 2));
             
+            // Check if panel is still alive before posting
             if (channel && channel.baseUrl && channel.token) {
-                console.log('[DataBrowserPanel] Sending init message to webview');
-                panel.webview.postMessage({
-                    type: 'init',
-                    baseUrl: channel.baseUrl,
-                    token: channel.token
-                });
+                if (DataBrowserPanel.currentPanel) {
+                    console.log('[DataBrowserPanel] Sending init message to webview');
+                    panel.webview.postMessage({
+                        type: 'init',
+                        baseUrl: channel.baseUrl,
+                        token: channel.token
+                    });
+                } else {
+                    console.log('[DataBrowserPanel] Panel was disposed before init could be sent');
+                }
             } else {
                 console.error('[DataBrowserPanel] Invalid channel details received');
                 vscode.window.showErrorMessage('Failed to retrieve UI channel details from Stata.');
@@ -108,10 +111,15 @@ class DataBrowserPanel {
     }
 
     static refresh() {
-        if (DataBrowserPanel.currentPanel) {
+    // Check if panel exists before trying to post message
+    if (DataBrowserPanel.currentPanel) {
+        try {
             DataBrowserPanel.currentPanel.webview.postMessage({ type: 'refresh' });
+        } catch (err) {
+            console.warn('[DataBrowserPanel] Could not refresh - panel may be disposed:', err.message);
         }
     }
+}
 
     static _performRequest(urlStr, options) {
         return new Promise((resolve, reject) => {

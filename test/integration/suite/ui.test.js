@@ -161,7 +161,11 @@ describe('UI Integration', () => {
         const api = extension.exports;
         expect(api?.TerminalPanel).toBeTruthy();
 
-        const doc = await vscode.workspace.openTextDocument({ language: 'stata', content: 'sleep 5000' });
+        // Use a loop that can be interrupted (100 iterations × 100ms = 10s total)
+        const doc = await vscode.workspace.openTextDocument({ 
+            language: 'stata', 
+            content: 'forvalues i = 1/100 { display "`i\'"; sleep 100 }'
+        });
         const editor = await vscode.window.showTextDocument(doc);
         editor.selection = new vscode.Selection(0, 0, doc.lineCount - 1, doc.lineAt(doc.lineCount - 1).text.length);
 
@@ -170,9 +174,7 @@ describe('UI Integration', () => {
             outgoing.push(msg);
         };
 
-        // Kick off a long run
         const runPromise = vscode.commands.executeCommand('stata-workbench.runSelection');
-        // Attach catch immediately to avoid unhandled rejection in case it fails before we await it.
         runPromise.catch(() => { });
 
         // Wait for runStarted
@@ -186,11 +188,12 @@ describe('UI Integration', () => {
         }
         expect(runStarted).toBeTruthy();
 
-        // Trigger cancel via handler (simulating stop button)
+        // Cancel should interrupt the loop quickly
         await api.TerminalPanel._handleCancelRun();
 
+        // Should finish within 2-3 seconds (not 10)
         let runFinished = null;
-        for (let i = 0; i < 40; i++) {
+        for (let i = 0; i < 12; i++) {  // 12 × 250ms = 3 seconds max
             for (const m of outgoing) {
                 if (m?.type === 'runFinished') runFinished = m;
             }
@@ -205,7 +208,6 @@ describe('UI Integration', () => {
             cancelledThrown = true;
         }
 
-        // We accept either an explicit runFinished with error or a thrown cancellation
         expect(cancelledThrown || (!!runFinished && runFinished.success === false)).toBe(true);
     });
 
