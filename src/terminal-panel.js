@@ -951,6 +951,7 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <link rel="stylesheet" href="${designUri}">
   <link rel="stylesheet" href="${highlightCssUri}">
+  <link rel="stylesheet" href="https://unpkg.com/@vscode/codicons@0.0.44/dist/codicon.css">
   <title>Stata Terminal</title>
   <script nonce="${nonce}">
     window.initialEntries = ${initialJson};
@@ -958,13 +959,21 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
   <style nonce="${nonce}">
     /* Override highlight.js background to blend with terminal */
     .hljs { background: transparent !important; padding: 0 !important; }
-    @import url('https://unpkg.com/@vscode/codicons@0.0.44/dist/codicon.css');
 
-    #btn-open-browser {
+    .context-right .btn-icon {
       padding: 4px;
-      height: 24px;
-      width: 24px;
+      height: 28px;
+      width: 28px;
+      display: flex;
+      align-items: center;
       justify-content: center;
+      flex-shrink: 0;
+    }
+
+    .context-right .btn-icon i {
+      font-size: 16px;
+      line-height: 1;
+      display: block;
     }
 
     .data-summary {
