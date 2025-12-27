@@ -841,6 +841,8 @@ class TerminalPanel {
       // Do not ship full stdout on failure; rely on stderr/tail.
       // Apply smclToHtml to the final result
       stdout: success ? smclToHtml(result?.stdout || result?.contentText || '') : '',
+      // fullStdout: always available for the 'Log' tab.
+      fullStdout: smclToHtml(result?.stdout || result?.contentText || ''),
       stderr: success ? '' : smclToHtml(finalStderr),
       artifacts: normalizeArtifacts(result),
       baseDir: result?.cwd || ''
@@ -1866,6 +1868,9 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
             run.stderrEl.style.display = 'block';
             run.stderrEl.innerHTML = String(msg.message || 'Run cancelled.');
         }
+        if (run.stdoutEl) {
+            run.stdoutEl.style.display = 'none';
+        }
         if (run.progressWrap) {
             if (run.progressText) run.progressText.textContent = '';
             if (run.progressMeta) run.progressMeta.textContent = '';
@@ -1889,10 +1894,14 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
       if (msg.type === 'runLogAppend') {
         const runId = msg.runId;
         const run = runs[runId];
-        if (!run || !run.stdoutEl) return;
+        if (!run) return;
         const shouldStick = autoScrollPinned;
         const chunk = String(msg.text ?? '');
         if (!chunk) return;
+        if (run.logEl) {
+            run.logEl.insertAdjacentHTML('beforeend', chunk);
+        }
+        if (!run.stdoutEl) return;
         const MAX_STREAM_CHARS = 20_000; // keep a bounded tail while streaming
         run.stdoutEl.insertAdjacentHTML('beforeend', chunk);
         
@@ -1978,16 +1987,8 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
         const MAX_STDOUT_DISPLAY = 20_000; // show at most the tail of large stdout
         const MAX_BACKFILL_DELTA = 5_000; // avoid replacing huge content if streaming already filled most
         if (!success && run.stdoutEl) {
-            // Only overwrite if we have actual final output to show.
-            // If finalStdout is empty (e.g. error preventing capture), keep any partial streamed output.
-            if (finalStdout) {
-                const tail = safeSliceTail(finalStdout, MAX_STDOUT_DISPLAY);
-                run.stdoutEl.innerHTML = tail;
-                run.stdoutEl.style.display = tail ? 'block' : 'none';
-            } else if (run.stdoutEl.innerHTML) {
-                // Keep existing streamed content visible
-                run.stdoutEl.style.display = 'block';
-            }
+            // If failed, hide the log content in the 'Result' tab to show "error only"
+            run.stdoutEl.style.display = "none";
         } else if (run.stdoutEl && finalStdout) {
             const current = run.stdoutEl.innerHTML || '';
             const normalizedFinal = safeSliceTail(finalStdout, MAX_STDOUT_DISPLAY);
@@ -2034,6 +2035,9 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
         if (run.stderrEl) {
             run.stderrEl.style.display = 'block';
             run.stderrEl.textContent = String(msg.message || 'Unknown error');
+        }
+        if (run.stdoutEl) {
+            run.stdoutEl.style.display = 'none';
         }
         
         // Update header status for failed run
