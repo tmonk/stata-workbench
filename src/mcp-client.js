@@ -378,18 +378,18 @@ class StataMcpClient {
 
         const uvCommand = process.env.MCP_STATA_UVX_CMD || 'uvx';
         const serverConfig = this._loadServerConfig();
-        
+
         // Use command/args from config if available, otherwise fall back to uvx with --refresh
         const finalCommand = serverConfig.command || uvCommand;
         const finalArgs = serverConfig.args || ['--refresh', '--from', `${MCP_PACKAGE_NAME}@latest`, MCP_PACKAGE_NAME];
         const configuredEnv = serverConfig.env || {};
-        
+
         // Log that we're creating the transport
         this._log(`[mcp-stata] Creating StdioClientTransport`);
         this._log(`[mcp-stata] Config source: ${serverConfig.configPath || 'defaults (uvx --refresh)'}`);
         this._log(`[mcp-stata] Command: ${finalCommand}`);
         this._log(`[mcp-stata] Args: ${JSON.stringify(finalArgs)}`);
-        
+
         const transport = new StdioClientTransport({
             command: finalCommand,
             args: finalArgs,
@@ -419,7 +419,7 @@ class StataMcpClient {
         // Debug: check what properties transport has
         this._log(`[mcp-stata] Transport created. Has stderr: ${!!transport.stderr}, type: ${typeof transport.stderr}`);
         this._log(`[mcp-stata] Transport keys: ${Object.keys(transport || {}).join(', ')}`);
-        
+
         // Try to access the underlying process if available
         const proc = transport._process || transport.process || transport._serverProcess;
         if (proc) {
