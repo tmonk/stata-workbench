@@ -64,4 +64,67 @@ describe('Terminal Output E2E', () => {
         expect(combined).not.toContain('log type:');
         expect(combined).not.toContain('opened on:');
     });
+
+    test('Should show Log tab on failure and hide on success', async () => {
+        if (!enabled) {
+            return;
+        }
+
+        const extension = vscode.extensions.getExtension('tmonk.stata-workbench');
+        if (!extension.isActive) {
+            await extension.activate();
+        }
+        const api = extension.exports;
+
+        const outgoing = [];
+        api.TerminalPanel._testOutgoingCapture = (msg) => {
+            outgoing.push(msg);
+        };
+
+        // 1. Run a command that FAILS (RC 199)
+        // [MODIFIED] Added stdout to mock so fullStdout is populated
+        await api.TerminalPanel.handleRun('nosuchcommand_xyz', async () => ({
+            rc: 199,
+            stdout: '{com}. nosuchcommand_xyz\n',
+            stderr: '{err}command not found',
+            success: false
+        }));
+
+        let failureFinished = null;
+        for (let i = 0; i < 60; i++) {
+            failureFinished = outgoing.find(m => m?.type === 'runFinished' && m.rc === 199);
+            if (failureFinished) break;
+            await new Promise(r => setTimeout(r, 500));
+        }
+
+        expect(failureFinished).toBeTruthy();
+        expect(failureFinished.success).toBe(false);
+        expect(failureFinished.hasError).toBe(true);
+        expect(failureFinished.fullStdout).toBeTruthy(); // Log content
+        expect(failureFinished.stdout).toBe(''); // Cleaned result view
+
+        // 2. Run a command that SUCCEEDS (RC 0)
+        outgoing.length = 0; // clear capture
+        // [MODIFIED] Using handleRun instead of internal _handleRun which failed before
+        await api.TerminalPanel.handleRun('display "OK-SUCCESS"', async () => ({
+            rc: 0,
+            stdout: 'OK-SUCCESS',
+            stderr: '',
+            success: true
+        }));
+
+        let successFinished = null;
+        for (let i = 0; i < 60; i++) {
+            successFinished = outgoing.find(m => m?.type === 'runFinished' && m.success === true);
+            if (successFinished) break;
+            await new Promise(r => setTimeout(r, 500));
+        }
+
+        expect(successFinished).toBeTruthy();
+        expect(successFinished.success).toBe(true);
+        expect(successFinished.hasError).toBe(false);
+        expect(successFinished.rc).toBe(0);
+        expect(successFinished.stdout).toContain('OK-SUCCESS');
+        expect(successFinished.fullStdout).toContain('OK-SUCCESS');
+    });
 });

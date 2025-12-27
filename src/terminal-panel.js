@@ -16,46 +16,40 @@ function parseSMCL(smclText) {
   let commandHistory = [];
   let errorMessages = [];
   let errorLineIndex = -1;
+  let hasError = false;
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     const trimmedLine = line.trim();
     if (!trimmedLine) continue;
 
-    // 1. Extract return code
+    // 1. Extract return code from explicit tags as a priority
     if (!extractedRC) {
-      let rcMatch = line.match(/r\((\d+)\)/i);
-      if (rcMatch) {
-        extractedRC = parseInt(rcMatch[1], 10);
-      }
-
-      if (!extractedRC) {
-        rcMatch = line.match(/rc[=\s]+(\d+)/i);
-        if (rcMatch) {
-          extractedRC = parseInt(rcMatch[1], 10);
-        }
-      }
-
-      if (!extractedRC) {
-        rcMatch = line.match(/exit\s+(\d+)/i);
-        if (rcMatch) {
-          const code = parseInt(rcMatch[1], 10);
-          if (code !== 0) {
-            extractedRC = code;
-          }
+      // Look for Stata's standard return code search tag
+      const searchMatch = line.match(/\{search r\((\d+)\)/i);
+      if (searchMatch) {
+        extractedRC = parseInt(searchMatch[1], 10);
+      } else {
+        // Look for the standard standalone return code line at the end
+        const standaloneRC = trimmedLine.match(/^r\((\d+)\);$/);
+        if (standaloneRC) {
+          extractedRC = parseInt(standaloneRC[1], 10);
         }
       }
     }
 
-    // 2. Detect error messages
+    // 2. Detect error messages - ONLY capture from {err} tags
     const errMatch = line.match(/^\{err\}(.+)$/);
     if (errMatch) {
+      hasError = true;
       const errorText = errMatch[1].trim().replace(/\{[^}]+\}/g, '');
-      errorMessages.push(errorText);
-      if (errorLineIndex === -1) errorLineIndex = i;
+      if (errorText) {
+        errorMessages.push(errorText);
+        if (errorLineIndex === -1) errorLineIndex = i;
+      }
     }
 
-    // 3. Track call stack
+    // 3. Track call stack - look for begin/end blocks
     const beginMatch = line.match(/begin\s+(\S+)/);
     if (beginMatch) {
       const funcName = beginMatch[1];
@@ -68,7 +62,6 @@ function parseSMCL(smclText) {
     if (endMatch && callStack.length > 0) {
       // ONLY pop if we haven't found an error yet. This effectively "freezes" the stack state at the error.
       if (errorLineIndex === -1 || i < errorLineIndex) {
-        // Also add strict check: unrelated 'end' tags shouldn't pop our stack
         const funcName = endMatch[1];
         if (callStack[callStack.length - 1] === funcName) {
           callStack.pop();
@@ -76,20 +69,16 @@ function parseSMCL(smclText) {
       }
     }
 
-    // 4. Capture executed commands
-    if (line.trim().startsWith('= ')) {
-      let cmd = line.substring(line.indexOf('= ') + 2).trim();
+    // 4. Capture executed commands - ONLY capture from {com} or '= ' lines
+    if (trimmedLine.startsWith('= ')) {
+      let cmd = trimmedLine.substring(2).trim();
       // Handle multiple prefixes
       cmd = cmd.replace(/^((cap(ture)?|qui(etly)?|noi(sily)?)\s+)+/gi, '').trim();
 
-      const isUtilityCmd = /^(loc(al)?|if|else|args|return|exit|scalar|matrix|global|tempvar|tempname|tempfile|macro|while|foreach|forvalues|continue)\b/i.test(cmd);
-      const isCleanupCmd = /^(Cleanup|Drop|Clear)/i.test(cmd);
-
-      if (!isUtilityCmd && !isCleanupCmd && cmd.length > 0) {
-        if (errorLineIndex === -1 || i < errorLineIndex) {
-          commandHistory.push(cmd);
-          if (commandHistory.length > 3) commandHistory.shift();
-        }
+      const isUtilityCmd = /^(loc(al)?|if|else|args|return|exit|scalar|matrix|global|tempvar|tempname|tempfile|macro|while|foreach|forvalues|continue|Cleanup|Drop|Clear)\b/i.test(cmd);
+      if (!isUtilityCmd && cmd.length > 0 && (errorLineIndex === -1 || i < errorLineIndex)) {
+        commandHistory.push(cmd);
+        if (commandHistory.length > 3) commandHistory.shift();
       }
     } else {
       const comMatch = line.match(/^\{com\}(.+)$/);
@@ -104,7 +93,7 @@ function parseSMCL(smclText) {
         // Handle multiple prefixes
         cmd = cmd.replace(/^((cap(ture)?|qui(etly)?|noi(sily)?)\s+)+/gi, '').trim();
 
-        const isUtilityCmd = /^(loc(al)?|if|else|args|\.|\*|while|foreach|forvalues|continue)/i.test(cmd);
+        const isUtilityCmd = /^(loc(al)?|if|else|args|\.|\*|while|foreach|forvalues|continue|Cleanup|Drop|Clear)\b/i.test(cmd);
         if (!isUtilityCmd && cmd.length > 0 && (errorLineIndex === -1 || i < errorLineIndex)) {
           commandHistory.push(cmd);
           if (commandHistory.length > 3) commandHistory.shift();
@@ -115,7 +104,11 @@ function parseSMCL(smclText) {
 
   // Formatting return
   if (errorMessages.length === 0) {
-    return { rc: extractedRC, formattedText: '' };
+    return {
+      rc: extractedRC,
+      formattedText: '',
+      hasError: hasError
+    };
   }
 
   // Filter out redundant "error ###" if we have more specific errors
@@ -143,7 +136,11 @@ function parseSMCL(smclText) {
     parts.push(`\nError: ${uniqueErrors.join('\n       ')}`);
   }
 
-  return { rc: extractedRC, formattedText: parts.join('\n').trim() };
+  return {
+    rc: extractedRC,
+    formattedText: parts.join('\n').trim(),
+    hasError: hasError
+  };
 }
 
 /**
@@ -574,8 +571,25 @@ class TerminalPanel {
         }
       }
 
-      if (finalStderr && parsed.formattedText) {
-        finalStderr = parsed.formattedText;
+      if (parsed.formattedText) {
+        const smclContext = parsed.formattedText
+          .split('\n')
+          .map(line => {
+            if (line.startsWith('In:') || line.startsWith('Command:')) {
+              return `{txt}${line}`;
+            }
+            if (line.startsWith('Error:')) {
+              return `{err}${line}`;
+            }
+            return `{txt}${line}`;
+          })
+          .join('\n');
+
+        if (finalStderr) {
+          finalStderr = `${smclContext}\n{res}{hline}\n${finalStderr}`;
+        } else {
+          finalStderr = smclContext;
+        }
       }
 
       // Determine success using parsed RC
@@ -586,10 +600,12 @@ class TerminalPanel {
         runId,
         rc: finalRC,
         success,
+        hasError: parsed.hasError,
         durationMs: result?.durationMs ?? null,
-        // Do not ship full stdout on failure; rely on stderr/tail.
-        // Apply smclToHtml to the final result
+        // Main stdout: only show if success=true.
         stdout: success ? smclToHtml(result?.stdout || result?.contentText || '') : '',
+        // fullStdout: always available for the 'Log' tab.
+        fullStdout: smclToHtml(result?.stdout || result?.contentText || ''),
         stderr: success ? '' : smclToHtml(finalStderr),
         artifacts: normalizeArtifacts(result),
         baseDir: result?.cwd || ''
@@ -810,7 +826,7 @@ class TerminalPanel {
 
 }
 
-module.exports = { TerminalPanel, toEntry, normalizeArtifacts, parseSMCL, smclToHtml };
+module.exports = { TerminalPanel, toEntry, normalizeArtifacts, parseSMCL, smclToHtml, determineSuccess };
 
 function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = []) {
   const designUri = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'src', 'ui-shared', 'design.css'));
@@ -1095,6 +1111,40 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
         scrollToBottom();
     }
 
+    function safeSliceTail(html, limit) {
+        if (!html || html.length <= limit) return html || '';
+        let start = html.length - limit;
+        // Search for the first newline after the potential cut point.
+        // This ensures we start on a fresh line, avoiding broken tags.
+        const firstNewline = html.indexOf(String.fromCharCode(10), start);
+        const firstTagStart = html.indexOf('<', start);
+        
+        let cutPoint = -1;
+        let offset = 1; // default to skipping the delimiter (like newline)
+
+        if (firstNewline !== -1 && firstTagStart !== -1) {
+            // Both found, take earliest
+            if (firstNewline < firstTagStart) {
+                cutPoint = firstNewline;
+                offset = 1; // skip \n
+            } else {
+                cutPoint = firstTagStart;
+                offset = 0; // keep <
+            }
+        } else if (firstNewline !== -1) {
+            cutPoint = firstNewline;
+            offset = 1;
+        } else if (firstTagStart !== -1) {
+            cutPoint = firstTagStart;
+            offset = 0;
+        }
+
+        if (cutPoint !== -1 && cutPoint < html.length - 1) {
+            return html.substring(cutPoint + offset);
+        }
+        return html.slice(-limit);
+    }
+
     function scrollToBottom() {
         const top = document.body.scrollHeight;
         try {
@@ -1157,13 +1207,7 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
         }
         
         if (success) {
-            // Check if it's a warning RC (1, 9, or 10)
-            const isWarningRC = rc === 1 || rc === 9 || rc === 10;
-            if (isWarningRC) {
-                indicator.style.color = 'var(--accent-warning)';
-            } else {
-                indicator.style.color = 'var(--accent-success)';
-            }
+            indicator.style.color = 'var(--accent-success)';
         } else {
             indicator.style.color = 'var(--accent-error)';
         }
@@ -1256,6 +1300,28 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
     if (window.stataUI && typeof window.stataUI.bindArtifactEvents === 'function') {
         window.stataUI.bindArtifactEvents(vscode);
     }
+
+    // Tab switching logic (delegated)
+    document.addEventListener('click', (e) => {
+        const tabBtn = e.target.closest('.tab-btn');
+        if (tabBtn) {
+            const runId = tabBtn.dataset.runId;
+            const tab = tabBtn.dataset.tab; // 'result' or 'log'
+            if (!runId || !tab) return;
+
+            const card = tabBtn.closest('.output-card');
+            if (!card) return;
+
+            // Update buttons
+            card.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+            tabBtn.classList.add('active');
+
+            // Update panes
+            card.querySelectorAll('.output-pane').forEach(pane => pane.classList.remove('active'));
+            const targetPane = card.querySelector('.output-pane[data-tab="' + tab + '"]');
+            if (targetPane) targetPane.classList.add('active');
+        }
+    });
 
     function requestVariables() {
       if (variablesPending) return;
@@ -1379,8 +1445,17 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
             +      '</div>'
             +      '<div class="progress-bar"><div class="progress-fill" id="run-progress-fill-' + runId + '" style="width:0%;"></div></div>'
             +    '</div>'
-            +    '<div class="output-content error" id="run-stderr-' + runId + '" style="display:none;"></div>'
-            +    '<div class="output-content" id="run-stdout-' + runId + '"></div>'
+            +    '<div class="output-tabs" id="run-tabs-' + runId + '" style="display:none;">'
+            +      '<button class="tab-btn active" data-run-id="' + runId + '" data-tab="result">Result</button>'
+            +      '<button class="tab-btn" data-run-id="' + runId + '" data-tab="log">Log</button>'
+            +    '</div>'
+            +    '<div class="output-pane active" data-tab="result">'
+            +      '<div class="output-content error" id="run-stderr-' + runId + '" style="display:none;"></div>'
+            +      '<div class="output-content" id="run-stdout-' + runId + '"></div>'
+            +    '</div>'
+            +    '<div class="output-pane" data-tab="log">'
+            +      '<div class="output-content" id="run-log-' + runId + '"></div>'
+            +    '</div>'
             +  '</div>'
             +  '<div id="run-artifacts-' + runId + '"></div>'
             + '</div>';
@@ -1404,6 +1479,8 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
             statusTitle: document.getElementById('run-status-title-' + runId),
             rcEl: document.getElementById('run-rc-' + runId),
             durationEl: document.getElementById('run-duration-' + runId),
+            logEl: document.getElementById('run-log-' + runId),
+            tabsContainer: document.getElementById('run-tabs-' + runId),
             artifactsEl: document.getElementById('run-artifacts-' + runId)
         };
 
@@ -1446,13 +1523,11 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
         const artifactsHtml = renderArtifacts(entry.artifacts, entry.timestamp);
 
         // Determine traffic light color
-        let statusColor;
-        if (entry.success) {
-            const isWarningRC = entry.rc === 1 || entry.rc === 9 || entry.rc === 10;
-            statusColor = isWarningRC ? 'var(--accent-warning)' : 'var(--accent-success)';
-        } else {
-            statusColor = 'var(--accent-error)';
-        }
+        const statusColor = entry.success ? 'var(--accent-success)' : 'var(--accent-error)';
+
+        // Determine if we should show tabs
+        const hasProblem = !entry.success || entry.hasError || (entry.rc !== null && entry.rc !== 0);
+        const tabsStyle = hasProblem ? '' : 'style="display:none;"';
 
         // System Bubble (Card)
         const systemHtml =
@@ -1468,7 +1543,17 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
             +         (entry.durationMs ? ('<span>' + window.stataUI.formatDuration(entry.durationMs) + '</span>') : '')
             +       '</div>'
             +     '</div>'
-            +     outputContent
+            +     '<div class="output-tabs" ' + tabsStyle + '>'
+            +       '<button class="tab-btn active" data-run-id="' + entry.timestamp + '" data-tab="result">Result</button>'
+            +       '<button class="tab-btn" data-run-id="' + entry.timestamp + '" data-tab="log">Log</button>'
+            +     '</div>'
+            +     '<div class="output-pane active" data-tab="result">'
+            +       (entry.stderr ? ('<div class="output-content error">' + entry.stderr + '</div>') : '')
+            +       (entry.stdout ? ('<div class="output-content">' + entry.stdout + '</div>') : '')
+            +     '</div>'
+            +     '<div class="output-pane" data-tab="log">'
+            +       '<div class="output-content">' + (entry.fullStdout || '') + '</div>'
+            +     '</div>'
             +   '</div>'
             +   artifactsHtml
             + '</div>';
@@ -1713,13 +1798,13 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
         const shouldStick = autoScrollPinned;
         const chunk = String(msg.text ?? '');
         if (!chunk) return;
-        const MAX_STREAM_CHARS = 200_000; // keep a bounded tail while streaming
+        const MAX_STREAM_CHARS = 20_000; // keep a bounded tail while streaming
         run.stdoutEl.insertAdjacentHTML('beforeend', chunk);
         
         scheduleHighlight();
         const currentLen = run.stdoutEl.innerHTML.length;
         if (currentLen > MAX_STREAM_CHARS) {
-            run.stdoutEl.innerHTML = run.stdoutEl.innerHTML.slice(-MAX_STREAM_CHARS);
+            run.stdoutEl.innerHTML = safeSliceTail(run.stdoutEl.innerHTML, MAX_STREAM_CHARS);
         }
         if (shouldStick) scheduleScrollToBottom();
       }
@@ -1753,15 +1838,11 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
         if (!run) return;
 
         const success = msg.success === true;
+        const hasError = msg.hasError === true;
         
-        // Determine traffic light color based on success and RC
+        // Determine traffic light color based on success
         if (run.statusDot) {
-            if (success) {
-                const isWarningRC = msg.rc === 1 || msg.rc === 9 || msg.rc === 10;
-                run.statusDot.style.color = isWarningRC ? 'var(--accent-warning)' : 'var(--accent-success)';
-            } else {
-                run.statusDot.style.color = 'var(--accent-error)';
-            }
+            run.statusDot.style.color = success ? 'var(--accent-success)' : 'var(--accent-error)';
         }
         
         if (run.statusTitle) {
@@ -1773,6 +1854,17 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
         }
         if (run.durationEl) {
             run.durationEl.textContent = msg.durationMs ? window.stataUI.formatDuration(msg.durationMs) : '';
+        }
+
+        // Populate Log tab
+        if (run.logEl) {
+            run.logEl.innerHTML = String(msg.fullStdout || '');
+        }
+
+        // Show tabs ONLY if there was an error or a non-zero RC
+        if (run.tabsContainer) {
+            const hasProblem = !success || hasError || (msg.rc !== null && msg.rc !== 0);
+            run.tabsContainer.style.display = hasProblem ? 'flex' : 'none';
         }
 
         const stderr = String(msg.stderr || '');
@@ -1788,23 +1880,31 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
         // If the run failed, prioritize showing the error and hide the bulky stdout content.
         // When successful, only backfill stdout when it is small or the delta is small to avoid massive reflows.
         const finalStdout = String(msg.stdout || '');
-        const MAX_STDOUT_DISPLAY = 200_000; // show at most the tail of large stdout
+        const MAX_STDOUT_DISPLAY = 20_000; // show at most the tail of large stdout
         const MAX_BACKFILL_DELTA = 5_000; // avoid replacing huge content if streaming already filled most
         if (!success && run.stdoutEl) {
-            const tail = finalStdout ? finalStdout.slice(-MAX_STDOUT_DISPLAY) : '';
-            run.stdoutEl.innerHTML = tail;
-            run.stdoutEl.style.display = tail ? 'block' : 'none';
+            // Only overwrite if we have actual final output to show.
+            // If finalStdout is empty (e.g. error preventing capture), keep any partial streamed output.
+            if (finalStdout) {
+                const tail = safeSliceTail(finalStdout, MAX_STDOUT_DISPLAY);
+                run.stdoutEl.innerHTML = tail;
+                run.stdoutEl.style.display = tail ? 'block' : 'none';
+            } else if (run.stdoutEl.innerHTML) {
+                // Keep existing streamed content visible
+                run.stdoutEl.style.display = 'block';
+            }
         } else if (run.stdoutEl && finalStdout) {
             const current = run.stdoutEl.innerHTML || '';
-            const normalizedFinal = finalStdout.length > MAX_STDOUT_DISPLAY
-                ? finalStdout.slice(-MAX_STDOUT_DISPLAY)
-                : finalStdout;
+            const normalizedFinal = safeSliceTail(finalStdout, MAX_STDOUT_DISPLAY);
 
             const needsInitial = !current && normalizedFinal;
             const needsSmallDelta = normalizedFinal.length > current.length &&
                 (normalizedFinal.length - current.length) <= MAX_BACKFILL_DELTA;
 
             if (needsInitial || needsSmallDelta) {
+                run.stdoutEl.innerHTML = normalizedFinal;
+            } else if (!current && normalizedFinal) {
+                // Fallback: if we had no streaming but have results, show them
                 run.stdoutEl.innerHTML = normalizedFinal;
             }
             if (run.stdoutEl.innerHTML) {
@@ -1825,6 +1925,7 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
         
         // Update header status indicator
         updateStatusIndicator(success, msg.rc);
+        setBusy(false);
 
         if (autoScrollPinned) scrollToBottomSmooth();
       }
@@ -1842,6 +1943,7 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
         
         // Update header status for failed run
         updateStatusIndicator(false, null);
+        setBusy(false);
 
         if (autoScrollPinned) scrollToBottomSmooth();
       }
@@ -2098,24 +2200,25 @@ function toEntry(code, result) {
     }
   }
 
-  if (finalStderr) {
-    // Prepend error context if found (In: ..., Command: ..., Error: ...)
-    if (parsed.formattedText) {
-      const smclContext = parsed.formattedText
-        .split('\n')
-        .map(line => {
-          if (line.startsWith('In:') || line.startsWith('Command:')) {
-            return `{txt}${line}`;
-          }
-          if (line.startsWith('Error:')) {
-            return `{err}${line}`;
-          }
+  if (parsed.formattedText) {
+    const smclContext = parsed.formattedText
+      .split('\n')
+      .map(line => {
+        if (line.startsWith('In:') || line.startsWith('Command:')) {
           return `{txt}${line}`;
-        })
-        .join('\n');
+        }
+        if (line.startsWith('Error:')) {
+          return `{err}${line}`;
+        }
+        return `{txt}${line}`;
+      })
+      .join('\n');
 
+    if (finalStderr) {
       // Separate context from raw output with a horizontal line
       finalStderr = `${smclContext}\n{res}{hline}\n${finalStderr}`;
+    } else {
+      finalStderr = smclContext;
     }
   }
 
@@ -2133,9 +2236,11 @@ function toEntry(code, result) {
   return {
     code,
     success,
+    hasError: parsed.hasError,
     rc: finalRC,
     durationMs: result?.durationMs ?? null,
     stdout,
+    fullStdout: smclToHtml(result?.stdout || result?.contentText || ''),
     stderr,
     artifacts: normalizeArtifacts(result),
     timestamp: Date.now()
@@ -2195,10 +2300,8 @@ function determineSuccess(result, finalRC) {
   if (typeof finalRC === 'number') {
     // Normal RCs (not errors):
     // 0 = success
-    // 1 = success with warnings
-    // 9 = break (loop terminated normally)
-    // 10 = break (user-initiated or programmatic)
-    const isNormalRC = finalRC === 0 || finalRC === 1 || finalRC === 9 || finalRC === 10;
+    // User explicitly requested to treat 1, 9, 10 as errors (remove "amber" logic).
+    const isNormalRC = finalRC === 0;
     return isNormalRC;
   }
 
