@@ -19,8 +19,10 @@ function parseSMCL(smclText) {
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
+    const trimmedLine = line.trim();
+    if (!trimmedLine) continue;
 
-    // Extract return code
+    // 1. Extract return code
     if (!extractedRC) {
       let rcMatch = line.match(/r\((\d+)\)/i);
       if (rcMatch) {
@@ -45,22 +47,15 @@ function parseSMCL(smclText) {
       }
     }
 
-    // Detect error messages
+    // 2. Detect error messages
     const errMatch = line.match(/^\{err\}(.+)$/);
     if (errMatch) {
       const errorText = errMatch[1].trim().replace(/\{[^}]+\}/g, '');
       errorMessages.push(errorText);
       if (errorLineIndex === -1) errorLineIndex = i;
     }
-    // Also catch plain text errors (but be more selective)
-    else if (!line.match(/^\{/) && line.trim() && errorLineIndex === -1) {
-      if (line.match(/\bnot found\b|\binvalid syntax\b|\berror\b/i)) {
-        errorMessages.push(line.trim());
-        errorLineIndex = i;
-      }
-    }
 
-    // Track call stack
+    // 3. Track call stack
     const beginMatch = line.match(/begin\s+(\S+)/);
     if (beginMatch) {
       const funcName = beginMatch[1];
@@ -71,16 +66,23 @@ function parseSMCL(smclText) {
 
     const endMatch = line.match(/end\s+(\S+)/);
     if (endMatch && callStack.length > 0) {
-      callStack.pop();
+      // ONLY pop if we haven't found an error yet. This effectively "freezes" the stack state at the error.
+      if (errorLineIndex === -1 || i < errorLineIndex) {
+        // Also add strict check: unrelated 'end' tags shouldn't pop our stack
+        const funcName = endMatch[1];
+        if (callStack[callStack.length - 1] === funcName) {
+          callStack.pop();
+        }
+      }
     }
 
-    // Capture executed commands
+    // 4. Capture executed commands
     if (line.trim().startsWith('= ')) {
       let cmd = line.substring(line.indexOf('= ') + 2).trim();
-      cmd = cmd.replace(/^(cap(ture)?|qui(etly)?|noi(sily)?)\s+/gi, '');
-      cmd = cmd.trim();
+      // Handle multiple prefixes
+      cmd = cmd.replace(/^((cap(ture)?|qui(etly)?|noi(sily)?)\s+)+/gi, '').trim();
 
-      const isUtilityCmd = /^(loc(al)?|if|else|args|return|exit|scalar|matrix|global|tempvar|tempname|tempfile|macro)\s/i.test(cmd);
+      const isUtilityCmd = /^(loc(al)?|if|else|args|return|exit|scalar|matrix|global|tempvar|tempname|tempfile|macro|while|foreach|forvalues|continue)\b/i.test(cmd);
       const isCleanupCmd = /^(Cleanup|Drop|Clear)/i.test(cmd);
 
       if (!isUtilityCmd && !isCleanupCmd && cmd.length > 0) {
@@ -89,14 +91,20 @@ function parseSMCL(smclText) {
           if (commandHistory.length > 3) commandHistory.shift();
         }
       }
-    }
-    else {
+    } else {
       const comMatch = line.match(/^\{com\}(.+)$/);
       if (comMatch) {
         let cmd = comMatch[1].trim().replace(/\{[^}]+\}/g, '');
-        cmd = cmd.replace(/^(cap(ture)?|qui(etly)?|noi(sily)?)\s+/gi, '').trim();
 
-        const isUtilityCmd = /^(loc(al)?|if|else|args|\.|\*)/i.test(cmd);
+        // Strip prompt early so it doesn't trigger utility check for "."
+        if (cmd.startsWith('. ')) {
+          cmd = cmd.substring(2).trim();
+        }
+
+        // Handle multiple prefixes
+        cmd = cmd.replace(/^((cap(ture)?|qui(etly)?|noi(sily)?)\s+)+/gi, '').trim();
+
+        const isUtilityCmd = /^(loc(al)?|if|else|args|\.|\*|while|foreach|forvalues|continue)/i.test(cmd);
         if (!isUtilityCmd && cmd.length > 0 && (errorLineIndex === -1 || i < errorLineIndex)) {
           commandHistory.push(cmd);
           if (commandHistory.length > 3) commandHistory.shift();
@@ -105,39 +113,37 @@ function parseSMCL(smclText) {
     }
   }
 
-  // Only show error info if we actually found error messages
+  // Formatting return
   if (errorMessages.length === 0) {
-    return {
-      rc: extractedRC,
-      formattedText: ''  // Return empty string when no error
-    };
+    return { rc: extractedRC, formattedText: '' };
   }
 
-  // Build formatted output only when there are errors
+  // Filter out redundant "error ###" if we have more specific errors
+  let filteredErrors = errorMessages.filter(e => e.length > 0);
+  if (filteredErrors.length > 1) {
+    const hasSpecificError = filteredErrors.some(e => !e.match(/^error \d+$/i));
+    if (hasSpecificError) {
+      filteredErrors = filteredErrors.filter(e => !e.match(/^error \d+$/i));
+    }
+  }
+
+  const uniqueErrors = [...new Set(filteredErrors)];
   let parts = [];
 
   if (callStack.length > 0) {
     parts.push(`In: ${callStack.join(' → ')}`);
   }
-
   if (commandHistory.length > 0) {
     const cmd = commandHistory[commandHistory.length - 1];
-    const formattedCmd = cmd
-      .replace(/,\s+/g, ',\n    ')
-      .replace(/\s+(if|in|using)\s+/gi, '\n    $1 ')
-      .trim();
+    // Indent subsequent lines of the command for readability
+    const formattedCmd = cmd.replace(/,\s+/g, ',\n    ').replace(/\s+(if|in|using)\s+/gi, '\n    $1 ').trim();
     parts.push(`\nCommand:\n  ${formattedCmd}`);
   }
-
-  if (errorMessages.length > 0) {
-    const uniqueErrors = [...new Set(errorMessages)];
+  if (uniqueErrors.length > 0) {
     parts.push(`\nError: ${uniqueErrors.join('\n       ')}`);
   }
 
-  return {
-    rc: extractedRC,
-    formattedText: parts.join('\n').trim()
-  };
+  return { rc: extractedRC, formattedText: parts.join('\n').trim() };
 }
 
 /**
@@ -568,6 +574,10 @@ class TerminalPanel {
         }
       }
 
+      if (finalStderr && parsed.formattedText) {
+        finalStderr = parsed.formattedText;
+      }
+
       // Determine success using parsed RC
       const success = determineSuccess(result, finalRC);
 
@@ -578,8 +588,9 @@ class TerminalPanel {
         success,
         durationMs: result?.durationMs ?? null,
         // Do not ship full stdout on failure; rely on stderr/tail.
-        stdout: success ? (result?.stdout || result?.contentText || '') : '',
-        stderr: success ? '' : finalStderr,
+        // Apply smclToHtml to the final result
+        stdout: success ? smclToHtml(result?.stdout || result?.contentText || '') : '',
+        stderr: success ? '' : smclToHtml(finalStderr),
         artifacts: normalizeArtifacts(result),
         baseDir: result?.cwd || ''
       });
@@ -695,6 +706,10 @@ class TerminalPanel {
       }
     }
 
+    if (finalStderr && parsed.formattedText) {
+      finalStderr = parsed.formattedText;
+    }
+
     // NOW determine success using the parsed RC
     const success = determineSuccess(result, finalRC);
 
@@ -705,8 +720,9 @@ class TerminalPanel {
       success,
       durationMs: result?.durationMs ?? null,
       // Do not ship full stdout on failure; rely on stderr/tail.
-      stdout: success ? (result?.stdout || result?.contentText || '') : '',
-      stderr: success ? '' : finalStderr,
+      // Apply smclToHtml to the final result
+      stdout: success ? smclToHtml(result?.stdout || result?.contentText || '') : '',
+      stderr: success ? '' : smclToHtml(finalStderr),
       artifacts: normalizeArtifacts(result),
       baseDir: result?.cwd || ''
     });
@@ -2106,14 +2122,21 @@ function toEntry(code, result) {
   // Determine success using parsed RC
   const success = determineSuccess(result, finalRC);
 
+  let stdout = success ? (result?.stdout || result?.contentText || '') : '';
+  let stderr = success ? '' : finalStderr;
+
+  // Process SMCL for history entries
+  stdout = stdout ? smclToHtml(stdout) : '';
+  stderr = stderr ? smclToHtml(stderr) : '';
+
   // Return the complete entry object
   return {
     code,
     success,
     rc: finalRC,
     durationMs: result?.durationMs ?? null,
-    stdout: success ? (result?.stdout || result?.contentText || '') : '',
-    stderr: success ? '' : finalStderr,
+    stdout,
+    stderr,
     artifacts: normalizeArtifacts(result),
     timestamp: Date.now()
   };
