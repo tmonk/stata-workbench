@@ -122,14 +122,11 @@ describe('Run File UI Integration', () => {
             // Create a temp .do that emits ~100,000 lines then triggers an r(199) unknown command error.
             const errFile = path.join(os.tmpdir(), `test_run_error_${Date.now()}.do`);
             fs.writeFileSync(errFile, [
-                'capture log close _all',
-                'log using "error-tail.log", replace text',
                 'forvalues i = 1/100000 {',
                 '    display "."',
                 '}',
                 // Intentional unknown command to yield r(199)
-                'ppp',
-                'log close'
+                'ppp'
             ].join('\n'));
 
             // Ensure a clean panel state and capture outgoing messages.
