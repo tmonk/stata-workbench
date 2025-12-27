@@ -152,33 +152,22 @@ function smclToHtml(text) {
   if (!text) return '';
 
   // Handle case where . prompt is present but no {com} tag (fallback)
-  // Split into lines to avoid wrapping the whole block if only one line has a prompt
   let lines = text.split(/\r?\n/);
   lines = lines.map(line => {
+    // Only apply fallback if line looks like a prompt and doesn't already have HTML/SMCL tags
     if (line.trim().startsWith('.') && !line.includes('<span') && !line.includes('{com}')) {
-      return `<span class="smcl-com syntax-highlight">${line}</span>`;
+      return `{com}${line}{/com}`;
     }
     return line;
   });
   let processedText = lines.join('\n');
 
-  // 1. Initial cleanup and simple literal replacements
   // Remove global SMCL wrappers
   let html = processedText.replace(/\{smcl\}|\{\/smcl\}/gi, '');
 
-  // Strip Stata log metadata that shouldn't be shown to the user.
-  // Match lines that contain these labels, possibly preceded by tags/spaces,
-  // but avoid over-matching lines that start with other things (like {.-}).
-  html = html.replace(/^[ \t]*(?:\{[^}]+\})*[ \t]*(?:name|log|log type|opened on):.*(?:\r?\n|$)/gmi, '');
-
-  // Strip internal MCP log management noise - very aggressive search
-  // Strip lines that contain . capture log close _mcp_smcl_ anywhere
-  html = html.split('\n')
-    .filter(line => !line.includes('capture log close _mcp_smcl_'))
-    .join('\n');
-
-  // Handle some common Stata-specific characters
+  // 1. Basic entity cleaning
   html = html
+    .replace(/&/g, '&amp;')
     .replace(/\{c -\}/g, '-')
     .replace(/\{c \|\}/g, '|')
     .replace(/\{c \+\}/g, '+')
@@ -194,85 +183,199 @@ function smclToHtml(text) {
     .replace(/\{c -(?:-)*\}/g, (m) => '-'.repeat(m.length - 4))
     .replace(/\{c \+(?:\+)*\}/g, (m) => '+'.repeat(m.length - 4));
 
-  // Handle character escapes for braces by using placeholders
+  // Handle character escapes for braces matches
   html = html.replace(/\{c -\(\}/g, '__BRACE_OPEN__').replace(/\{c \)-\}/g, '__BRACE_CLOSE__');
 
-  // Handle {hline}
-  html = html.replace(/\{hline(?:\s+(\d+))?\}/g, (match, p1) => {
-    return '<span class="smcl-hline"></span>';
-  });
+  // Regex for tokenization
+  const tokenRegex = /(\{[^}]+\})|(\n)|([^{}\n]+)/g;
 
-  // Handle {.-}
-  html = html.replace(/\{\.-\}/g, '<span class="smcl-hline"></span>');
-
-  // Handle state-switching tags as self-closing or simple spans for now
-  // In a full implementation, we'd handle the stack properly.
-  // For now, let's just make sure they don't appear as raw text.
-  html = html.replace(/\{sf\}|\{\/sf\}|\{ul off\}/gi, '');
-
-  // 2. Process nested tags using a stack-based approach
-  // We'll look for {tag} or {tag:content} and convert to spans
-
+  let match;
   let result = '';
-  let i = 0;
-  let openSpanCount = 0;
+  // "First Principles": track column position to handle {col N}
+  let currentLineLen = 0;
 
-  while (i < html.length) {
-    if (html[i] === '{') {
-      let closeIndex = -1;
-      let depth = 0;
-      for (let j = i; j < html.length; j++) {
-        if (html[j] === '{') depth++;
-        if (html[j] === '}') depth--;
-        if (depth === 0) {
-          closeIndex = j;
-          break;
-        }
-      }
+  // State for mode nesting prevention
+  const MODE_TAGS = ['com', 'res', 'err', 'txt', 'input', 'result', 'text', 'error'];
+  const openTags = [];
 
-      if (closeIndex !== -1) {
-        const fullTag = html.substring(i + 1, closeIndex);
-        const colonIndex = fullTag.indexOf(':');
+  while ((match = tokenRegex.exec(html)) !== null) {
+    const fullMatch = match[0];
+    const tag = match[1];
+    const newline = match[2];
+    const text = match[3];
 
-        if (colonIndex !== -1) {
-          // Tag with immediate content: {tag:content}
-          const tagName = fullTag.substring(0, colonIndex).trim();
-          const tagContent = fullTag.substring(colonIndex + 1);
-          result += wrapTag(tagName, smclToHtml(tagContent));
-          i = closeIndex + 1;
-          continue;
-        } else {
-          // Opening or single tag: {tag}
-          const tagName = fullTag.trim();
-          if (tagName.startsWith('/')) {
-            // Close tag: {/tag}
-            if (openSpanCount > 0) {
-              result += '</span>';
-              openSpanCount--;
-            }
-          } else {
-            // Open tag: {tag}
-            result += startTag(tagName);
-            openSpanCount++;
-          }
-          i = closeIndex + 1;
-          continue;
-        }
-      }
+    if (newline) {
+      result += '\n';
+      currentLineLen = 0;
+      continue;
     }
 
-    result += html[i];
-    i++;
+    if (text) {
+      result += text;
+      // Decode entities for length calculation approximation
+      let visibleLen = text.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').length;
+      currentLineLen += visibleLen;
+      continue;
+    }
+
+    if (tag) {
+      // Strip braces for parsing
+      const inner = tag.substring(1, tag.length - 1);
+
+      // Handle {tag:content} syntax
+      let tagName = inner;
+      let tagContent = null;
+      const firstColon = inner.indexOf(':');
+
+      if (firstColon !== -1) {
+        // Heuristic: Command is always first word.
+        const cmdCandidate = inner.substring(0, firstColon).split(/\s+/)[0].toLowerCase();
+
+        // If the command is NOT one of the positioning commands that typically use space-separated parameters,
+        // then treat it as a tag:content structure.
+        if (!['col', 'column', 'space', 'hline', '.-'].includes(cmdCandidate)) {
+          tagName = inner.substring(0, firstColon);
+          tagContent = inner.substring(firstColon + 1);
+        }
+      }
+
+      const parts = tagName.split(/\s+/); // only split command part
+      const command = parts[0].toLowerCase();
+
+      // 1. Positioning Commands
+      if (command === 'col' || command === 'column') {
+        const dest = parseInt(parts[1], 10);
+        if (!isNaN(dest)) {
+          let spacesNeeded = (dest - 1) - currentLineLen;
+          if (spacesNeeded > 0) {
+            const spacer = ' '.repeat(spacesNeeded);
+            result += spacer;
+            currentLineLen += spacesNeeded;
+          }
+        }
+        continue;
+      }
+
+      if (command === 'space') {
+        const amt = parts[1] ? parseInt(parts[1], 10) : 1;
+        if (!isNaN(amt)) {
+          const spacer = ' '.repeat(amt);
+          result += spacer;
+          currentLineLen += amt;
+        }
+        continue;
+      }
+
+      if (command.startsWith('hline')) {
+        let len = 12; // default
+        if (parts[1] && !isNaN(parseInt(parts[1]))) {
+          len = parseInt(parts[1], 10);
+        }
+        const dashes = '-'.repeat(len);
+        result += dashes;
+        currentLineLen += len;
+        continue;
+      }
+
+      if (command === '.-') {
+        result += '-';
+        currentLineLen += 1;
+        continue;
+      }
+
+      // 2. Styling/Mode Commands
+      if (command === 'ralign' || command === 'lalign' || command === 'center') {
+        if (tagContent !== null) {
+          let width = parseInt(parts[1], 10);
+          let innerHtml = smclToHtml(tagContent);
+
+          if (!isNaN(width)) {
+            let visibleText = innerHtml.replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>');
+            let len = visibleText.length;
+            let padding = Math.max(0, width - len);
+
+            if (padding > 0) {
+              let leftPad = 0, rightPad = 0;
+              if (command === 'ralign') leftPad = padding;
+              else if (command === 'lalign') rightPad = padding;
+              else if (command === 'center') { leftPad = Math.floor(padding / 2); rightPad = padding - leftPad; }
+
+              if (leftPad) { result += ' '.repeat(leftPad); currentLineLen += leftPad; }
+              result += innerHtml;
+              currentLineLen += len;
+              if (rightPad) { result += ' '.repeat(rightPad); currentLineLen += rightPad; }
+              continue;
+            }
+          }
+          result += innerHtml;
+          let visibleText = innerHtml.replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>');
+          currentLineLen += visibleText.length;
+          continue;
+        }
+      }
+
+      // Standard Mode Tags
+      if (MODE_TAGS.includes(command) || command === '/' + openTags[openTags.length - 1]) {
+        // If we have content {res:text}, wrap strict.
+        if (tagContent !== null && MODE_TAGS.includes(command)) {
+          result += startTag(command);
+          let innerC = smclToHtml(tagContent);
+          result += innerC;
+          result += '</span>';
+
+          let visibleText = innerC.replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>');
+          currentLineLen += visibleText.length;
+          continue;
+        }
+
+        // Close existing if open
+        if (openTags.length > 0) {
+          const current = openTags[openTags.length - 1];
+          if (MODE_TAGS.includes(command)) {
+            result += `</span>`;
+            openTags.pop();
+          } else if (command === '/' + current) {
+            result += `</span>`;
+            openTags.pop();
+            continue;
+          }
+        }
+
+        // Open new
+        if (MODE_TAGS.includes(command)) {
+          const className = `smcl-${command}`;
+          let extraClass = '';
+          if (command === 'com') extraClass = ' syntax-highlight';
+          result += `<span class="${className}${extraClass}">`;
+          openTags.push(command);
+        }
+        continue;
+      }
+
+      // 3. Links and other complex tags (skip but keep simple)
+      if (command === 'browse' || command === 'view') {
+        continue;
+      }
+    }
   }
 
-  // Close any unclosed spans
-  while (openSpanCount > 0) {
+  // Close any remaining tags
+  while (openTags.length > 0) {
     result += '</span>';
-    openSpanCount--;
+    openTags.pop();
   }
 
-  // Final replacement of placeholders
-  return result.replace(/__BRACE_OPEN__/g, '{').replace(/__BRACE_CLOSE__/g, '}');
+  // Restore placeholders
+  result = result.replace(/__BRACE_OPEN__/g, '{').replace(/__BRACE_CLOSE__/g, '}');
+
+  // Fallback for lines starting with . (legacy support)
+  if (!result.includes('smcl-com')) {
+    if (result.trim().startsWith('.') && !result.includes('smcl-')) {
+      result = `<span class="smcl-com syntax-highlight">${result}</span>`;
+    }
+  }
+
+  return result;
 }
 
 /**
@@ -830,7 +933,9 @@ module.exports = { TerminalPanel, toEntry, normalizeArtifacts, parseSMCL, smclTo
 
 function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = []) {
   const designUri = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'src', 'ui-shared', 'design.css'));
+  const highlightCssUri = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'src', 'ui-shared', 'highlight.css'));
   const mainJsUri = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'src', 'ui-shared', 'main.js'));
+  const highlightJsUri = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'src', 'ui-shared', 'highlight.min.js'));
 
   const fileName = filePath ? path.basename(filePath) : 'Terminal Session';
   const escapedTitle = escapeHtml(fileName);
@@ -843,11 +948,14 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${webview.cspSource} https: data:; script-src 'nonce-${nonce}' ${webview.cspSource}; style-src 'unsafe-inline' ${webview.cspSource} https://unpkg.com; font-src ${webview.cspSource} https://unpkg.com;">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <link rel="stylesheet" href="${designUri}">
+  <link rel="stylesheet" href="${highlightCssUri}">
   <title>Stata Terminal</title>
   <script nonce="${nonce}">
     window.initialEntries = ${initialJson};
   </script>
   <style nonce="${nonce}">
+    /* Override highlight.js background to blend with terminal */
+    .hljs { background: transparent !important; padding: 0 !important; }
     @import url('https://unpkg.com/@vscode/codicons@0.0.44/dist/codicon.css');
 
     #btn-open-browser {
@@ -967,6 +1075,7 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
     </div>
   </footer>
 
+  <script src="${highlightJsUri}"></script>
   <script src="${mainJsUri}"></script>
   <script nonce="${nonce}">
     const vscode = acquireVsCodeApi();
@@ -1010,32 +1119,18 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
     function scheduleHighlight() {
         if (highlightTimer) clearTimeout(highlightTimer);
         highlightTimer = setTimeout(() => {
-            processSyntaxHighlighting();
+            if (window.stataUI && window.stataUI.processSyntaxHighlighting) {
+                window.stataUI.processSyntaxHighlighting();
+            }
             highlightTimer = null;
         }, 100);
     }
-
-    // Post-processor for syntax highlighting
-    function processSyntaxHighlighting(root = document) {
-        if (!window.stataUI || !window.stataUI.StataHighlighter) return;
-        
-        const elements = root.querySelectorAll('.syntax-highlight:not(.highlighted)');
-        elements.forEach(el => {
-            try {
-                const raw = el.textContent;
-                const highlighted = window.stataUI.StataHighlighter.highlight(raw);
-                el.innerHTML = highlighted;
-                el.classList.add('highlighted');
-            } catch (err) {
-                console.error('[Terminal] Highlight error:', err);
-                el.classList.add('highlighted'); // prevent infinite retries
-            }
-        });
-    }
-
-    // Process initial entries
+    
+    // Initial load
     document.addEventListener('DOMContentLoaded', () => {
-        processSyntaxHighlighting();
+        if (window.stataUI && window.stataUI.processSyntaxHighlighting) {
+            window.stataUI.processSyntaxHighlighting();
+        }
     });
 
     // Listen for new messages

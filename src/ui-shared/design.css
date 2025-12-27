@@ -505,43 +505,7 @@ textarea#command-input:focus {
 
 /* Command - Emerald */
 
-/* Syntax Highlighting Tokens */
-.token-keyword {
-  color: #c678dd;
-  font-weight: 500;
-}
 
-.token-string {
-  color: #98c379;
-}
-
-.token-comment {
-  color: #7f848e;
-  font-style: italic;
-}
-
-.token-macro {
-  color: #e06c75;
-}
-
-.token-function {
-  color: #61afef;
-}
-
-.token-operator {
-  color: #56b6c2;
-}
-
-.token-constant {
-  color: #d19a66;
-}
-
-.token-prompt {
-  color: var(--text-tertiary);
-  font-weight: 600;
-  user-select: none;
-  /* Make dot non-selectable if desired, but let's keep it simple */
-}
 
 /* SMCL Formatting */
 .smcl-bf {

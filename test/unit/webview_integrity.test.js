@@ -44,6 +44,16 @@ describe('Webview Script Integrity', () => {
         }));
     });
 
+    // Reset shared state from other tests (CRITICAL FIX)
+    beforeEach(() => {
+        // Clear singleton instance
+        TerminalPanel.currentPanel = null;
+        // Also clear any private static state if accessible or re-require
+        // Force mock cleanup
+        vscode.window.createWebviewPanel.mockClear();
+        htmlContent = '';
+    });
+
     it('should produce valid script content without literal newlines in strings', () => {
         // Important: Set extension URI first to avoid crash
         TerminalPanel.setExtensionUri(vscode.Uri.file('/extension'));
