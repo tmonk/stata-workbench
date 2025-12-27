@@ -143,37 +143,67 @@ pre {
   margin-bottom: var(--space-md);
 }
 
-.context-info {
+.context-container {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
   max-width: 900px;
   margin: 0 auto;
+  width: 100%;
+  gap: var(--space-md);
+  min-width: 0;
+}
+
+.context-info {
+  flex: 1 1 0;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 2px;
   font-size: 12px;
 }
 
+.context-right {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  flex-shrink: 0;
+}
+
 .context-row {
   display: flex;
   align-items: center;
   gap: var(--space-xs);
+  min-width: 0;
+  flex-wrap: nowrap;
 }
 
 .context-label {
   color: var(--text-tertiary);
   font-weight: 500;
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 
 .context-value {
   color: var(--text-secondary);
   font-family: var(--font-mono);
   font-size: 11px;
+  min-width: 0;
 }
 
 .context-command {
-  max-width: 500px;
+  flex: 1 1 0;
+  max-width: 400px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* Keep Status label and value from shrinking */
+.context-row>.context-label:nth-last-child(2),
+.context-row>.context-value:last-child {
+  flex-shrink: 0;
 }
 
 
@@ -204,10 +234,10 @@ pre {
   gap: 6px;
 }
 
- .btn-sm {
+.btn-sm {
   padding: 5px 10px;
   font-size: 12px;
- }
+}
 
 .btn:hover {
   background: var(--bg-surface-hover);
@@ -242,10 +272,10 @@ pre {
   color: var(--text-primary);
 }
 
-.input-actions {
-  display: flex;
-  align-items: center;
-  gap: var(--space-xs);
+.btn-icon {
+  padding: 4px;
+  min-width: 28px;
+  justify-content: center;
 }
 
 .icon-eraser,
@@ -306,6 +336,8 @@ textarea#command-input:focus {
   justify-content: space-between;
   align-items: center;
   padding-top: 4px;
+  gap: var(--space-sm);
+  min-width: 0;
 }
 
 .key-hint {
@@ -314,6 +346,21 @@ textarea#command-input:focus {
   display: flex;
   align-items: center;
   gap: 4px;
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.key-hint>* {
+  flex-shrink: 1;
+}
+
+.input-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  flex-shrink: 0;
 }
 
 .kbd {
@@ -396,13 +443,13 @@ textarea#command-input:focus {
   background: rgba(127, 29, 29, 0.1);
 }
 
- .output-progress {
+.output-progress {
   padding: 8px 12px;
   border-bottom: 1px solid var(--border-subtle);
   background: rgba(255, 255, 255, 0.015);
- }
+}
 
- .progress-row {
+.progress-row {
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -410,34 +457,34 @@ textarea#command-input:focus {
   margin-bottom: 6px;
   font-size: 11px;
   color: var(--text-secondary);
- }
+}
 
- .progress-text {
+.progress-text {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
- }
+}
 
- .progress-meta {
+.progress-meta {
   flex-shrink: 0;
   color: var(--text-tertiary);
   font-family: var(--font-mono);
- }
+}
 
- .progress-bar {
+.progress-bar {
   width: 100%;
   height: 6px;
   background: rgba(255, 255, 255, 0.06);
   border-radius: var(--radius-pill);
   overflow: hidden;
- }
+}
 
- .progress-fill {
+.progress-fill {
   height: 100%;
   background: var(--accent-primary);
   border-radius: var(--radius-pill);
   transition: width 0.15s ease;
- }
+}
 
 /* Artifacts */
 .artifact-grid {
@@ -498,37 +545,37 @@ textarea#command-input:focus {
   color: var(--text-secondary);
 }
 
- .artifacts-card {
+.artifacts-card {
   background: var(--bg-panel);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
   overflow: hidden;
- }
+}
 
- .artifacts-header {
+.artifacts-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding: 8px 12px;
   background: rgba(255, 255, 255, 0.02);
   border-bottom: 1px solid var(--border-subtle);
- }
+}
 
- .artifacts-title {
+.artifacts-title {
   font-size: 11px;
   color: var(--text-secondary);
   font-weight: 600;
   letter-spacing: 0.02em;
   text-transform: uppercase;
- }
+}
 
- .artifacts-header-right {
+.artifacts-header-right {
   display: inline-flex;
   align-items: center;
   gap: var(--space-xs);
- }
+}
 
- .artifacts-count {
+.artifacts-count {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -541,9 +588,9 @@ textarea#command-input:focus {
   border: 1px solid rgba(59, 130, 246, 0.25);
   font-size: 11px;
   font-family: var(--font-mono);
- }
+}
 
- .artifacts-toggle {
+.artifacts-toggle {
   background: transparent;
   border: 1px solid var(--border-subtle);
   color: var(--text-secondary);
@@ -552,17 +599,17 @@ textarea#command-input:focus {
   font-size: 11px;
   cursor: pointer;
   transition: all 0.2s ease;
- }
+}
 
- .artifacts-toggle:hover {
+.artifacts-toggle:hover {
   background: rgba(255, 255, 255, 0.04);
   border-color: rgba(255, 255, 255, 0.15);
   color: var(--text-primary);
- }
+}
 
- .artifacts-body {
+.artifacts-body {
   padding: var(--space-sm);
- }
+}
 
 .artifact-gallery {
   display: grid;
@@ -570,47 +617,47 @@ textarea#command-input:focus {
   gap: 10px;
 }
 
- .artifact-tile {
+.artifact-tile {
   background: var(--bg-surface);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
   overflow: hidden;
   cursor: pointer;
   transition: all 0.18s ease;
- }
+}
 
- .artifact-tile:hover {
+.artifact-tile:hover {
   background: var(--bg-surface-hover);
   border-color: rgba(255, 255, 255, 0.15);
   transform: translateY(-1px);
- }
+}
 
- .artifact-thumb {
+.artifact-thumb {
   width: 100%;
   height: 100px;
   background: rgba(255, 255, 255, 0.03);
   display: flex;
   align-items: center;
   justify-content: center;
- }
+}
 
- .artifact-thumb-img {
+.artifact-thumb-img {
   width: 100%;
   height: 100%;
   object-fit: contain;
   padding: 4px;
- }
+}
 
- .artifact-thumb-fallback {
+.artifact-thumb-fallback {
   font-family: var(--font-mono);
   font-size: 11px;
   color: var(--text-secondary);
   border: 1px dashed rgba(255, 255, 255, 0.18);
   padding: 4px 8px;
   border-radius: var(--radius-sm);
- }
+}
 
- .artifact-tile-label {
+.artifact-tile-label {
   padding: 6px 8px;
   font-size: 11px;
   font-weight: 500;
@@ -619,15 +666,15 @@ textarea#command-input:focus {
   overflow: hidden;
   text-overflow: ellipsis;
   border-top: 1px solid rgba(255, 255, 255, 0.06);
- }
+}
 
- .artifact-tile-error {
+.artifact-tile-error {
   padding: 0 10px 10px 10px;
   font-size: 11px;
   color: #fca5a5;
- }
+}
 
- .artifact-modal {
+.artifact-modal {
   position: fixed;
   inset: 0;
   z-index: 200;
@@ -635,16 +682,16 @@ textarea#command-input:focus {
   align-items: center;
   justify-content: center;
   padding: var(--space-lg);
- }
+}
 
- .artifact-modal-overlay {
+.artifact-modal-overlay {
   position: absolute;
   inset: 0;
   background: rgba(0, 0, 0, 0.6);
   backdrop-filter: blur(8px);
- }
+}
 
- .artifact-modal-panel {
+.artifact-modal-panel {
   position: relative;
   width: min(980px, calc(100vw - 48px));
   max-height: calc(100vh - 48px);
@@ -655,50 +702,50 @@ textarea#command-input:focus {
   box-shadow: 0 18px 60px rgba(0, 0, 0, 0.55);
   display: flex;
   flex-direction: column;
- }
+}
 
- .artifact-modal-header {
+.artifact-modal-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding: 10px 12px;
   border-bottom: 1px solid var(--border-subtle);
   background: rgba(255, 255, 255, 0.02);
- }
+}
 
- .artifact-modal-title {
+.artifact-modal-title {
   font-size: 13px;
   font-weight: 600;
   color: var(--text-primary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
- }
+}
 
- .artifact-modal-body {
+.artifact-modal-body {
   padding: var(--space-md);
   overflow: auto;
   display: flex;
   flex-direction: column;
   gap: var(--space-sm);
- }
+}
 
- .artifact-modal-img {
+.artifact-modal-img {
   max-width: 100%;
   border-radius: var(--radius-md);
   border: 1px solid var(--border-subtle);
- }
+}
 
- .artifact-modal-meta {
+.artifact-modal-meta {
   font-family: var(--font-mono);
   font-size: 11px;
   color: var(--text-tertiary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
- }
+}
 
- .artifact-modal-actions {
+.artifact-modal-actions {
   padding: 10px 12px;
   border-top: 1px solid var(--border-subtle);
   background: rgba(255, 255, 255, 0.02);
@@ -706,7 +753,7 @@ textarea#command-input:focus {
   gap: var(--space-xs);
   justify-content: flex-end;
   flex-wrap: wrap;
- }
+}
 
 /* Scrollbars */
 ::-webkit-scrollbar {
@@ -725,4 +772,24 @@ textarea#command-input:focus {
 
 ::-webkit-scrollbar-thumb:hover {
   background: rgba(255, 255, 255, 0.2);
+}
+
+/* Responsive adjustments for narrow viewports */
+@media (max-width: 480px) {
+  .input-actions .btn span {
+    display: none;
+  }
+
+  .input-actions .btn {
+    padding: 5px 8px;
+  }
+
+  .key-hint {
+    font-size: 10px;
+    gap: 2px;
+  }
+
+  .key-hint>span:not(.kbd) {
+    display: none;
+  }
 }

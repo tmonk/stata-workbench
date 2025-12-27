@@ -2,7 +2,6 @@ const { openArtifact, revealArtifact, copyToClipboard, resolveArtifactUri } = re
 const path = require('path');
 const vscode = require('vscode');
 
-
 /**
  * Parse SMCL text and extract formatted error information
  * @param {string} smclText - Raw SMCL text
@@ -10,50 +9,134 @@ const vscode = require('vscode');
  */
 function parseSMCL(smclText) {
   if (!smclText) return { rc: null, formattedText: '' };
-  
+
   const lines = smclText.split('\n');
-  const formatted = [];
   let extractedRC = null;
-  let lastErrIndex = -1;
-  
+  let callStack = [];
+  let commandHistory = [];
+  let errorMessages = [];
+  let errorLineIndex = -1;
+
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
-    
-    // Extract RC from error messages like r(601) or rc=601
+
+    // Extract return code
     if (!extractedRC) {
-      const rcMatch = line.match(/r\((\d+)\)|rc[=\s]+(\d+)/i);
+      let rcMatch = line.match(/r\((\d+)\)/i);
       if (rcMatch) {
-        extractedRC = parseInt(rcMatch[1] || rcMatch[2], 10);
+        extractedRC = parseInt(rcMatch[1], 10);
+      }
+
+      if (!extractedRC) {
+        rcMatch = line.match(/rc[=\s]+(\d+)/i);
+        if (rcMatch) {
+          extractedRC = parseInt(rcMatch[1], 10);
+        }
+      }
+
+      if (!extractedRC) {
+        rcMatch = line.match(/exit\s+(\d+)/i);
+        if (rcMatch) {
+          const code = parseInt(rcMatch[1], 10);
+          if (code !== 0) {
+            extractedRC = code;
+          }
+        }
       }
     }
-    
-    // Keep only {com} and {err} lines
-    const comMatch = line.match(/^\{com\}(.+)$/);
+
+    // Detect error messages
     const errMatch = line.match(/^\{err\}(.+)$/);
-    
-    if (comMatch) {
-      // Extract content and remove any other tags
-      const content = comMatch[1].trim().replace(/\{[^}]+\}/g, '');
-      formatted.push(content);
-    } else if (errMatch) {
-      // Extract content and remove any other tags
-      const content = errMatch[1].trim().replace(/\{[^}]+\}/g, '');
-      formatted.push(content);
-      lastErrIndex = formatted.length - 1;
+    if (errMatch) {
+      const errorText = errMatch[1].trim().replace(/\{[^}]+\}/g, '');
+      errorMessages.push(errorText);
+      if (errorLineIndex === -1) errorLineIndex = i;
+    }
+    // Also catch plain text errors (but be more selective)
+    else if (!line.match(/^\{/) && line.trim() && errorLineIndex === -1) {
+      if (line.match(/\bnot found\b|\binvalid syntax\b|\berror\b/i)) {
+        errorMessages.push(line.trim());
+        errorLineIndex = i;
+      }
+    }
+
+    // Track call stack
+    const beginMatch = line.match(/begin\s+(\S+)/);
+    if (beginMatch) {
+      const funcName = beginMatch[1];
+      if (errorLineIndex === -1 || i < errorLineIndex) {
+        callStack.push(funcName);
+      }
+    }
+
+    const endMatch = line.match(/end\s+(\S+)/);
+    if (endMatch && callStack.length > 0) {
+      callStack.pop();
+    }
+
+    // Capture executed commands
+    if (line.trim().startsWith('= ')) {
+      let cmd = line.substring(line.indexOf('= ') + 2).trim();
+      cmd = cmd.replace(/^(cap(ture)?|qui(etly)?|noi(sily)?)\s+/gi, '');
+      cmd = cmd.trim();
+
+      const isUtilityCmd = /^(loc(al)?|if|else|args|return|exit|scalar|matrix|global|tempvar|tempname|tempfile|macro)\s/i.test(cmd);
+      const isCleanupCmd = /^(Cleanup|Drop|Clear)/i.test(cmd);
+
+      if (!isUtilityCmd && !isCleanupCmd && cmd.length > 0) {
+        if (errorLineIndex === -1 || i < errorLineIndex) {
+          commandHistory.push(cmd);
+          if (commandHistory.length > 3) commandHistory.shift();
+        }
+      }
+    }
+    else {
+      const comMatch = line.match(/^\{com\}(.+)$/);
+      if (comMatch) {
+        let cmd = comMatch[1].trim().replace(/\{[^}]+\}/g, '');
+        cmd = cmd.replace(/^(cap(ture)?|qui(etly)?|noi(sily)?)\s+/gi, '').trim();
+
+        const isUtilityCmd = /^(loc(al)?|if|else|args|\.|\*)/i.test(cmd);
+        if (!isUtilityCmd && cmd.length > 0 && (errorLineIndex === -1 || i < errorLineIndex)) {
+          commandHistory.push(cmd);
+          if (commandHistory.length > 3) commandHistory.shift();
+        }
+      }
     }
   }
-  
-  // Drop any com lines after the last err line
-  if (lastErrIndex >= 0 && lastErrIndex < formatted.length - 1) {
-    formatted.splice(lastErrIndex + 1);
+
+  // Only show error info if we actually found error messages
+  if (errorMessages.length === 0) {
+    return {
+      rc: extractedRC,
+      formattedText: ''  // Return empty string when no error
+    };
   }
-  
-  // Join the formatted lines with newlines
-  const formattedText = formatted.join('\n');
-  
+
+  // Build formatted output only when there are errors
+  let parts = [];
+
+  if (callStack.length > 0) {
+    parts.push(`In: ${callStack.join(' → ')}`);
+  }
+
+  if (commandHistory.length > 0) {
+    const cmd = commandHistory[commandHistory.length - 1];
+    const formattedCmd = cmd
+      .replace(/,\s+/g, ',\n    ')
+      .replace(/\s+(if|in|using)\s+/gi, '\n    $1 ')
+      .trim();
+    parts.push(`\nCommand:\n  ${formattedCmd}`);
+  }
+
+  if (errorMessages.length > 0) {
+    const uniqueErrors = [...new Set(errorMessages)];
+    parts.push(`\nError: ${uniqueErrors.join('\n       ')}`);
+  }
+
   return {
     rc: extractedRC,
-    formattedText: formattedText
+    formattedText: parts.join('\n').trim()
   };
 }
 
@@ -283,6 +366,7 @@ class TerminalPanel {
     TerminalPanel._activeRunId = runId;
     TerminalPanel._postMessage({ type: 'busy', value: true });
     TerminalPanel._postMessage({ type: 'runStarted', runId, code: trimmed });
+
     try {
       const cwd = TerminalPanel._activeFilePath ? path.dirname(TerminalPanel._activeFilePath) : null;
       const hooks = {
@@ -295,8 +379,8 @@ class TerminalPanel {
         },
         cwd
       };
+
       const result = await runCommand(trimmed, hooks);
-      const success = isRunSuccess(result);
 
       // Parse SMCL stderr to extract RC and format
       let finalRC = typeof result?.rc === 'number' ? result.rc : null;
@@ -312,6 +396,9 @@ class TerminalPanel {
         }
       }
 
+      // Determine success using parsed RC
+      const success = determineSuccess(result, finalRC);
+
       TerminalPanel._postMessage({
         type: 'runFinished',
         runId,
@@ -320,7 +407,7 @@ class TerminalPanel {
         durationMs: result?.durationMs ?? null,
         // Do not ship full stdout on failure; rely on stderr/tail.
         stdout: success ? (result?.stdout || result?.contentText || '') : '',
-        stderr: finalStderr,
+        stderr: success ? '' : finalStderr,
         artifacts: normalizeArtifacts(result),
         baseDir: result?.cwd || ''
       });
@@ -417,7 +504,6 @@ class TerminalPanel {
 
   static finishStreamingEntry(runId, result) {
     if (!TerminalPanel.currentPanel || !runId) return;
-    const success = isRunSuccess(result);
 
     // Parse SMCL stderr to extract RC and format
     let finalRC = typeof result?.rc === 'number' ? result.rc : null;
@@ -433,6 +519,9 @@ class TerminalPanel {
       }
     }
 
+    // NOW determine success using the parsed RC
+    const success = determineSuccess(result, finalRC);
+
     TerminalPanel._postMessage({
       type: 'runFinished',
       runId,
@@ -441,7 +530,7 @@ class TerminalPanel {
       durationMs: result?.durationMs ?? null,
       // Do not ship full stdout on failure; rely on stderr/tail.
       stdout: success ? (result?.stdout || result?.contentText || '') : '',
-      stderr: finalStderr,
+      stderr: success ? '' : finalStderr,
       artifacts: normalizeArtifacts(result),
       baseDir: result?.cwd || ''
     });
@@ -553,25 +642,11 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
   <style nonce="${nonce}">
     @import url('https://unpkg.com/@vscode/codicons@0.0.44/dist/codicon.css');
 
-    .context-container {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      max-width: 900px;
-      margin: 0 auto;
-      width: 100%;
-    }
-
-    .context-info {
-      margin: 0 !important;
-      max-width: none !important;
-      flex: 1;
-    }
-
-    .context-right {
-      display: flex;
-      align-items: center;
-      gap: var(--space-md);
+    #btn-open-browser {
+      padding: 4px;
+      height: 24px;
+      width: 24px;
+      justify-content: center;
     }
 
     .data-summary {
@@ -595,13 +670,6 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
       color: var(--text-primary);
       font-weight: 600;
     }
-
-    #btn-open-browser {
-      padding: 4px;
-      height: 24px;
-      width: 24px;
-      justify-content: center;
-    }
   </style>
 </head>
 <body>
@@ -617,6 +685,11 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
         <div class="context-row">
           <span class="context-label">Last command:</span>
           <span class="context-value context-command" id="last-command">—</span>
+          <span class="context-label" style="margin-left: 16px;">Status:</span>
+          <span class="context-value">
+            <span class="status-indicator" id="status-indicator" style="color: var(--text-muted); font-size:16px;">●</span>
+            <span id="status-rc" style="margin-left: 4px;"></span>
+          </span>
         </div>
       </div>
       <div class="context-right">
@@ -778,6 +851,9 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
         // Reset last command display
         updateLastCommand('—');
         
+        // Reset status indicator
+        updateStatusIndicator(null, null);
+        
         // Clear any optimistic messages
         const optimistic = chatStream.querySelectorAll('[data-optimistic="true"]');
         optimistic.forEach(el => el.remove());
@@ -833,6 +909,36 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
             scrollScheduled = false;
             scrollToBottom();
         });
+    }
+
+    function updateStatusIndicator(success, rc) {
+        const indicator = document.getElementById('status-indicator');
+        const rcDisplay = document.getElementById('status-rc');
+        
+        if (!indicator) return;
+        
+        if (success === null || success === undefined) {
+            // No status yet or reset
+            indicator.style.color = 'var(--text-muted)';
+            if (rcDisplay) rcDisplay.textContent = '';
+            return;
+        }
+        
+        if (success) {
+            // Check if it's a warning RC (1, 9, or 10)
+            const isWarningRC = rc === 1 || rc === 9 || rc === 10;
+            if (isWarningRC) {
+                indicator.style.color = 'var(--accent-warning)';
+            } else {
+                indicator.style.color = 'var(--accent-success)';
+            }
+        } else {
+            indicator.style.color = 'var(--accent-error)';
+        }
+        
+        if (rcDisplay) {
+            rcDisplay.textContent = (rc !== null && rc !== undefined) ? ('RC ' + rc) : '';
+        }
     }
 
     // ... (rest of the listeners) ...
@@ -939,6 +1045,7 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
       if (!code) return;
 
       updateLastCommand(code);
+      updateStatusIndicator(null, null); // Reset status indicator when starting new run
       vscode.postMessage({ type: 'run', code });
 
       autoScrollPinned = true;
@@ -1084,6 +1191,9 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
 
         // Update last command in header
         updateLastCommand(entry.code);
+        
+        // Update status indicator in header
+        updateStatusIndicator(entry.success, entry.rc);
 
         // Build HTML
         const userHtml = \`
@@ -1103,13 +1213,22 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
         
         const artifactsHtml = renderArtifacts(entry.artifacts, entry.timestamp);
 
+        // Determine traffic light color
+        let statusColor;
+        if (entry.success) {
+            const isWarningRC = entry.rc === 1 || entry.rc === 9 || entry.rc === 10;
+            statusColor = isWarningRC ? 'var(--accent-warning)' : 'var(--accent-success)';
+        } else {
+            statusColor = 'var(--accent-error)';
+        }
+
         // System Bubble (Card)
         const systemHtml =
             '<div class="system-bubble">'
             +   '<div class="output-card">'
             +     '<div class="output-header">'
             +       '<div class="flex items-center gap-xs">'
-            +         '<span class="' + (entry.success ? 'text-muted' : 'text-error') + '" style="color: ' + (entry.success ? 'var(--accent-success)' : 'var(--accent-error)') + '; font-size:16px;">●</span>'
+            +         '<span class="' + (entry.success ? 'text-muted' : 'text-error') + '" style="color: ' + statusColor + '; font-size:16px;">●</span>'
             +         '<span>' + statusLabel + '</span>'
             +       '</div>'
             +       '<div class="flex items-center gap-sm">'
@@ -1322,6 +1441,7 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
         const runId = msg.runId;
         const code = String(msg.code || '');
         ensureRunGroup(runId, code);
+        updateStatusIndicator(null, null); // Reset status when run starts
       }
 
       if (msg.type === 'runCancelled') {
@@ -1338,6 +1458,8 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
             if (run.progressText) run.progressText.textContent = '';
             if (run.progressMeta) run.progressMeta.textContent = '';
         }
+        // Update header status for cancelled
+        updateStatusIndicator(false, null);
         if (autoScrollPinned) scrollToBottomSmooth();
       }
 
@@ -1397,9 +1519,17 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
         if (!run) return;
 
         const success = msg.success === true;
+        
+        // Determine traffic light color based on success and RC
         if (run.statusDot) {
-            run.statusDot.style.color = success ? 'var(--accent-success)' : 'var(--accent-error)';
+            if (success) {
+                const isWarningRC = msg.rc === 1 || msg.rc === 9 || msg.rc === 10;
+                run.statusDot.style.color = isWarningRC ? 'var(--accent-warning)' : 'var(--accent-success)';
+            } else {
+                run.statusDot.style.color = 'var(--accent-error)';
+            }
         }
+        
         if (run.statusTitle) {
             run.statusTitle.textContent = 'Stata Output';
         }
@@ -1458,6 +1588,9 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
         if (run.artifactsEl) {
             run.artifactsEl.innerHTML = artifactsHtml;
         }
+        
+        // Update header status indicator
+        updateStatusIndicator(success, msg.rc);
 
         if (autoScrollPinned) scrollToBottomSmooth();
       }
@@ -1472,6 +1605,9 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
             run.stderrEl.style.display = 'block';
             run.stderrEl.textContent = String(msg.message || 'Unknown error');
         }
+        
+        // Update header status for failed run
+        updateStatusIndicator(false, null);
 
         if (autoScrollPinned) scrollToBottomSmooth();
       }
@@ -1708,8 +1844,6 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
 }
 
 function toEntry(code, result) {
-  const success = isRunSuccess(result);
-
   // Parse SMCL stderr to extract RC and format
   let finalRC = typeof result?.rc === 'number' ? result.rc : null;
   let finalStderr = result?.stderr || '';
@@ -1724,6 +1858,9 @@ function toEntry(code, result) {
     }
   }
 
+  // Determine success using parsed RC
+  const success = determineSuccess(result, finalRC);
+
   // Return the complete entry object
   return {
     code,
@@ -1731,7 +1868,7 @@ function toEntry(code, result) {
     rc: finalRC,
     durationMs: result?.durationMs ?? null,
     stdout: success ? (result?.stdout || result?.contentText || '') : '',
-    stderr: finalStderr,
+    stderr: success ? '' : finalStderr,
     artifacts: normalizeArtifacts(result),
     timestamp: Date.now()
   };
@@ -1783,14 +1920,26 @@ function normalizeArtifacts(result) {
   return normalized;
 }
 
-function isRunSuccess(result) {
+function determineSuccess(result, finalRC) {
   if (!result) return false;
+
+  // If we have a parsed RC, use that FIRST (takes precedence)
+  if (typeof finalRC === 'number') {
+    // Normal RCs (not errors):
+    // 0 = success
+    // 1 = success with warnings
+    // 9 = break (loop terminated normally)
+    // 10 = break (user-initiated or programmatic)
+    const isNormalRC = finalRC === 0 || finalRC === 1 || finalRC === 9 || finalRC === 10;
+    return isNormalRC;
+  }
+
+  // Fall back to result flags only when we don't have a parsed RC
   if (result.success === false) return false;
-  if (typeof result.rc === 'number' && result.rc !== 0) return false;
   if (result.error) return false;
+
   return true;
 }
-
 function escapeHtml(text) {
   return (text || '')
     .replace(/&/g, '&amp;')
@@ -1809,4 +1958,3 @@ function getNonce() {
   }
   return text;
 }
-
