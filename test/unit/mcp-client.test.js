@@ -3,6 +3,7 @@ const sinon = require('sinon');
 const path = require('path');
 const proxyquire = require('proxyquire');
 const vscodeMock = require('../mocks/vscode');
+jest.mock('vscode', () => require('../mocks/vscode'), { virtual: true });
 
 describe('mcp-client normalizeResponse', () => {
     it('keeps longest stdout including logText tail', () => {

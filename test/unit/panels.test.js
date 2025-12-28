@@ -1,4 +1,5 @@
 const vscode = require('vscode');
+jest.mock('vscode', () => require('../mocks/vscode'), { virtual: true });
 
 jest.mock('fs');
 

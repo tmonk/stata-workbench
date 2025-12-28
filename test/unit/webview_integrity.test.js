@@ -1,61 +1,61 @@
 
-const assert = require('assert');
-const { TerminalPanel } = require('../../src/terminal-panel');
-const vscode = require('vscode');
-
-// Mock vscode
-jest.mock('vscode', () => ({
-    Uri: {
-        joinPath: () => ({ fsPath: '/path/to/resource' }),
-        file: (f) => ({ fsPath: f })
-    },
-    ViewColumn: { Beside: 1 },
-    window: {
-        createWebviewPanel: jest.fn()
-    }
-}), { virtual: true });
+const { describe, it, beforeEach, expect } = require('@jest/globals');
 
 describe('Webview Script Integrity', () => {
-    let mockWebview;
+    let TerminalPanel;
     let htmlContent = '';
+    let mockWebview;
 
-    beforeAll(() => {
-        mockWebview = {
-            asWebviewUri: (u) => 'uri:' + u,
+    beforeEach(() => {
+        jest.resetModules();
+
+        const mockWebview = {
+            asWebviewUri: (u) => 'uri:' + (u?.fsPath || u),
             cspSource: 'csp',
             onDidReceiveMessage: jest.fn(),
             html: ''
         };
 
-        // Mock createWebviewPanel to capture the webview object
-        vscode.window.createWebviewPanel = jest.fn(() => ({
-            webview: new Proxy(mockWebview, {
-                set: (target, prop, value) => {
-                    if (prop === 'html') {
-                        htmlContent = value;
-                    }
-                    target[prop] = value;
-                    return true;
-                },
-                get: (target, prop) => target[prop]
-            }),
-            onDidDispose: jest.fn(),
-            reveal: jest.fn()
-        }));
-    });
+        const vscodeMock = {
+            Uri: {
+                joinPath: (u, ...f) => ({ fsPath: (u?.fsPath || u) + '/' + f.join('/') }),
+                file: (f) => ({ fsPath: f })
+            },
+            ViewColumn: { Beside: 1 },
+            window: {
+                createWebviewPanel: jest.fn(() => ({
+                    webview: new Proxy(mockWebview, {
+                        set: (target, prop, value) => {
+                            if (prop === 'html') {
+                                htmlContent = value;
+                            }
+                            target[prop] = value;
+                            return true;
+                        },
+                        get: (target, prop) => target[prop]
+                    }),
+                    onDidDispose: jest.fn(),
+                    reveal: jest.fn()
+                }))
+            },
+            workspace: {
+                getConfiguration: () => ({
+                    get: (key, def) => def
+                })
+            }
+        };
 
-    // Reset shared state from other tests (CRITICAL FIX)
-    beforeEach(() => {
-        // Clear singleton instance
-        TerminalPanel.currentPanel = null;
-        // Also clear any private static state if accessible or re-require
-        // Force mock cleanup
-        vscode.window.createWebviewPanel.mockClear();
+        jest.doMock('vscode', () => vscodeMock, { virtual: true });
+
+        // Re-require TerminalPanel to pick up the mock
+        const terminalPanelModule = require('../../src/terminal-panel');
+        TerminalPanel = terminalPanelModule.TerminalPanel;
+
         htmlContent = '';
     });
 
     it('should produce valid script content without literal newlines in strings', () => {
-        // Important: Set extension URI first to avoid crash
+        const vscode = require('vscode');
         TerminalPanel.setExtensionUri(vscode.Uri.file('/extension'));
 
         TerminalPanel.show({
@@ -68,7 +68,7 @@ describe('Webview Script Integrity', () => {
         const strictPattern = /\.indexOf\('[\r\n]+', start\)/;
         expect(htmlContent).not.toMatch(strictPattern);
 
-        // Ensure our fix is present (checking against both possible valid JS implementations if needed, but we look for charCode)
+        // Ensure our fix is present
         expect(htmlContent).toContain('String.fromCharCode(10)');
     });
 });

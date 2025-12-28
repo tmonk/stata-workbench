@@ -79,20 +79,25 @@ Offline/VSIX fallback:
 - **Syntax highlighting** for Stata, Dyndoc Markdown, and Dyndoc LaTeX.
 - **Run Selection/Current Line** (`stata-workbench.runSelection`) → Executes the selected code or current line via MCP tool `run_command` with normalized output + graphs. Results appear in the terminal panel.
 - **Run Current File** (`stata-workbench.runFile`) → Runs the entire `.do` file via MCP tool `run_do_file`. Results appear in the terminal panel.
-- **Terminal panel**: Automatically opens when running code, displaying results with stdout/stderr, execution time, return codes, and graph artifacts. You can continue running additional Stata commands directly in the panel. Supports quick history navigation (PageUp/PageDown) and Tab-based variable name completion sourced from the active Stata dataset.
+- **Terminal panel**: Automatically opens when running code, displaying results with stdout/stderr, execution time, return codes, and graph artifacts. You can continue running additional Stata commands directly in the panel. Supports quick history navigation (PageUp/PageDown), Tab-based variable name completion, and clickable links to the full SMCL log. Matches Stata's behavior by providing a **Log tab** for viewing the full session history with efficient tail-loading for large files.
 - **Graph viewer** (`stata-workbench.showGraphs`): View all graphs from the current Stata session via `list_graphs` and `export_graph` MCP tools. Click any graph to open it.
+- **Data Browser** (`stata-workbench.viewData`): Live view of your data with filtering and sorting. Optimized for high performance (~20x faster with Apache Arrow support) and includes a custom variable selector for large datasets.
 - **Test MCP Server** (`stata-workbench.testMcpServer`) for quick smoke checks.
 - **Install MCP CLI helper** (`stata-workbench.installMcpCli`): Bootstraps uv locally when it is missing.
 - **Status bar + cancel** (`stata-workbench.cancelRequest`): Live request states with one-click cancellation routed through the MCP client.
-- **Auto-manage MCP configs**: Writes the user-level `mcp.json` in your editor's user data so AI agents reuse the same `uvx --from mcp-stata@latest --refresh mcp-stata` wiring, and auto-corrects older entries missing `--refresh`.
+- **Auto-manage MCP configs**: Writes the user-level `mcp.json` in your editor's user data so AI agents reuse the same `uvx --from mcp-stata@latest --refresh mcp-stata` wiring.
 - **Durable logs**: All run results are logged to the `Stata Workbench` output channel for reference.
 
 ## Settings
-- `stataMcp.requestTimeoutMs` (default `45000`): timeout for MCP requests.
-- `stataMcp.autoRevealOutput` (default `true`): automatically show the output channel after runs.
+- `stataMcp.requestTimeoutMs` (default `100000`): timeout for MCP requests.
+- `stataMcp.autoRevealOutput` (default `false`): automatically show the output channel after runs.
+- `stataMcp.autoConfigureMcp` (default `true`): automatically add/update the mcp-stata server entry in your host MCP config (`mcp.json`).
 - `stataMcp.runFileWorkingDirectory` (default empty): working directory when running .do files. Supports an absolute path, ~, ${workspaceFolder} or ${fileDir}; empty uses the .do file's folder.
+- `stataMcp.setupTimeoutSeconds` (default `60`): timeout (seconds) for Stata initialization.
 - `stataMcp.maxOutputLines` (default `0`): limit Stata output to N lines (0 = unlimited). Useful for reducing token usage with AI agents.
+- `stataMcp.runFileBehavior` (default `runDirtyFile`): choose whether 'Run File' should run the current editor content (including unsaved changes) or the version saved on disk.
 - `stataMcp.useBase64Graphs` (default `false`): if true, export graphs as base64 strings; otherwise use file paths. NOT RECOMMENDED: Base64 consumes many more tokens but may be more robust in some remote environments.
+- `stataMcp.defaultVariableLimit` (default `100`): default number of variables to select when opening the Data Browser (0 = all). Useful for huge datasets.
 
 
 ## AI Assistant Integration

@@ -1,5 +1,6 @@
 const { describe, it, beforeEach, afterEach, expect } = require('@jest/globals');
 const path = require('path');
+jest.mock('vscode', () => require('../mocks/vscode'), { virtual: true });
 
 describe('extension unit tests', () => {
     let extension;

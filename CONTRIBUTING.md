@@ -1,8 +1,10 @@
 ## Development
-- Install deps: `npm install`
-- Bundle once for local debugging: `npm run compile`
-- Watch mode while iterating: `npm run watch`
-- Tests: `npm test`, `npm run test:integration` for integration tests. (`$env:MCP_STATA_INTEGRATION="1"; npm run compile; node ./test/integration/runTest.js`)
+- Install dependencies: `npm install`
+- Bundle for development: `npm run compile`
+- Production build: `npm run bundle`
+- Watch mode: `npm run watch`
+- Unit Tests: `npm test`
+- Integration Tests: `npm run test:integration` (requires `mcp-stata` on PATH, (`$env:MCP_STATA_INTEGRATION="1"; npm run compile; node ./test/integration/runTest.js`)
 
 ## Commit Conventions
 We use [Conventional Commits](https://www.conventionalcommits.org/) to automate our release process. This is enforced via `commitlint` and `husky`.
@@ -14,10 +16,10 @@ When you commit, use the following prefixes:
 - `chore:`, `docs:`, `style:`, `refactor:`, `test:` for changes that don't affect the production code (no release)
 
 ## Automated Releases
-This project uses `semantic-release` to automate versioning and publishing.
-- **Releases**: Happen automatically on push/merge to the `main` branch.
-- **Notes**: Generated automatically from commit history into `CHANGELOG.md`.
-- **Publishing**: Automated to both the VS Code Marketplace and Open VSX Registry via GitHub Actions.
+This project uses `semantic-release` to automate versioning and publishing to the VS Code Marketplace and Open VSX Registry via GitHub Actions.
+
+- Releases trigger automatically on push to `main`.
+- `CHANGELOG.md` is updated automatically.
 
 ## Manual Packaging (Local Debugging)
 - Build VSIX: `npm run package:dist` (outputs to `dist/`).
