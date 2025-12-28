@@ -1,3 +1,11 @@
+# [0.10.0](https://github.com/tmonk/stata-workbench/compare/v0.9.1...v0.10.0) (2025-12-28)
+
+
+### Features
+
+* Add runFileBehavior configuration and enhance runFile functionality ([0952d36](https://github.com/tmonk/stata-workbench/commit/0952d360377eb4bee4b3cba69216ef9ca4edb48d))
+* Add runFileBehavior configuration and enhance runFile functionality ([f1331f6](https://github.com/tmonk/stata-workbench/commit/f1331f6c1db13ca2fbf6b60d9bfe33f198634673))
+
 # Changelog
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
