@@ -35,7 +35,7 @@ describe('extension unit tests', () => {
             client: mcpClientMock
         }));
         jest.doMock('../../src/terminal-panel', () => ({
-            TerminalPanel: { setExtensionUri: jest.fn(), addEntry: jest.fn(), show: jest.fn() }
+            TerminalPanel: { setExtensionUri: jest.fn(), addEntry: jest.fn(), show: jest.fn(), setLogProvider: jest.fn() }
         }));
         jest.doMock('../../src/data-browser-panel', () => ({
             DataBrowserPanel: { createOrShow: jest.fn() }
