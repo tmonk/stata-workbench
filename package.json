@@ -15,7 +15,8 @@
   },
   "version": "0.9.2",
   "engines": {
-    "vscode": "^1.75.0"
+    "vscode": "^1.75.0",
+    "node": ">=22.14.0"
   },
   "keywords": [
     "stata",

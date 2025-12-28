@@ -1,4 +1,5 @@
 ## Development
+- Node.js version: `>=22.14.0`
 - Install dependencies: `npm install`
 - Bundle for development: `npm run compile`
 - Production build: `npm run bundle`
