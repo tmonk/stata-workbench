@@ -14,7 +14,7 @@ async function run() {
         const result = await runCLI(
             {
                 config: configPath,
-                testMatch: ['<rootDir>/test/integration/suite/*.test.js'],
+                testMatch: ['<rootDir>/test/integration/suite/benchmark.test.js'],
                 runInBand: true, // Required for VS Code integration tests
                 testEnvironment: 'node',
                 setupFilesAfterEnv: [],

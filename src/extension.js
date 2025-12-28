@@ -66,6 +66,7 @@ function activate(context) {
     if (typeof mcpClient.setLogger === 'function') {
         mcpClient.setLogger((msg) => outputChannel.appendLine(msg));
     }
+    DataBrowserPanel.setLogger((msg) => outputChannel.appendLine(msg));
 
     statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
     statusBarItem.text = '$(beaker) Stata Workbench: Idle';
