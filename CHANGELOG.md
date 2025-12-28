@@ -1,3 +1,10 @@
+# [0.11.0](https://github.com/tmonk/stata-workbench/compare/v0.10.0...v0.11.0) (2025-12-28)
+
+
+### Features
+
+* add search functionality to terminal panel ([960f8ff](https://github.com/tmonk/stata-workbench/commit/960f8ffaffdb822393a1f205e5d76b4668604208))
+
 # [0.10.0](https://github.com/tmonk/stata-workbench/compare/v0.9.1...v0.10.0) (2025-12-28)
 
 
