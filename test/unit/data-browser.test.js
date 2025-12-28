@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const { JSDOM } = require('jsdom');
+const { tableToIPC, tableFromArrays } = require('apache-arrow');
 
 describe('Data Browser Frontend (data-browser.js)', () => {
     let dom;
@@ -12,6 +13,8 @@ describe('Data Browser Frontend (data-browser.js)', () => {
 
     beforeAll(() => {
         scriptContent = fs.readFileSync(path.join(__dirname, '../../src/ui-shared/data-browser.js'), 'utf8');
+        // Strip ESM import for JSDOM eval
+        scriptContent = scriptContent.replace(/import {.*} from 'apache-arrow';/g, '');
     });
 
     beforeEach(() => {
@@ -51,26 +54,26 @@ describe('Data Browser Frontend (data-browser.js)', () => {
         const originalClearTimeout = window.clearTimeout;
         const originalClearInterval = window.clearInterval;
 
-        window.setTimeout = function(...args) {
+        window.setTimeout = function (...args) {
             const id = originalSetTimeout.apply(this, args);
             activeTimers.add({ type: 'timeout', id });
             return id;
         };
 
-        window.setInterval = function(...args) {
+        window.setInterval = function (...args) {
             const id = originalSetInterval.apply(this, args);
             activeTimers.add({ type: 'interval', id });
             return id;
         };
 
-        window.clearTimeout = function(id) {
+        window.clearTimeout = function (id) {
             activeTimers.forEach(timer => {
                 if (timer.id === id) activeTimers.delete(timer);
             });
             return originalClearTimeout.call(this, id);
         };
 
-        window.clearInterval = function(id) {
+        window.clearInterval = function (id) {
             activeTimers.forEach(timer => {
                 if (timer.id === id) activeTimers.delete(timer);
             });
@@ -89,6 +92,9 @@ describe('Data Browser Frontend (data-browser.js)', () => {
             error: jest.fn(),
             warn: jest.fn()
         };
+
+        // Inject dependencies
+        window.tableFromIPC = require('apache-arrow').tableFromIPC;
 
         // Execute the script
         window.eval(scriptContent);
@@ -109,7 +115,7 @@ describe('Data Browser Frontend (data-browser.js)', () => {
         if (dom && dom.window) {
             dom.window.close();
         }
-        
+
         dom = null;
         window = null;
         document = null;
@@ -230,7 +236,7 @@ describe('Data Browser Frontend (data-browser.js)', () => {
         await flushPromises();
 
         // Check page call
-        const pageCall = getApiCall('/v1/page');
+        const pageCall = getApiCall('/v1/arrow');
         expect(pageCall).toBeTruthy();
 
         const body = JSON.parse(pageCall.options.body);
@@ -254,7 +260,7 @@ describe('Data Browser Frontend (data-browser.js)', () => {
         await flushPromises();
 
         // Page
-        const pageReqId = getApiCall('/v1/page').reqId;
+        const pageReqId = getApiCall('/v1/arrow').reqId;
 
         // Send response with ROWS array
         triggerMessage({
@@ -294,7 +300,7 @@ describe('Data Browser Frontend (data-browser.js)', () => {
         triggerMessage({ type: 'apiResponse', reqId: varsReqId, success: true, data: { vars: [] } });
         await flushPromises();
 
-        const pageReqId = getApiCall('/v1/page').reqId;
+        const pageReqId = getApiCall('/v1/arrow').reqId;
 
         vscodeMock.postMessage.mockReset();
 
@@ -333,7 +339,7 @@ describe('Data Browser Frontend (data-browser.js)', () => {
         window.__loadPage();
         await flushPromises();
 
-        const pageCall = getApiCall('/v1/page');
+        const pageCall = getApiCall('/v1/arrow');
         expect(pageCall).toBeTruthy();
 
         const body = JSON.parse(pageCall.options.body);
@@ -403,7 +409,7 @@ describe('Data Browser Frontend (data-browser.js)', () => {
         });
         await flushPromises();
 
-        const pageCall = getApiCall('/v1/views/VIEW_1/page');
+        const pageCall = getApiCall('/v1/views/VIEW_1/arrow');
         expect(pageCall).toBeTruthy();
 
         const body = JSON.parse(pageCall.options.body);
@@ -420,7 +426,7 @@ describe('Data Browser Frontend (data-browser.js)', () => {
         triggerMessage({ type: 'apiResponse', reqId: varsReqId, success: true, data: { vars: [{ name: 'v1' }] } });
         await flushPromises();
 
-        const pageReqId = getApiCall('/v1/page').reqId;
+        const pageReqId = getApiCall('/v1/arrow').reqId;
         triggerMessage({
             type: 'apiResponse',
             reqId: pageReqId,
@@ -448,7 +454,7 @@ describe('Data Browser Frontend (data-browser.js)', () => {
         triggerMessage({ type: 'apiResponse', reqId: varsReqId, success: true, data: { vars: [{ name: 'price' }, { name: 'mpg' }] } });
         await flushPromises();
 
-        const initPageReqId = getApiCall('/v1/page').reqId;
+        const initPageReqId = getApiCall('/v1/arrow').reqId;
         triggerMessage({
             type: 'apiResponse',
             reqId: initPageReqId,
@@ -463,7 +469,7 @@ describe('Data Browser Frontend (data-browser.js)', () => {
         priceHeader.click();
         await flushPromises();
 
-        const pageCall1 = getApiCall('/v1/page');
+        const pageCall1 = getApiCall('/v1/arrow');
         expect(pageCall1).toBeTruthy();
         expect(JSON.parse(pageCall1.options.body).sortBy).toEqual(['price']);
 
@@ -472,7 +478,7 @@ describe('Data Browser Frontend (data-browser.js)', () => {
         priceHeader.click();
         await flushPromises();
 
-        const pageCall2 = getApiCall('/v1/page');
+        const pageCall2 = getApiCall('/v1/arrow');
         expect(JSON.parse(pageCall2.options.body).sortBy).toEqual(['-price']);
 
         vscodeMock.postMessage.mockReset();
@@ -480,7 +486,43 @@ describe('Data Browser Frontend (data-browser.js)', () => {
         priceHeader.click();
         await flushPromises();
 
-        const pageCall3 = getApiCall('/v1/page');
+        const pageCall3 = getApiCall('/v1/arrow');
         expect(JSON.parse(pageCall3.options.body).sortBy).toEqual([]);
+    });
+
+    it('should correctly parse binary Arrow IPC response', async () => {
+        triggerMessage({ type: 'init', baseUrl: 'http://test', token: 'xyz' });
+
+        const dsReqId = getApiCall('/v1/dataset').reqId;
+        triggerMessage({ type: 'apiResponse', reqId: dsReqId, success: true, data: { dataset: { id: '123', n: 10 } } });
+        await flushPromises();
+        const varsReqId = getApiCall('/v1/vars').reqId;
+        triggerMessage({ type: 'apiResponse', reqId: varsReqId, success: true, data: { vars: [{ name: 'v1' }] } });
+        await flushPromises();
+
+        const pageReqId = getApiCall('/v1/arrow').reqId;
+
+        // Generate mock Arrow buffer
+        const table = tableFromArrays({
+            _n: new Int32Array([1, 2]),
+            v1: ['Value A', 'Value B']
+        });
+        const buffer = tableToIPC(table);
+
+        triggerMessage({
+            type: 'apiResponse',
+            reqId: pageReqId,
+            success: true,
+            isBinary: true,
+            data: buffer
+        });
+
+        await flushPromises();
+
+        const rows = document.querySelectorAll('#grid-body tr');
+        expect(rows.length).toEqual(2);
+        const cells = rows[0].querySelectorAll('td');
+        expect(cells[0].textContent).toEqual('1');
+        expect(cells[1].textContent).toEqual('Value A');
     });
 });

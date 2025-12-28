@@ -1,3 +1,4 @@
+import { tableFromIPC } from 'apache-arrow';
 const vscode = acquireVsCodeApi();
 
 function log(message, isError = false) {
@@ -76,14 +77,33 @@ window.addEventListener('message', (event) => {
 
 
 function handleApiResponse(msg) {
-    const { reqId, success, data, error } = msg;
+    const { reqId, success, data, error, isBinary } = msg;
 
     if (pendingRequests.has(reqId)) {
         const { resolve, reject } = pendingRequests.get(reqId);
         pendingRequests.delete(reqId);
 
         if (success) {
-            resolve(data);
+            const isBinaryData = isBinary && data && (data instanceof Uint8Array || data.buffer instanceof ArrayBuffer || typeof data.byteLength === 'number');
+            if (isBinaryData) {
+                try {
+                    const table = tableFromIPC(data);
+                    const vars = table.schema.fields.map(f => f.name);
+                    const rows = [];
+                    for (let i = 0; i < table.numRows; i++) {
+                        const row = [];
+                        for (let j = 0; j < table.numCols; j++) {
+                            row.push(table.getChildAt(j).get(i));
+                        }
+                        rows.push(row);
+                    }
+                    resolve({ vars, rows, totalObs: state.totalObs, datasetId: state.datasetId });
+                } catch (e) {
+                    reject(new Error(`Arrow Parsing Failed: ${e.message}`));
+                }
+            } else {
+                resolve(data);
+            }
         } else {
             // Check for Dataset ID conflict
             if (error && (error.includes('409') || error.includes('datasetId') || error.includes('identity'))) {
@@ -293,7 +313,7 @@ async function loadPage() {
     log(`Loading page. Offset: ${state.offset}, Limit: ${state.limit}, View: ${state.viewId}`);
     setLoading(true);
     try {
-        let endpoint = '/v1/page';
+        let endpoint = '/v1/arrow';
         const parsedOffset = parseInt(state.offset, 10);
         const parsedLimit = parseInt(state.limit, 10);
         const safeOffset = Number.isFinite(parsedOffset) && parsedOffset >= 0 ? parsedOffset : 0;
@@ -311,7 +331,7 @@ async function loadPage() {
         };
 
         if (state.viewId) {
-            endpoint = `/v1/views/${state.viewId}/page`;
+            endpoint = `/v1/views/${state.viewId}/arrow`;
         }
 
         const data = await apiCall(endpoint, 'POST', body);

@@ -28,7 +28,10 @@ class DataBrowserPanel {
             {
                 enableScripts: true,
                 retainContextWhenHidden: true,
-                localResourceRoots: [vscode.Uri.joinPath(extensionUri, 'src', 'ui-shared')]
+                localResourceRoots: [
+                    vscode.Uri.joinPath(extensionUri, 'src', 'ui-shared'),
+                    vscode.Uri.joinPath(extensionUri, 'dist', 'ui-shared')
+                ]
             }
         );
 
@@ -51,20 +54,22 @@ class DataBrowserPanel {
                         break;
                     case 'apiCall':
                         try {
-                            const result = await DataBrowserPanel._performRequest(message.url, message.options);
-                            
+                            const isArrow = message.url.endsWith('/arrow');
+                            const result = await DataBrowserPanel._performRequest(message.url, message.options, isArrow);
+
                             // Check if panel is still alive before posting
                             if (DataBrowserPanel.currentPanel) {
                                 panel.webview.postMessage({
                                     type: 'apiResponse',
                                     reqId: message.reqId,
                                     success: true,
-                                    data: result
+                                    data: result,
+                                    isBinary: isArrow
                                 });
                             }
                         } catch (err) {
                             console.error('[DataBrowser Proxy Error]', err);
-                            
+
                             // Check if panel is still alive before posting
                             if (DataBrowserPanel.currentPanel) {
                                 panel.webview.postMessage({
@@ -87,7 +92,7 @@ class DataBrowserPanel {
         try {
             const channel = await mcpClient.getUiChannel();
             console.log('[DataBrowserPanel] Received channel:', JSON.stringify(channel, null, 2));
-            
+
             // Check if panel is still alive before posting
             if (channel && channel.baseUrl && channel.token) {
                 if (DataBrowserPanel.currentPanel) {
@@ -111,26 +116,25 @@ class DataBrowserPanel {
     }
 
     static refresh() {
-    // Check if panel exists before trying to post message
-    if (DataBrowserPanel.currentPanel) {
-        try {
-            DataBrowserPanel.currentPanel.webview.postMessage({ type: 'refresh' });
-        } catch (err) {
-            console.warn('[DataBrowserPanel] Could not refresh - panel may be disposed:', err.message);
+        // Check if panel exists before trying to post message
+        if (DataBrowserPanel.currentPanel) {
+            try {
+                DataBrowserPanel.currentPanel.webview.postMessage({ type: 'refresh' });
+            } catch (err) {
+                console.warn('[DataBrowserPanel] Could not refresh - panel may be disposed:', err.message);
+            }
         }
     }
-}
 
-    static _performRequest(urlStr, options) {
+    static _performRequest(urlStr, options, expectBinary = false) {
         return new Promise((resolve, reject) => {
             try {
                 const url = new URL(urlStr);
                 const headers = options.headers || {};
-                
+
                 let body = options.body;
-                
+
                 // Robustness: ensure body is a string if present.
-                // explicitly handle object bodies if they somehow arrive here
                 if (body && typeof body !== 'string' && !Buffer.isBuffer(body)) {
                     try {
                         body = JSON.stringify(body);
@@ -145,7 +149,6 @@ class DataBrowserPanel {
                 if (body) {
                     headers['Content-Length'] = Buffer.byteLength(body);
                     if (!headers['Content-Type']) {
-                        // Default to JSON if not specified but body is present
                         headers['Content-Type'] = 'application/json';
                     }
                 }
@@ -159,19 +162,23 @@ class DataBrowserPanel {
                 };
 
                 const req = http.request(opts, (res) => {
-                    let data = '';
-                    res.on('data', (chunk) => data += chunk);
+                    const chunks = [];
+                    res.on('data', (chunk) => chunks.push(chunk));
                     res.on('end', () => {
+                        const buffer = Buffer.concat(chunks);
                         if (res.statusCode >= 200 && res.statusCode < 300) {
-                            try {
-                                const json = JSON.parse(data);
-                                resolve(json);
-                            } catch (e) {
-                                // If not JSON, return text? The API should return JSON.
-                                reject(new Error('Invalid JSON response'));
+                            if (expectBinary) {
+                                resolve(buffer);
+                            } else {
+                                try {
+                                    const json = JSON.parse(buffer.toString());
+                                    resolve(json);
+                                } catch (e) {
+                                    reject(new Error('Invalid JSON response'));
+                                }
                             }
                         } else {
-                            reject(new Error(`API Request Failed (${res.statusCode}): ${data}`));
+                            reject(new Error(`API Request Failed (${res.statusCode}): ${buffer.toString()}`));
                         }
                     });
                 });
@@ -189,7 +196,7 @@ class DataBrowserPanel {
     }
 
     static _getHtmlForWebview(webview, extensionUri) {
-        const scriptUri = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'src', 'ui-shared', 'data-browser.js'));
+        const scriptUri = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'dist', 'ui-shared', 'data-browser.js'));
         const styleUri = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'src', 'ui-shared', 'data-browser.css'));
         const designUri = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'src', 'ui-shared', 'design.css'));
         const nonce = getNonce();

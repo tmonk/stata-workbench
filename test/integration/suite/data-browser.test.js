@@ -25,6 +25,13 @@ describe('Data Browser Integration', () => {
                         res.writeHead(200, { 'Content-Type': 'application/json' });
                         res.end(body); // Echo back
                     });
+                } else if (req.url === '/v1/arrow') {
+                    // Small Arrow IPC stream
+                    const { tableToIPC, tableFromArrays } = require('apache-arrow');
+                    const table = tableFromArrays({ a: [1, 2, 3] });
+                    const buffer = tableToIPC(table);
+                    res.writeHead(200, { 'Content-Type': 'application/octet-stream' });
+                    res.end(buffer);
                 } else {
                     res.writeHead(404);
                     res.end();
@@ -95,6 +102,73 @@ describe('Data Browser Integration', () => {
         });
 
         expect(result).toEqual(bodyObj);
+    });
+
+    test('DataBrowserPanel proxy should handle binary Arrow IPC responses', async () => {
+        const extension = vscode.extensions.getExtension('tmonk.stata-workbench');
+        const api = extension.exports;
+
+        const result = await api.DataBrowserPanel._performRequest(`${dummyUrl}/v1/arrow`, { method: 'POST' }, true);
+
+        expect(result instanceof Uint8Array).toBe(true);
+        expect(result.byteLength).toBeGreaterThan(0);
+    });
+
+    test('DataBrowserPanel should work with LIVE server if configured', async () => {
+        if (process.env.MCP_STATA_LIVE !== '1') {
+            console.log('Skipping live server test (MCP_STATA_LIVE !== 1)');
+            return;
+        }
+
+        const extension = vscode.extensions.getExtension('tmonk.stata-workbench');
+        if (!extension.isActive) await extension.activate();
+        const api = extension.exports;
+        console.log('[Live Test] Extension API keys:', Object.keys(api || {}));
+        const mcpClient = api.mcpClient;
+
+        if (!mcpClient) {
+            throw new Error(`mcpClient is undefined in extension.exports! Keys: ${Object.keys(api || {}).join(', ')}`);
+        }
+
+        // Wait for client to be ready and get UI channel
+        console.log('[Live Test] Fetching UI channel from real MCP server...');
+        const channel = await mcpClient.getUiChannel();
+        expect(channel.baseUrl).toBeTruthy();
+        expect(channel.token).toBeTruthy();
+
+        console.log(`[Live Test] Real Server BaseURL: ${channel.baseUrl}`);
+
+        // Load some data first
+        console.log('[Live Test] Loading auto.dta...');
+        await mcpClient.runSelection('sysuse auto, clear');
+
+        // Try /v1/dataset first
+        const dsResult = await api.DataBrowserPanel._performRequest(`${channel.baseUrl}/v1/dataset`, {
+            method: 'GET',
+            headers: { 'Authorization': `Bearer ${channel.token}` }
+        });
+        const ds = dsResult.dataset || dsResult;
+
+        // Fetch data via arrow
+        const endpoint = `${channel.baseUrl}/v1/arrow`;
+        const body = {
+            datasetId: ds.id,
+            frame: ds.frame || 'default',
+            limit: 10
+        };
+
+        const result = await api.DataBrowserPanel._performRequest(endpoint, {
+            method: 'POST',
+            body: JSON.stringify(body),
+            headers: {
+                'Authorization': `Bearer ${channel.token}`,
+                'Content-Type': 'application/json'
+            }
+        }, true);
+
+        expect(result instanceof Uint8Array || Buffer.isBuffer(result)).toBe(true);
+        expect(result.byteLength).toBeGreaterThan(0);
+        console.log(`[Live Test] Successfully fetched ${result.byteLength} bytes of Arrow data from real server.`);
     });
 
     test('DataBrowserPanel proxy should handle errors', async () => {

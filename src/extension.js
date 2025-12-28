@@ -106,7 +106,8 @@ function activate(context) {
         return {
             TerminalPanel,
             DataBrowserPanel,
-            downloadGraphAsPdf
+            downloadGraphAsPdf,
+            mcpClient
         };
     }
 }
@@ -1320,5 +1321,7 @@ module.exports = {
     promptInstallMcpCli,
     hasExistingMcpConfig,
     getMcpConfigTarget,
-    downloadGraphAsPdf
+    downloadGraphAsPdf,
+    mcpClient,
+    DataBrowserPanel
 };
