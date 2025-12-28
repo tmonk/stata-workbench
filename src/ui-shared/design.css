@@ -892,3 +892,9 @@ textarea#command-input:focus {
     display: none;
   }
 }
+
+.scrollable-log {
+  max-height: 600px;
+  overflow-y: auto;
+  border-bottom: 1px solid var(--border-subtle);
+}

@@ -33,7 +33,7 @@ describe('McpClient integration (VS Code host)', () => {
         fs.mkdirSync(doDir, { recursive: true });
         doFile = path.join(doDir, 'integration.do');
         fs.writeFileSync(doFile, [
-            'capture log close _all',
+            'capture log close',
             'log using "integration.log", replace text',
             'display "integration-ok"',
             'log close'

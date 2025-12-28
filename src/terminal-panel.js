@@ -1,6 +1,7 @@
 const { openArtifact, revealArtifact, copyToClipboard, resolveArtifactUri } = require('./artifact-utils');
 const path = require('path');
 const vscode = require('vscode');
+const fs = require('fs');
 
 /**
  * Parse SMCL text and extract formatted error information
@@ -569,6 +570,9 @@ class TerminalPanel {
         if (message.type === 'log') {
           console.log(`[Client Log] ${message.level || 'info'}: ${message.message}`);
         }
+        if (message.type === 'fetchLog') {
+          await TerminalPanel._handleFetchLog(message.runId, message.path, message.offset, message.maxBytes);
+        }
       });
 
       const webview = TerminalPanel.currentPanel.webview;
@@ -832,6 +836,18 @@ class TerminalPanel {
     // NOW determine success using the parsed RC
     const success = determineSuccess(result, finalRC);
 
+    let logSize = 0;
+    if (result?.logPath) {
+      try {
+        const stats = fs.statSync(result.logPath);
+        logSize = stats.size;
+      } catch (e) {
+        if (e.code !== 'ENOENT') {
+          console.error('Failed to stat log file:', e);
+        }
+      }
+    }
+
     TerminalPanel._postMessage({
       type: 'runFinished',
       runId,
@@ -841,13 +857,46 @@ class TerminalPanel {
       // Do not ship full stdout on failure; rely on stderr/tail.
       // Apply smclToHtml to the final result
       stdout: success ? smclToHtml(result?.stdout || result?.contentText || '') : '',
-      // fullStdout: always available for the 'Log' tab.
-      fullStdout: smclToHtml(result?.stdout || result?.contentText || ''),
+      // fullStdout: OMITTED intentionally if we have a log path to safe memory
+      // The frontend will now use the LogViewer to fetch data from disk.
       stderr: success ? '' : smclToHtml(finalStderr),
+      logPath: result?.logPath || null,
+      logSize,
       artifacts: normalizeArtifacts(result),
       baseDir: result?.cwd || ''
     });
     TerminalPanel._postMessage({ type: 'busy', value: false });
+  }
+
+  static async _handleFetchLog(runId, path, offset, maxBytes) {
+    console.log(`[TerminalPanel] _handleFetchLog: runId=${runId} path=${path} offset=${offset}`);
+    if (!path) return;
+    try {
+      // Lazy require to avoid circularity if possible, or assume mcpClient is globally available 
+      if (TerminalPanel._logProvider) {
+        const slice = await TerminalPanel._logProvider(path, offset, maxBytes);
+        const rawData = slice?.data || '';
+        // Apply SMCL formatting so the frontend displays styled text
+        // Note: partial chunks might split chunks of tags. A robust solution would need a streaming parser state.
+        // For now, stateless formatting on chunks is a reasonable approximation for viewing logs.
+        const formatted = smclToHtml(rawData);
+
+        TerminalPanel._postMessage({
+          type: 'logChunk',
+          runId,
+          path,
+          offset,
+          data: formatted,
+          nextOffset: slice?.next_offset
+        });
+      }
+    } catch (err) {
+      console.error('Fetch log failed', err);
+    }
+  }
+
+  static setLogProvider(fn) {
+    TerminalPanel._logProvider = fn;
   }
 
   static failStreamingEntry(runId, errorMessage) {
@@ -1542,6 +1591,7 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
             +      '<div class="flex items-center gap-sm">'
             +        '<span id="run-rc-' + runId + '"></span>'
             +        '<span id="run-duration-' + runId + '"></span>'
+            +        '<span id="run-log-link-' + runId + '"></span>'
             +      '</div>'
             +    '</div>'
             +    '<div class="output-progress" id="run-progress-wrap-' + runId + '" style="display:none;">'
@@ -1585,6 +1635,7 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
             statusTitle: document.getElementById('run-status-title-' + runId),
             rcEl: document.getElementById('run-rc-' + runId),
             durationEl: document.getElementById('run-duration-' + runId),
+            logLinkEl: document.getElementById('run-log-link-' + runId),
             logEl: document.getElementById('run-log-' + runId),
             tabsContainer: document.getElementById('run-tabs-' + runId),
             artifactsEl: document.getElementById('run-artifacts-' + runId)
@@ -1647,6 +1698,7 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
             +       '<div class="flex items-center gap-sm">'
             +         (entry.rc !== null ? ('<span>RC ' + entry.rc + '</span>') : '')
             +         (entry.durationMs ? ('<span>' + window.stataUI.formatDuration(entry.durationMs) + '</span>') : '')
+            +         (entry.logPath ? ('<span class="text-secondary" style="cursor:pointer;" title="' + window.stataUI.escapeHtml(entry.logPath) + '" data-action="open-artifact" data-path="' + window.stataUI.escapeHtml(entry.logPath) + '"><i class="codicon codicon-file-code"></i> Log</span>') : '')
             +       '</div>'
             +     '</div>'
             +     '<div class="output-tabs" ' + tabsStyle + '>'
@@ -1658,7 +1710,7 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
             +       (entry.stdout ? ('<div class="output-content">' + entry.stdout + '</div>') : '')
             +     '</div>'
             +     '<div class="output-pane" data-tab="log">'
-            +       '<div class="output-content">' + (entry.fullStdout || '') + '</div>'
+            +       '<div class="output-content log-container" id="run-log-' + entry.timestamp + '" data-log-path="' + (entry.logPath || '') + '"></div>'
             +     '</div>'
             +   '</div>'
             +   artifactsHtml
@@ -1968,10 +2020,61 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
         if (run.durationEl) {
             run.durationEl.textContent = msg.durationMs ? window.stataUI.formatDuration(msg.durationMs) : '';
         }
+        
+        if (run.logLinkEl && msg.logPath) {
+             run.logLinkEl.innerHTML = '<span class="text-secondary" style="cursor:pointer;" title="' + window.stataUI.escapeHtml(msg.logPath) + '" data-action="open-artifact" data-path="' + window.stataUI.escapeHtml(msg.logPath) + '"><i class="codicon codicon-file-code"></i> Log</span>';
+        }
 
-        // Populate Log tab
+        // Populate Log tab or Main Output based on success/logPath availability
+        const useBufferedLog = !!msg.logPath;
+        
+        if (success && useBufferedLog && run.stdoutEl) {
+            // SUCCESS + LOG EXISTS: 
+            // Replace the main output content with the buffered log viewer.
+            // This gives "infinite scroll" behavior for the main result.
+            // Note: do NOT clear innerHTML here; let LogViewer handle seamless transition
+            // by inspecting existing content.
+            run.viewer = new LogViewer(run.stdoutEl, msg.logPath, msg.logSize, runId);
+            run.stdoutEl.style.display = 'block';
+        } else if (success) {
+             // SUCCESS + NO LOG: 
+             // Keep the streamed content (backfilled if needed)
+             const finalStdout = String(msg.stdout || '');
+             if (run.stdoutEl && finalStdout) {
+                 // ... existing backfill logic ...
+                 const current = run.stdoutEl.innerHTML || '';
+                 const MAX_STDOUT_DISPLAY = 20_000;
+                 const normalizedFinal = safeSliceTail(finalStdout, MAX_STDOUT_DISPLAY);
+                 if (!current || (normalizedFinal.length > current.length)) {
+                     run.stdoutEl.innerHTML = normalizedFinal;
+                 }
+                 run.stdoutEl.style.display = 'block';
+             }
+        }
+        
         if (run.logEl) {
-            run.logEl.innerHTML = String(msg.fullStdout || '');
+             if (useBufferedLog) {
+                 // Always populate Log tab with buffered viewer if available
+                 // (Even if success, the Log tab exists, though maybe hidden. 
+                 // If we decided to hide tabs on success, this viewer is just ready if toggled).
+                 // Wait, if we put viewer in stdoutEl on success, do we also put it in logEl?
+                 // No, that would duplicate the viewer and fetches. 
+                 // If success, we hide tabs. Users see stdoutEl.
+                 // If failure, we show tabs. Users see stdoutEl (error) and logEl (full log).
+                 
+                 // So:
+                 if (!success) {
+            run.logEl.innerHTML = '';
+            run.viewer = new LogViewer(run.logEl, msg.logPath, msg.logSize, runId);
+        } else {
+                     // On success, we used stdoutEl for the viewer. 
+                     // We can leave logEl empty or put a note.
+                     run.logEl.innerHTML = '<div class="text-muted">Log viewed in Result pane</div>';
+                 }
+             } else {
+                 // Fallback to memory content
+                 run.logEl.innerHTML = String(msg.fullStdout || '');
+             }
         }
 
         // Show tabs ONLY if there was an error or a non-zero RC
@@ -1991,29 +2094,33 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
         }
 
         // If the run failed, prioritize showing the error and hide the bulky stdout content.
-        // When successful, only backfill stdout when it is small or the delta is small to avoid massive reflows.
-        const finalStdout = String(msg.stdout || '');
-        const MAX_STDOUT_DISPLAY = 20_000; // show at most the tail of large stdout
-        const MAX_BACKFILL_DELTA = 5_000; // avoid replacing huge content if streaming already filled most
         if (!success && run.stdoutEl) {
-            // If failed, hide the log content in the 'Result' tab to show "error only"
-            run.stdoutEl.style.display = "none";
-        } else if (run.stdoutEl && finalStdout) {
-            const current = run.stdoutEl.innerHTML || '';
-            const normalizedFinal = safeSliceTail(finalStdout, MAX_STDOUT_DISPLAY);
-
-            const needsInitial = !current && normalizedFinal;
-            const needsSmallDelta = normalizedFinal.length > current.length &&
-                (normalizedFinal.length - current.length) <= MAX_BACKFILL_DELTA;
-
-            if (needsInitial || needsSmallDelta) {
-                run.stdoutEl.innerHTML = normalizedFinal;
-            } else if (!current && normalizedFinal) {
-                // Fallback: if we had no streaming but have results, show them
-                run.stdoutEl.innerHTML = normalizedFinal;
-            }
-            if (run.stdoutEl.innerHTML) {
-                run.stdoutEl.style.display = 'block';
+            // Keep error visible, hide stdout (if not using viewer)
+            // If using viewer in logEl, stdoutEl is just for error context?
+            // Actually stdoutEl usually contains the "Result" tab content.
+            // On failure, Result tab shows stderr. 
+            // So we hide any partial stdout that might have been streamed there to focus on error.
+            if (!useBufferedLog) {
+                 // Only hide if we aren't using it for something else (we aren't on failure)
+                 run.stdoutEl.style.display = "none";
+            } else {
+                 // If we have buffered log, we put it in logEl. 
+                 // stdoutEl shows error. 
+                 // So yes, hide "streaming" stdout residue.
+                 // But wait, stderrEl provides the error message. 
+                 // stdoutEl is the container for "Result" pane content. 
+                 // stderrEl is typically INSIDE stdoutEl or separate?
+                 // Let's check structure.
+                 // Structure: 
+                 // <div class="output-pane active" data-tab="result">
+                 //   <div id="run-stderr-...">...</div>
+                 //   <div id="run-stdout-...">...</div>
+                 // </div>
+                 // <div class="output-pane" data-tab="log">...</div>
+                 
+                 // So stderrEl is SEPARATE from stdoutEl.
+                 // So yes, we can hide stdoutEl on failure to show just stderrEl in the Result pane.
+                 run.stdoutEl.style.display = 'none';
             }
         }
 
@@ -2282,6 +2389,114 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
       input.setSelectionRange(cursor, cursor);
       input.dispatchEvent(new Event('input', { bubbles: true }));
     }
+
+    class LogViewer {
+        constructor(container, logPath, logSize, runId) {
+            this.container = container;
+            this.logPath = logPath;
+            this.logSize = logSize || 0;
+            this.runId = runId;
+            this.offset = 0; 
+            this.maxBytes = 50000;
+            this.isFirstLoad = true;
+            this.isLoading = false;
+            
+            // Calculate initial offset to show tail
+            if (this.logSize > this.maxBytes) {
+                this.offset = this.logSize - this.maxBytes;
+            } else {
+                this.offset = 0;
+            }
+            
+            // Do NOT clear the container immediately with "Loading..." to avoid flash.
+            // Keeping existing content (streamed output) until the first chunk arrives is smoother.
+            // this.container.innerHTML = '<div class="log-loading">Loading log...</div>';
+            
+            // Force container to be scrollable
+            this.container.classList.add('scrollable-log');
+            this.container.addEventListener('scroll', this.onScroll.bind(this));
+            
+            console.log('[LogViewer] Initializing. Size:', this.logSize, 'Start Offset:', this.offset);
+            this.fetchChunk(this.offset);
+        }
+        
+        onScroll() {
+            if (this.isLoading) return;
+            // Native scrolling Up
+            // Use a threshold (e.g. 50px) instead of strictly 0 to handle faster scrolls or sub-pixel differences
+            if (this.container.scrollTop < 50 && this.offset > 0) {
+                 // Prepend previous chunk
+                 const newOffset = Math.max(0, this.offset - this.maxBytes);
+                 console.log('[LogViewer] Scrolling up. Fetching from', newOffset);
+                 this.fetchChunk(newOffset, true); // true = prepend
+            }
+        }
+        
+        fetchChunk(offset, isPrepend = false) {
+            this.isLoading = true;
+            this.pendingPrepend = isPrepend;
+            vscode.postMessage({
+                type: 'fetchLog',
+                runId: this.runId,
+                path: this.logPath,
+                offset: offset,
+                maxBytes: this.maxBytes
+            });
+        }
+        
+        appendData(data, nextOffset) {
+             this.isLoading = false;
+             
+             // Remove loading indicator
+             const loader = this.container.querySelector('.log-loading');
+             if (loader) loader.remove();
+             
+             if (this.isFirstLoad) {
+                 this.container.innerHTML = '';
+                 this.isFirstLoad = false;
+             }
+             
+             const div = document.createElement('div');
+             div.className = 'log-chunk';
+             div.innerHTML = data;
+             
+             if (this.pendingPrepend) {
+                 // Prepend
+                 // Maintain scroll position?
+                 const oldHeight = this.container.scrollHeight;
+                 this.container.prepend(div);
+                 const newHeight = this.container.scrollHeight;
+                 this.container.scrollTop = newHeight - oldHeight;
+                 
+                 // Update local offset tracker to the NEW lowest point
+                 this.offset = Math.max(0, this.offset - this.maxBytes);
+                 this.pendingPrepend = false;
+             } else {
+                 // Append (Initial load or scroll down if implemented)
+                 this.container.appendChild(div);
+                 // If initial tail load, autoscroll to bottom?
+                 // Usually yes for terminal output.
+                 // Only if we haven't scrolled manually? 
+                 // For first load from tail, yes.
+                 if (this.offset + (data ? data.length : 0) >= this.logSize || this.offset === 0) {
+                     // Wait, checking offset against size is tricky with bytes vs chars.
+                     // Simple heuristic: If it's the very first render of the tail, scroll to bottom.
+                      this.container.scrollTop = this.container.scrollHeight;
+                 }
+             }
+        }
+    }
+    
+    // Register global handler for log chunks
+    window.addEventListener('message', ev => {
+        if (ev.data.type === 'logChunk') {
+            const { runId, data, nextOffset } = ev.data;
+            const run = runs[runId];
+            if (run && run.viewer) {
+                run.viewer.appendData(data, nextOffset);
+            }
+        }
+    });
   </script>
 </body>
 </html>`;

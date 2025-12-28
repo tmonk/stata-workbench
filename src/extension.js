@@ -86,6 +86,7 @@ function activate(context) {
     context.subscriptions.push(...subscriptions, statusBarItem, outputChannel);
     globalExtensionUri = context.extensionUri;
     TerminalPanel.setExtensionUri(context.extensionUri);
+    TerminalPanel.setLogProvider((path, offset, maxBytes) => mcpClient.readLog(path, offset, maxBytes));
     missingCli = !ensureMcpCliAvailable(context);
     if (!missingCli) {
         const autoConfigureMcp = settings.get('autoConfigureMcp', true);

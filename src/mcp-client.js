@@ -113,6 +113,28 @@ class StataMcpClient {
         return result;
     }
 
+    _filterLogChunk(text) {
+        if (!text) return '';
+
+        let lines = text.split('\n');
+        let filteredLines = [];
+
+        for (const line of lines) {
+            // Filter out internal log closing command
+            if (/capture\s+log\s+close\s+_mcp_smcl_/i.test(line)) continue;
+
+            // Filter out log header metadata (tolerant of SMCL tags like {txt}, {res})
+            if (/log\s+type:\s+.*smcl/i.test(line)) continue;
+            if (/opened\s+on:\s+/i.test(line)) continue;
+            if (/log:\s+.*\.smcl/i.test(line)) continue;
+            if (/name:\s+.*_mcp_smcl_/i.test(line)) continue;
+
+            filteredLines.push(line);
+        }
+
+        return filteredLines.join('\n');
+    }
+
     async runFile(filePath, options = {}) {
         const { normalizeResult, includeGraphs, onLog, onProgress, cancellationToken: externalCancellationToken, ...rest } = options || {};
         // Resolve working directory (configurable, defaults to the .do file folder).
@@ -486,9 +508,11 @@ class StataMcpClient {
                         this._ensureLogTail(client, run, String(parsed.path)).catch(() => { });
                         return;
                     }
-                    run._appendLog?.(text);
+                    const filtered = this._filterLogChunk(text);
+                    if (!filtered) return;
+                    run._appendLog?.(filtered);
                     if (typeof run.onLog === 'function') {
-                        run.onLog(text);
+                        run.onLog(filtered);
                     }
                 });
             }
@@ -651,11 +675,14 @@ class StataMcpClient {
             }
             const data = String(slice.data ?? '');
             if (data) {
-                run._appendLog?.(data);
+                const filtered = this._filterLogChunk(data);
+                if (filtered) {
+                    run._appendLog?.(filtered);
+                }
                 emptyReads = 0;
             } else {
                 emptyReads += 1;
-                if (emptyReads >= 2) break;
+                if (emptyReads >= 10) break;
                 await this._delay(50);
             }
         }
@@ -685,17 +712,26 @@ class StataMcpClient {
             }
             const data = String(slice.data ?? '');
             if (data) {
-                run._appendLog?.(data);
-                if (typeof run.onLog === 'function') {
-                    try {
-                        run.onLog(data);
-                    } catch (_err) {
+                const filtered = this._filterLogChunk(data);
+                if (filtered) {
+                    run._appendLog?.(filtered);
+                    if (typeof run.onLog === 'function') {
+                        try {
+                            run.onLog(filtered);
+                        } catch (_err) {
+                        }
                     }
+                } else {
+                    await this._delay(200);
                 }
-            } else {
-                await this._delay(200);
             }
         }
+    }
+
+    async readLog(path, offset, maxBytes) {
+        return this._enqueue('read_log', { timeoutMs: 10000 }, async (client) => {
+            return this._readLogSlice(client, path, offset, maxBytes);
+        });
     }
 
     async _readLogSlice(client, path, offset, maxBytes) {
