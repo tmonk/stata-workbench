@@ -148,6 +148,15 @@
           "default": 0,
           "description": "Maximum lines of output to return from Stata commands (0 = unlimited). Useful for limiting token usage with verbose commands like regress or codebook."
         },
+        "stataMcp.runFileBehavior": {
+          "type": "string",
+          "enum": [
+            "runDirtyFile",
+            "runDiskFile"
+          ],
+          "default": "runDirtyFile",
+          "description": "Choose whether 'Run File' should run the current editor content (including unsaved changes) or the version saved on disk."
+        },
         "stataMcp.useBase64Graphs": {
           "type": "boolean",
           "default": false,
