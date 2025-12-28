@@ -5,7 +5,7 @@ const fs = require('fs');
 
 /**
  * Parse SMCL text and extract formatted error information
- * @param {string} smclText - Raw SMCL text
+ * @param {string} smclText -Raw SMCL text
  * @returns {{rc: number|null, formattedText: string}}
  */
 function parseSMCL(smclText) {
@@ -39,7 +39,7 @@ function parseSMCL(smclText) {
       }
     }
 
-    // 2. Detect error messages - ONLY capture from {err} tags
+    // 2. Detect error messages -ONLY capture from {err} tags
     const errMatch = line.match(/^\{err\}(.+)$/);
     if (errMatch) {
       hasError = true;
@@ -50,7 +50,7 @@ function parseSMCL(smclText) {
       }
     }
 
-    // 3. Track call stack - look for begin/end blocks
+    // 3. Track call stack -look for begin/end blocks
     const beginMatch = line.match(/begin\s+(\S+)/);
     if (beginMatch) {
       const funcName = beginMatch[1];
@@ -70,7 +70,7 @@ function parseSMCL(smclText) {
       }
     }
 
-    // 4. Capture executed commands - ONLY capture from {com} or '= ' lines
+    // 4. Capture executed commands -ONLY capture from {com} or '= ' lines
     if (trimmedLine.startsWith('= ')) {
       let cmd = trimmedLine.substring(2).trim();
       // Handle multiple prefixes
@@ -146,7 +146,7 @@ function parseSMCL(smclText) {
 
 /**
  * Convert SMCL markup to HTML for display
- * @param {string} text - SMCL formatted text
+ * @param {string} text -SMCL formatted text
  * @returns {string} HTML formatted text
  */
 function smclToHtml(text) {
@@ -424,7 +424,7 @@ function getTagMeta(tagName) {
     case 'sf': return { class: 'smcl-sf' };
     case 'ul': return { class: 'smcl-ul' };
     case 'stata':
-      // Handle {stata "cmd":label} - we'll just style it for now
+      // Handle {stata "cmd":label} -we'll just style it for now
       return { class: 'smcl-link', data: 'data-type="stata"' };
     case 'help':
       return { class: 'smcl-link', data: 'data-type="help"' };
@@ -913,8 +913,8 @@ class TerminalPanel {
   * Appends an entry to the terminal panel, showing it if necessary.
    * @param {string} code
    * @param {object} result
-   * @param {string} [filePath] - associated file path to update title if needed
-   * @param {(code: string) => Promise<object>} [runCommand] - command runner if panel needs initialization
+   * @param {string} [filePath] -associated file path to update title if needed
+   * @param {(code: string) => Promise<object>} [runCommand] -command runner if panel needs initialization
    */
   static addEntry(code, result, filePath, runCommand, variableProvider) {
     if (!TerminalPanel.currentPanel) {
@@ -957,7 +957,7 @@ class TerminalPanel {
         TerminalPanel._postMessage({ type: 'cleared' });
         TerminalPanel._postMessage({ type: 'busy', value: true });
         await TerminalPanel._clearHandler();
-        // Success - UI already cleared, no need to show anything
+        // Success -UI already cleared, no need to show anything
       } catch (error) {
         console.error('[TerminalPanel] clearAll failed:', error);
         TerminalPanel._postMessage({ type: 'error', message: 'Failed to clear: ' + error.message });
@@ -987,6 +987,7 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
   const highlightCssUri = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'src', 'ui-shared', 'highlight.css'));
   const mainJsUri = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'src', 'ui-shared', 'main.js'));
   const highlightJsUri = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'src', 'ui-shared', 'highlight.min.js'));
+  const markJsUri = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'src', 'ui-shared', 'mark.min.js'));
 
   const fileName = filePath ? path.basename(filePath) : 'Terminal Session';
   const escapedTitle = escapeHtml(fileName);
@@ -1050,7 +1051,7 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
 </head>
 <body>
 
-  <!-- Context Header -->
+  <!--Context Header -->
   <div class="context-header" id="context-header">
     <div class="context-container">
       <div class="context-info">
@@ -1084,7 +1085,7 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
   </div>
 
   <main class="chat-stream" id="chat-stream">
-    <!-- Entries injected here -->
+    <!--Entries injected here -->
   </main>
 
   <div class="artifact-modal hidden" id="artifact-modal" role="dialog" aria-modal="true" aria-hidden="true">
@@ -1107,7 +1108,7 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
     </div>
   </div>
 
-  <!-- Floating Input Area -->
+  <!--Floating Input Area -->
   <footer class="input-area">
     <div class="input-container">
       <textarea id="command-input" placeholder="Run Stata command..." rows="1" autofocus></textarea>
@@ -1136,6 +1137,7 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
   </footer>
 
   <script src="${highlightJsUri}"></script>
+  <script src="${markJsUri}"></script>
   <script src="${mainJsUri}"></script>
   <script nonce="${nonce}">
     const vscode = acquireVsCodeApi();
@@ -1159,7 +1161,7 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
                 const s = ms / 1000;
                 if (s < 60) return s.toFixed(1) + ' s';
                 const m = Math.floor(s / 60);
-                const rem = s - m * 60;
+                const rem = s -m * 60;
                 return m + 'm ' + rem.toFixed(0) + 's';
             },
             bindArtifactEvents: function () { }
@@ -1268,7 +1270,7 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
 
     function safeSliceTail(html, limit) {
         if (!html || html.length <= limit) return html || '';
-        let start = html.length - limit;
+        let start = html.length -limit;
         // Search for the first newline after the potential cut point.
         // This ensures we start on a fresh line, avoiding broken tags.
         const firstNewline = html.indexOf(String.fromCharCode(10), start);
@@ -1294,7 +1296,7 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
             offset = 0;
         }
 
-        if (cutPoint !== -1 && cutPoint < html.length - 1) {
+        if (cutPoint !== -1 && cutPoint < html.length -1) {
             return html.substring(cutPoint + offset);
         }
         return html.slice(-limit);
@@ -1314,16 +1316,16 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
         const startY = window.scrollY || 0;
         const startTime = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
 
-        const easeOutCubic = (t) => 1 - Math.pow(1 - t, 3);
+        const easeOutCubic = (t) => 1 -Math.pow(1 -t, 3);
 
         const step = (now) => {
             const tNow = now ?? ((typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now());
-            const elapsed = tNow - startTime;
+            const elapsed = tNow -startTime;
             const t = Math.max(0, Math.min(1, elapsed / durationMs));
             const eased = easeOutCubic(t);
 
             const targetY = document.body.scrollHeight;
-            const nextY = startY + (targetY - startY) * eased;
+            const nextY = startY + (targetY -startY) * eased;
             window.scrollTo(0, nextY);
 
             if (t < 1) {
@@ -1405,7 +1407,7 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
         if (history.length === 0) return;
         e.preventDefault();
         if (historyIndex === -1) {
-          historyIndex = history.length - 1;
+          historyIndex = history.length -1;
         } else if (historyIndex > 0) {
           historyIndex -= 1;
         }
@@ -1417,7 +1419,7 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
         // Navigate forward through history (or clear if past newest)
         if (historyIndex === -1) return;
         e.preventDefault();
-        if (historyIndex < history.length - 1) {
+        if (historyIndex < history.length -1) {
           historyIndex += 1;
           applyHistory();
         } else {
@@ -1475,6 +1477,49 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
             card.querySelectorAll('.output-pane').forEach(pane => pane.classList.remove('active'));
             const targetPane = card.querySelector('.output-pane[data-tab="' + tab + '"]');
             if (targetPane) targetPane.classList.add('active');
+
+            // If search is active, refresh it for the new pane
+            if (typeof searchControllers !== 'undefined') {
+                const controller = searchControllers.get(runId);
+                if (controller && controller.input.value) {
+                    controller.performSearch();
+                }
+            }
+        }
+
+        // Search Handlers
+        const searchToggle = e.target.closest('.search-toggle');
+        if (searchToggle) {
+            const runId = searchToggle.dataset.runId;
+            const searchBar = document.getElementById('run-search-' + runId);
+            if (searchBar) {
+                const isHidden = searchBar.classList.toggle('hidden');
+                if (!isHidden) {
+                    const controller = getSearchController(runId);
+                    controller.input.focus();
+                } else {
+                    const controller = searchControllers.get(runId);
+                    if (controller) controller.close();
+                }
+            }
+        }
+
+        const btnNext = e.target.closest('.search-next');
+        if (btnNext) {
+            const controller = getSearchController(btnNext.dataset.runId);
+            controller.next();
+        }
+
+        const btnPrev = e.target.closest('.search-prev');
+        if (btnPrev) {
+            const controller = getSearchController(btnPrev.dataset.runId);
+            controller.prev();
+        }
+
+        const btnClose = e.target.closest('.search-close');
+        if (btnClose) {
+            const controller = getSearchController(btnClose.dataset.runId);
+            controller.close();
         }
     });
 
@@ -1592,6 +1637,7 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
             +        '<span id="run-rc-' + runId + '"></span>'
             +        '<span id="run-duration-' + runId + '"></span>'
             +        '<span id="run-log-link-' + runId + '"></span>'
+            +        '<button class="btn btn-ghost btn-icon search-toggle" data-run-id="' + runId + '" title="Search in this card"><i class="codicon codicon-search"></i></button>'
             +      '</div>'
             +    '</div>'
             +    '<div class="output-progress" id="run-progress-wrap-' + runId + '" style="display:none;">'
@@ -1600,6 +1646,18 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
             +        '<span class="progress-meta" id="run-progress-meta-' + runId + '"></span>'
             +      '</div>'
             +      '<div class="progress-bar"><div class="progress-fill" id="run-progress-fill-' + runId + '" style="width:0%;"></div></div>'
+            +    '</div>'
+            +    '<div class="output-search-bar hidden" id="run-search-' + runId + '">'
+            +      '<div class="search-input-wrapper">'
+            +        '<i class="codicon codicon-search" style="font-size: 12px; color: var(--text-tertiary);"></i>'
+            +        '<input type="text" placeholder="Find..." id="run-search-input-' + runId + '" data-run-id="' + runId + '">'
+            +        '<span class="search-counter" id="run-search-counter-' + runId + '">0/0</span>'
+            +      '</div>'
+            +      '<div class="search-actions">'
+            +        '<button class="btn btn-ghost btn-icon search-prev" data-run-id="' + runId + '" title="Previous Match (Shift+Enter)"><i class="codicon codicon-arrow-up"></i></button>'
+            +        '<button class="btn btn-ghost btn-icon search-next" data-run-id="' + runId + '" title="Next Match (Enter)"><i class="codicon codicon-arrow-down"></i></button>'
+            +        '<button class="btn btn-ghost btn-icon search-close" data-run-id="' + runId + '" title="Close Search (Esc)"><i class="codicon codicon-close"></i></button>'
+            +      '</div>'
             +    '</div>'
             +    '<div class="output-tabs" id="run-tabs-' + runId + '" style="display:none;">'
             +      '<button class="tab-btn active" data-run-id="' + runId + '" data-tab="result">Result</button>'
@@ -1699,6 +1757,19 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
             +         (entry.rc !== null ? ('<span>RC ' + entry.rc + '</span>') : '')
             +         (entry.durationMs ? ('<span>' + window.stataUI.formatDuration(entry.durationMs) + '</span>') : '')
             +         (entry.logPath ? ('<span class="text-secondary" style="cursor:pointer;" title="' + window.stataUI.escapeHtml(entry.logPath) + '" data-action="open-artifact" data-path="' + window.stataUI.escapeHtml(entry.logPath) + '"><i class="codicon codicon-file-code"></i> Log</span>') : '')
+            +         '<button class="btn btn-ghost btn-icon search-toggle" data-run-id="' + entry.timestamp + '" title="Search in this card"><i class="codicon codicon-search"></i></button>'
+            +       '</div>'
+            +     '</div>'
+            +     '<div class="output-search-bar hidden" id="run-search-' + entry.timestamp + '">'
+            +       '<div class="search-input-wrapper">'
+            +         '<i class="codicon codicon-search" style="font-size: 12px; color: var(--text-tertiary);"></i>'
+            +         '<input type="text" placeholder="Find..." id="run-search-input-' + entry.timestamp + '" data-run-id="' + entry.timestamp + '">'
+            +         '<span class="search-counter" id="run-search-counter-' + entry.timestamp + '">0/0</span>'
+            +       '</div>'
+            +       '<div class="search-actions">'
+            +         '<button class="btn btn-ghost btn-icon search-prev" data-run-id="' + entry.timestamp + '" title="Previous Match (Shift+Enter)"><i class="codicon codicon-arrow-up"></i></button>'
+            +         '<button class="btn btn-ghost btn-icon search-next" data-run-id="' + entry.timestamp + '" title="Next Match (Enter)"><i class="codicon codicon-arrow-down"></i></button>'
+            +         '<button class="btn btn-ghost btn-icon search-close" data-run-id="' + entry.timestamp + '" title="Close Search (Esc)"><i class="codicon codicon-close"></i></button>'
             +       '</div>'
             +     '</div>'
             +     '<div class="output-tabs" ' + tabsStyle + '>'
@@ -1817,7 +1888,7 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
         if (modalImg) modalImg.src = '';
     }
 
-    // Download button handler - requests PDF export and downloads it
+    // Download button handler -requests PDF export and downloads it
     if (modalDownloadBtn) {
         modalDownloadBtn.addEventListener('click', async () => {
             console.log('[Modal] Download button clicked');
@@ -1939,6 +2010,12 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
         // Update header status for cancelled
         updateStatusIndicator(false, null);
         if (autoScrollPinned) scrollToBottomSmooth();
+        if (typeof searchControllers !== 'undefined') {
+            const controller = searchControllers.get(runId);
+            if (controller && controller.input.value) {
+                controller.performSearch();
+            }
+        }
       }
 
       if (msg.type === 'downloadStatus') {
@@ -2140,6 +2217,12 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
         setBusy(false);
 
         if (autoScrollPinned) scrollToBottomSmooth();
+        if (typeof searchControllers !== 'undefined') {
+            const controller = searchControllers.get(runId);
+            if (controller && controller.input.value) {
+                controller.performSearch();
+            }
+        }
       }
 
       if (msg.type === 'runFailed') {
@@ -2161,6 +2244,12 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
         setBusy(false);
 
         if (autoScrollPinned) scrollToBottomSmooth();
+        if (typeof searchControllers !== 'undefined') {
+            const controller = searchControllers.get(runId);
+            if (controller && controller.input.value) {
+                controller.performSearch();
+            }
+        }
       }
 
       if (msg.type === 'variables') {
@@ -2336,7 +2425,7 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
     }
 
     function isAtBottom() {
-        return (window.innerHeight + window.scrollY) >= document.body.offsetHeight - 50;
+        return (window.innerHeight + window.scrollY) >= document.body.offsetHeight -50;
     }
 
     setBusy(false);
@@ -2374,7 +2463,7 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
       const beforeMatch = before.match(/([A-Za-z0-9_\.]+)$/);
       if (!beforeMatch) return null;
       const prefix = beforeMatch[1];
-      const start = pos - prefix.length;
+      const start = pos -prefix.length;
       const after = text.slice(pos);
       const afterMatch = after.match(/^([A-Za-z0-9_\.]+)/);
       const end = pos + (afterMatch ? afterMatch[1].length : 0);
@@ -2390,6 +2479,124 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
       input.dispatchEvent(new Event('input', { bubbles: true }));
     }
 
+    class SearchController {
+        constructor(runId) {
+            this.runId = runId;
+            this.card = document.querySelector('.message-group[data-run-id="' + runId + '"]');
+            this.input = document.getElementById('run-search-input-' + runId);
+            this.counter = document.getElementById('run-search-counter-' + runId);
+            
+            this.activePane = null;
+            this.markInstance = null;
+            this.results = [];
+            this.currentIndex = -1;
+            
+            this.init();
+        }
+
+        init() {
+            this.input.addEventListener('input', () => this.performSearch());
+            this.input.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    if (e.shiftKey) this.prev();
+                    else this.next();
+                } else if (e.key === 'Escape') {
+                    this.close();
+                }
+            });
+        }
+
+        getMarkContext() {
+            // Find the currently active output-pane in this card
+            const activePane = this.card.querySelector('.output-pane.active');
+            if (!activePane) return null;
+            // Get visible content within pane (either stderr or stdout)
+            const content = Array.from(activePane.querySelectorAll('.output-content'))
+                .find(el => el.style.display !== 'none');
+            return content || activePane;
+        }
+
+        performSearch() {
+            const query = this.input.value;
+            const context = this.getMarkContext();
+            
+            if (!context) return;
+            
+            if (this.activePane !== context || !this.markInstance) {
+                if (this.markInstance) this.markInstance.unmark();
+                this.markInstance = new Mark(context);
+                this.activePane = context;
+            }
+
+            this.markInstance.unmark({
+                done: () => {
+                    if (!query || query.length < 2) {
+                        this.updateCounter(0, 0);
+                        return;
+                    }
+
+                    this.markInstance.mark(query, {
+                        acrossElements: true,
+                        separateWordSearch: false,
+                        accuracy: 'partially',
+                        diacritics: true,
+                        done: (count) => {
+                            this.results = Array.from(this.activePane.querySelectorAll('mark'));
+                            this.currentIndex = count > 0 ? 0 : -1;
+                            this.updateCounter(this.currentIndex + 1, count);
+                            if (count > 0) this.jumpTo(0);
+                        }
+                    });
+                }
+            });
+        }
+
+        updateCounter(current, total) {
+            if (this.counter) {
+                this.counter.textContent = total > 0 ? (current + '/' + total) : '0/0';
+            }
+        }
+
+        jumpTo(index) {
+            if (this.results.length === 0) return;
+            
+            // Remove active class from all
+            this.results.forEach(m => m.classList.remove('active'));
+            
+            this.currentIndex = (index + this.results.length) % this.results.length;
+            const target = this.results[this.currentIndex];
+            target.classList.add('active');
+            
+            // Use a smoother scroll into view within the scrolling parent if possible
+            target.scrollIntoView({ behavior: 'auto', block: 'nearest' });
+            this.updateCounter(this.currentIndex + 1, this.results.length);
+        }
+
+        next() { this.jumpTo(this.currentIndex + 1); }
+        prev() { this.jumpTo(this.currentIndex -1); }
+
+        close() {
+            const searchBar = document.getElementById('run-search-' + this.runId);
+            if (searchBar) searchBar.classList.add('hidden');
+            if (this.markInstance) this.markInstance.unmark();
+            this.input.value = '';
+            this.updateCounter(0, 0);
+            this.currentIndex = -1;
+            this.results = [];
+            this.activePane = null;
+        }
+    }
+
+    const searchControllers = new Map();
+
+    function getSearchController(runId) {
+        if (!searchControllers.has(runId)) {
+            searchControllers.set(runId, new SearchController(runId));
+        }
+        return searchControllers.get(runId);
+    }
+
     class LogViewer {
         constructor(container, logPath, logSize, runId) {
             this.container = container;
@@ -2403,7 +2610,7 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
             
             // Calculate initial offset to show tail
             if (this.logSize > this.maxBytes) {
-                this.offset = this.logSize - this.maxBytes;
+                this.offset = this.logSize -this.maxBytes;
             } else {
                 this.offset = 0;
             }
@@ -2426,7 +2633,7 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
             // Use a threshold (e.g. 50px) instead of strictly 0 to handle faster scrolls or sub-pixel differences
             if (this.container.scrollTop < 50 && this.offset > 0) {
                  // Prepend previous chunk
-                 const newOffset = Math.max(0, this.offset - this.maxBytes);
+                 const newOffset = Math.max(0, this.offset -this.maxBytes);
                  console.log('[LogViewer] Scrolling up. Fetching from', newOffset);
                  this.fetchChunk(newOffset, true); // true = prepend
             }
@@ -2466,10 +2673,10 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
                  const oldHeight = this.container.scrollHeight;
                  this.container.prepend(div);
                  const newHeight = this.container.scrollHeight;
-                 this.container.scrollTop = newHeight - oldHeight;
+                 this.container.scrollTop = newHeight -oldHeight;
                  
                  // Update local offset tracker to the NEW lowest point
-                 this.offset = Math.max(0, this.offset - this.maxBytes);
+                 this.offset = Math.max(0, this.offset -this.maxBytes);
                  this.pendingPrepend = false;
              } else {
                  // Append (Initial load or scroll down if implemented)
