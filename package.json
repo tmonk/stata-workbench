@@ -13,7 +13,7 @@
   "bugs": {
     "url": "https://github.com/tmonk/stata-workbench/issues"
   },
-  "version": "0.9.0",
+  "version": "0.9.1",
   "engines": {
     "vscode": "^1.75.0"
   },
@@ -155,7 +155,7 @@
         },
         "stataMcp.defaultVariableLimit": {
           "type": "number",
-          "default": 0,
+          "default": 100,
           "description": "Default number of variables to select when opening the Data Browser (0 = all). Useful for huge datasets with thousands of variables."
         }
       }
