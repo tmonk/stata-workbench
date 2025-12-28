@@ -357,6 +357,25 @@ describe('McpClient', () => {
             enqueueStub.restore();
             vscodeMock.workspace.workspaceFolders = originalFolders;
         });
+
+        it('should respect explicitly provided cwd in options', async () => {
+            const callToolStub = client._callTool;
+            callToolStub.resetBehavior();
+            callToolStub.callsFake(async (_client, name, args) => ({ name, args }));
+
+            const enqueueStub = sinon.stub(client, '_enqueue').callsFake(async (label, rest, task, meta, normalize, collect) => {
+                const taskResult = await task({});
+                return { label, rest, meta, normalize, collect, taskResult };
+            });
+
+            const explicitCwd = '/explicit/cwd';
+            const result = await client.runFile('/tmp/script.do', { cwd: explicitCwd });
+
+            expect(result.meta.cwd).toEqual(explicitCwd);
+            expect(result.taskResult.args.cwd).toEqual(explicitCwd);
+
+            enqueueStub.restore();
+        });
     });
 
     describe('cwd propagation', () => {

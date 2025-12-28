@@ -649,36 +649,66 @@ async function runFile() {
         return;
     }
 
-    await withStataProgress(`Running ${path.basename(filePath)}`, async (token) => {
-        const commandText = `do "${path.basename(filePath)}"`;
-        const runId = TerminalPanel.startStreamingEntry(commandText, filePath, terminalRunCommand, variableListProvider, cancelRequest, downloadGraphAsPdf);
+    const isDirty = editor.document.isDirty;
+    const config = vscode.workspace.getConfiguration('stataMcp');
+    const behavior = config.get('runFileBehavior', 'runDirtyFile');
+    const originalDir = path.dirname(filePath);
+    let effectiveFilePath = filePath;
+    let tmpFile = null;
+
+    if (isDirty && behavior === 'runDirtyFile') {
         try {
-            const result = await mcpClient.runFile(filePath, {
-                cancellationToken: token,
-                normalizeResult: true,
-                includeGraphs: true,
-                onLog: (chunk) => {
-                    if (runId) TerminalPanel.appendStreamingLog(runId, chunk);
-                },
-                onProgress: (progress, total, message) => {
-                    if (runId) TerminalPanel.updateStreamingProgress(runId, progress, total, message);
-                }
-            });
-            if (runId) {
-                logRunToOutput(result, commandText);
-                TerminalPanel.finishStreamingEntry(runId, result);
-            } else {
-                await presentRunResult(commandText, result, filePath);
-            }
-            // Update summary after run
-            refreshDatasetSummary();
-        } catch (error) {
-            if (runId) {
-                TerminalPanel.failStreamingEntry(runId, error?.message || String(error));
-            }
-            throw error;
+            const tmpDir = os.tmpdir();
+            const fileName = `stata_tmp_${Date.now()}_${path.basename(filePath)}`;
+            tmpFile = path.join(tmpDir, fileName);
+            fs.writeFileSync(tmpFile, editor.document.getText(), 'utf8');
+            effectiveFilePath = tmpFile;
+        } catch (err) {
+            vscode.window.showWarningMessage(`Failed to create temporary file for unsaved changes: ${err.message}. Running version on disk instead.`);
         }
-    });
+    }
+
+    try {
+        await withStataProgress(`Running ${path.basename(filePath)}`, async (token) => {
+            const commandText = `do "${path.basename(filePath)}"`;
+            const runId = TerminalPanel.startStreamingEntry(commandText, filePath, terminalRunCommand, variableListProvider, cancelRequest, downloadGraphAsPdf);
+            try {
+                const result = await mcpClient.runFile(effectiveFilePath, {
+                    cancellationToken: token,
+                    normalizeResult: true,
+                    includeGraphs: true,
+                    cwd: originalDir,
+                    onLog: (chunk) => {
+                        if (runId) TerminalPanel.appendStreamingLog(runId, chunk);
+                    },
+                    onProgress: (progress, total, message) => {
+                        if (runId) TerminalPanel.updateStreamingProgress(runId, progress, total, message);
+                    }
+                });
+                if (runId) {
+                    logRunToOutput(result, commandText);
+                    TerminalPanel.finishStreamingEntry(runId, result);
+                } else {
+                    await presentRunResult(commandText, result, filePath);
+                }
+                // Update summary after run
+                refreshDatasetSummary();
+            } catch (error) {
+                if (runId) {
+                    TerminalPanel.failStreamingEntry(runId, error?.message || String(error));
+                }
+                throw error;
+            }
+        });
+    } finally {
+        if (tmpFile && fs.existsSync(tmpFile)) {
+            try {
+                fs.unlinkSync(tmpFile);
+            } catch (_err) {
+                // Ignore cleanup errors
+            }
+        }
+    }
 }
 
 async function testConnection() {

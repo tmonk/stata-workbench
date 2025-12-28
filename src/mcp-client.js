@@ -138,7 +138,8 @@ class StataMcpClient {
     async runFile(filePath, options = {}) {
         const { normalizeResult, includeGraphs, onLog, onProgress, cancellationToken: externalCancellationToken, ...rest } = options || {};
         // Resolve working directory (configurable, defaults to the .do file folder).
-        const cwd = this._resolveRunFileCwd(filePath);
+        // Allow caller to override CWD (important for running temp files while preserving original CWD).
+        const cwd = (rest && typeof rest.cwd === 'string') ? rest.cwd : this._resolveRunFileCwd(filePath);
         const config = vscode.workspace.getConfiguration('stataMcp');
         const maxOutputLines = Number.isFinite(config.get('maxOutputLines', 0)) && config.get('maxOutputLines', 0) > 0
             ? config.get('maxOutputLines', 0)
