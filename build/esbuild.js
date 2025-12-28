@@ -8,7 +8,8 @@ const entryFile = path.join(rootDir, 'src', 'extension.js');
 const outFile = path.join(rootDir, 'dist', 'extension.js');
 
 async function main() {
-  const ctx = await esbuild.context({
+  // Build Extension Host
+  const extensionCtx = await esbuild.context({
     entryPoints: [entryFile],
     bundle: true,
     format: 'cjs',
@@ -19,16 +20,33 @@ async function main() {
     outfile: outFile,
     external: ['vscode'],
     logLevel: 'warning',
-    plugins: [
-      /* add to the end of plugins array */
-      esbuildProblemMatcherPlugin
-    ]
+    plugins: [esbuildProblemMatcherPlugin]
   });
+
+  // Build Webview Scripts
+  const webviewEntry = path.join(rootDir, 'src', 'ui-shared', 'data-browser.js');
+  const webviewOut = path.join(rootDir, 'dist', 'ui-shared', 'data-browser.js');
+  const webviewCtx = await esbuild.context({
+    entryPoints: [webviewEntry],
+    bundle: true,
+    format: 'iife',
+    minify: production,
+    sourcemap: !production,
+    sourcesContent: false,
+    platform: 'browser',
+    outfile: webviewOut,
+    logLevel: 'warning',
+    plugins: [esbuildProblemMatcherPlugin]
+  });
+
   if (watch) {
-    await ctx.watch();
+    await extensionCtx.watch();
+    await webviewCtx.watch();
   } else {
-    await ctx.rebuild();
-    await ctx.dispose();
+    await extensionCtx.rebuild();
+    await webviewCtx.rebuild();
+    await extensionCtx.dispose();
+    await webviewCtx.dispose();
   }
 }
 

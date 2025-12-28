@@ -236,7 +236,8 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.24.3",
     "@vscode/codicons": "^0.0.44",
-    "@vscode/vsce": "^3.7.1"
+    "@vscode/vsce": "^3.7.1",
+    "apache-arrow": "^21.1.0"
   },
   "devDependencies": {
     "@types/jest": "^30.0.0",

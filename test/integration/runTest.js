@@ -28,6 +28,25 @@ async function main() {
         userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vscode-test-user-'));
         extDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vscode-test-exts-'));
 
+        // Ensure the test workspace has the local dev server config
+        const dotVscode = path.join(workspacePath, '.vscode');
+        if (!fs.existsSync(dotVscode)) fs.mkdirSync(dotVscode);
+        const mcpJson = path.join(dotVscode, 'mcp.json');
+        const config = {
+            servers: {
+                mcp_stata: {
+                    command: "uv",
+                    args: [
+                        "run",
+                        "--directory",
+                        "/Users/tom/Dropbox/projects/mcp-stata/",
+                        "mcp-stata"
+                    ]
+                }
+            }
+        };
+        fs.writeFileSync(mcpJson, JSON.stringify(config, null, 2));
+
         await runTests({
             extensionDevelopmentPath,
             extensionTestsPath,
