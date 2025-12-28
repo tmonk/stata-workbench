@@ -239,7 +239,9 @@
     "package": "npm run bundle && npx vsce package",
     "package:dist": "npm run bundle && node -e \"require('fs').mkdirSync('dist',{recursive:true});\" && npx vsce package --out dist/stata-workbench-$npm_package_version.vsix",
     "package:zip": "npm pack",
-    "publish:ovsx": "npm run bundle && npx ovsx publish -p $OVSX_TOKEN"
+    "publish:ovsx": "npm run bundle && npx ovsx publish -p $OVSX_TOKEN",
+    "release": "semantic-release",
+    "prepare": "husky"
   },
   "capabilities": {
     "untrustedWorkspaces": {
@@ -254,16 +256,28 @@
     "apache-arrow": "^21.1.0"
   },
   "devDependencies": {
+    "@commitlint/cli": "^20.2.0",
+    "@commitlint/config-conventional": "^20.2.0",
+    "@semantic-release/changelog": "^6.0.3",
+    "@semantic-release/commit-analyzer": "^13.0.1",
+    "@semantic-release/exec": "^7.1.0",
+    "@semantic-release/git": "^10.0.1",
+    "@semantic-release/github": "^12.0.2",
+    "@semantic-release/npm": "^13.1.3",
+    "@semantic-release/release-notes-generator": "^14.1.0",
     "@types/jest": "^30.0.0",
     "@vscode/test-electron": "^2.4.0",
     "chai": "^6.2.1",
     "esbuild": "^0.27.1",
+    "husky": "^9.1.7",
     "jest": "^30.2.0",
     "jest-environment-jsdom": "^30.2.0",
     "jsdom": "^24.0.0",
     "mocha": "^11.7.5",
     "ovsx": "^0.8.4",
     "proxyquire": "^2.1.3",
+    "semantic-release": "^25.0.2",
+    "semantic-release-vsce": "^6.0.20",
     "sinon": "^21.0.0"
   }
 }
