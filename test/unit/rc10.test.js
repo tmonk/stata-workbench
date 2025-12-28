@@ -1,3 +1,5 @@
+const vscode = require('vscode');
+jest.mock('vscode', () => require('../mocks/vscode'), { virtual: true });
 const { parseSMCL, determineSuccess } = require('../../src/terminal-panel');
 
 describe('parseSMCL RC 10 and Amber Refinement', () => {

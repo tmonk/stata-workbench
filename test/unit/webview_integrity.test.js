@@ -1,57 +1,53 @@
 
 const { describe, it, beforeEach, expect } = require('@jest/globals');
 
+// Use the centralized mock like other tests
+jest.mock('vscode', () => require('../mocks/vscode'), { virtual: true });
+
 describe('Webview Script Integrity', () => {
     let TerminalPanel;
     let htmlContent = '';
-    let mockWebview;
 
     beforeEach(() => {
         jest.resetModules();
+        const vscode = require('vscode');
 
-        const mockWebview = {
-            asWebviewUri: (u) => 'uri:' + (u?.fsPath || u),
-            cspSource: 'csp',
-            onDidReceiveMessage: jest.fn(),
-            html: ''
-        };
+        htmlContent = '';
 
-        const vscodeMock = {
-            Uri: {
-                joinPath: (u, ...f) => ({ fsPath: (u?.fsPath || u) + '/' + f.join('/') }),
-                file: (f) => ({ fsPath: f })
-            },
-            ViewColumn: { Beside: 1 },
-            window: {
-                createWebviewPanel: jest.fn(() => ({
-                    webview: new Proxy(mockWebview, {
-                        set: (target, prop, value) => {
-                            if (prop === 'html') {
-                                htmlContent = value;
-                            }
-                            target[prop] = value;
-                            return true;
-                        },
-                        get: (target, prop) => target[prop]
-                    }),
-                    onDidDispose: jest.fn(),
-                    reveal: jest.fn()
-                }))
-            },
-            workspace: {
-                getConfiguration: () => ({
-                    get: (key, def) => def
-                })
-            }
-        };
+        // Override the mock implementation to capture HTML content
+        vscode.window.createWebviewPanel.mockImplementation(() => {
+            const webviewBase = {
+                onDidReceiveMessage: jest.fn(),
+                html: '',
+                cspSource: 'mock-csp-source',
+                postMessage: jest.fn().mockResolvedValue(),
+                asWebviewUri: jest.fn().mockImplementation((uri) => uri?.fsPath || uri)
+            };
 
-        jest.doMock('vscode', () => vscodeMock, { virtual: true });
+            const webviewProxy = new Proxy(webviewBase, {
+                set: (target, prop, value) => {
+                    if (prop === 'html') {
+                        htmlContent = value;
+                    }
+                    target[prop] = value;
+                    return true;
+                },
+                get: (target, prop) => target[prop]
+            });
 
-        // Re-require TerminalPanel to pick up the mock
+            return {
+                webview: webviewProxy,
+                onDidDispose: jest.fn(),
+                reveal: jest.fn()
+            };
+        });
+
+        // Re-require TerminalPanel so it uses the fresh mock state
         const terminalPanelModule = require('../../src/terminal-panel');
         TerminalPanel = terminalPanelModule.TerminalPanel;
 
-        htmlContent = '';
+        // CRITICAL: Ensure static state is cleared
+        TerminalPanel.currentPanel = null;
     });
 
     it('should produce valid script content without literal newlines in strings', () => {
@@ -63,6 +59,8 @@ describe('Webview Script Integrity', () => {
             runCommand: async () => ({})
         });
 
+        // If this is failing with "", verify TerminalPanel.show() was actually called 
+        // and didn't return early due to currentPanel.
         expect(htmlContent).toBeTruthy();
 
         const strictPattern = /\.indexOf\('[\r\n]+', start\)/;

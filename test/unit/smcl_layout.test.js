@@ -2,6 +2,8 @@ const assert = require('assert');
 // We will mock the necessary parts or load the function if exported
 // Assuming we can load terminal-panel.js logic similar to other tests or create a standalone utility for testing if possible.
 // For now, let's rely on the structure used in panels.test.js which likely requires the module.
+const vscode = require('vscode');
+jest.mock('vscode', () => require('../mocks/vscode'), { virtual: true });
 const { smclToHtml } = require('../../src/terminal-panel.js');
 
 describe('SMCL Layout Principles', () => {
