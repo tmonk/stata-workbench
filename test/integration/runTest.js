@@ -32,6 +32,9 @@ async function main() {
         const dotVscode = path.join(workspacePath, '.vscode');
         if (!fs.existsSync(dotVscode)) fs.mkdirSync(dotVscode);
         const mcpJson = path.join(dotVscode, 'mcp.json');
+
+        const localRepo = process.env.MCP_STATA_LOCAL_REPO || path.resolve(__dirname, '../../../mcp-stata');
+
         const config = {
             servers: {
                 mcp_stata: {
@@ -39,7 +42,7 @@ async function main() {
                     args: [
                         "run",
                         "--directory",
-                        "/Users/tom/Dropbox/projects/mcp-stata/",
+                        localRepo,
                         "mcp-stata"
                     ]
                 }
@@ -52,16 +55,13 @@ async function main() {
             extensionTestsPath,
             launchArgs: ['--user-data-dir', userDataDir, '--extensions-dir', extDir, workspacePath]
         });
+
+        console.log('Test completed successfully. Dumping logs...');
+        dumpMcpLogs(userDataDir);
     } catch (err) {
         console.error('Failed to run integration tests', err);
         if (userDataDir) {
             dumpMcpLogs(userDataDir);
-        }
-        if (workspacePath && fs.existsSync(workspacePath)) {
-            try {
-                fs.rmSync(workspacePath, { recursive: true, force: true });
-            } catch (_err) {
-            }
         }
         process.exit(1);
     }

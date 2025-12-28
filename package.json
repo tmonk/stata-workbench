@@ -13,7 +13,7 @@
   "bugs": {
     "url": "https://github.com/tmonk/stata-workbench/issues"
   },
-  "version": "0.9.0",
+  "version": "0.9.1",
   "engines": {
     "vscode": "^1.75.0"
   },
@@ -152,6 +152,11 @@
           "type": "boolean",
           "default": false,
           "description": "Export graphs as base64-encoded data instead of file paths. Base64 is more token-intensive but works better for some workflows."
+        },
+        "stataMcp.defaultVariableLimit": {
+          "type": "number",
+          "default": 100,
+          "description": "Default number of variables to select when opening the Data Browser (0 = all). Useful for huge datasets with thousands of variables."
         }
       }
     },

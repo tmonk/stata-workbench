@@ -38,7 +38,7 @@ describe('extension unit tests', () => {
             TerminalPanel: { setExtensionUri: jest.fn(), addEntry: jest.fn(), show: jest.fn(), setLogProvider: jest.fn() }
         }));
         jest.doMock('../../src/data-browser-panel', () => ({
-            DataBrowserPanel: { createOrShow: jest.fn() }
+            DataBrowserPanel: { createOrShow: jest.fn(), setLogger: jest.fn() }
         }));
         jest.doMock('../../src/artifact-utils', () => ({
             openArtifact: jest.fn()

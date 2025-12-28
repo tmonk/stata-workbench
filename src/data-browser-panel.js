@@ -6,6 +6,11 @@ const { client: mcpClient } = require('./mcp-client');
 class DataBrowserPanel {
     static currentPanel = null;
     static extensionUri = null;
+    static _log = (msg) => console.log(msg);
+
+    static setLogger(logger) {
+        DataBrowserPanel._log = logger;
+    }
 
     /**
      * @param {vscode.Uri} extensionUri
@@ -15,11 +20,9 @@ class DataBrowserPanel {
 
         // If we already have a panel, show it.
         if (DataBrowserPanel.currentPanel) {
-            DataBrowserPanel.currentPanel.reveal(column);
+            DataBrowserPanel.currentPanel._panel.reveal(column);
             return;
         }
-
-        DataBrowserPanel.extensionUri = extensionUri;
 
         const panel = vscode.window.createWebviewPanel(
             'stataDataBrowser',
@@ -35,44 +38,62 @@ class DataBrowserPanel {
             }
         );
 
-        DataBrowserPanel.currentPanel = panel;
+        DataBrowserPanel.currentPanel = new DataBrowserPanel(panel, extensionUri);
+    }
 
-        panel.onDidDispose(() => {
-            DataBrowserPanel.currentPanel = null;
-        });
+    constructor(panel, extensionUri) {
+        this._panel = panel;
+        this._extensionUri = extensionUri;
+        this._disposables = [];
+        this._credentials = null;
+        this._isWebviewReady = false;
 
-        panel.webview.html = DataBrowserPanel._getHtmlForWebview(panel.webview, extensionUri);
-
-        panel.webview.onDidReceiveMessage(
+        // Listen for messages from the webview FIRST
+        this._panel.webview.onDidReceiveMessage(
             async message => {
                 switch (message.type) {
+                    case 'ready':
+                        DataBrowserPanel._log('[DataBrowserPanel] Webview reported ready.');
+                        this._isWebviewReady = true;
+                        if (this._credentials) {
+                            DataBrowserPanel._log('[DataBrowserPanel] Credentials available, sending init.');
+                            this._panel.webview.postMessage({
+                                type: 'init',
+                                ...this._credentials,
+                                config: this._config
+                            });
+                        }
+                        break;
                     case 'log':
-                        console.log(`[DataBrowser Webview] ${message.message}`);
+                        DataBrowserPanel._log(`[DataBrowser Webview] ${message.message}`);
                         break;
                     case 'error':
-                        console.error(`[DataBrowser Webview Error] ${message.message}`);
+                        DataBrowserPanel._log(`[DataBrowser Webview Error] ${message.message}`);
                         break;
                     case 'apiCall':
                         try {
                             const isArrow = message.url.endsWith('/arrow');
                             const result = await DataBrowserPanel._performRequest(message.url, message.options, isArrow);
 
+                            // Convert Buffer to Uint8Array for structured clone to webview
+                            const dataToPost = (result instanceof Buffer) ? new Uint8Array(result) : result;
+
                             // Check if panel is still alive before posting
-                            if (DataBrowserPanel.currentPanel) {
-                                panel.webview.postMessage({
+                            if (DataBrowserPanel.currentPanel === this) {
+                                this._panel.webview.postMessage({
                                     type: 'apiResponse',
                                     reqId: message.reqId,
                                     success: true,
-                                    data: result,
+                                    data: dataToPost,
                                     isBinary: isArrow
                                 });
                             }
                         } catch (err) {
-                            console.error('[DataBrowser Proxy Error]', err);
+                            DataBrowserPanel._log(`[DataBrowser Proxy Error] ${err.message}`);
 
                             // Check if panel is still alive before posting
-                            if (DataBrowserPanel.currentPanel) {
-                                panel.webview.postMessage({
+                            if (DataBrowserPanel.currentPanel === this) {
+                                this._panel.webview.postMessage({
                                     type: 'apiResponse',
                                     reqId: message.reqId,
                                     success: false,
@@ -84,97 +105,105 @@ class DataBrowserPanel {
                 }
             },
             null,
-            []
+            this._disposables
         );
 
-        // Fetch connection details and initialize
-        console.log('[DataBrowserPanel] Fetching UI channel details...');
+        // Set the HTML SECOND
+        this._update();
+
+        this._panel.onDidDispose(() => this.dispose(), null, this._disposables);
+
+        // Fetch connection details
+        this._fetchCredentials();
+    }
+
+    async _fetchCredentials() {
+        DataBrowserPanel._log('[DataBrowserPanel] Fetching UI channel details...');
         try {
             const channel = await mcpClient.getUiChannel();
-            console.log('[DataBrowserPanel] Received channel:', JSON.stringify(channel, null, 2));
-
-            // Check if panel is still alive before posting
             if (channel && channel.baseUrl && channel.token) {
-                if (DataBrowserPanel.currentPanel) {
-                    console.log('[DataBrowserPanel] Sending init message to webview');
-                    panel.webview.postMessage({
+                this._credentials = {
+                    baseUrl: channel.baseUrl,
+                    token: channel.token
+                };
+
+                const config = vscode.workspace.getConfiguration('stataMcp');
+                this._config = {
+                    variableLimit: config.get('defaultVariableLimit', 0)
+                };
+
+                DataBrowserPanel._log('[DataBrowserPanel] Credentials fetched.');
+
+                if (this._isWebviewReady) {
+                    DataBrowserPanel._log('[DataBrowserPanel] Webview already ready, sending init.');
+                    this._panel.webview.postMessage({
                         type: 'init',
-                        baseUrl: channel.baseUrl,
-                        token: channel.token
+                        ...this._credentials,
+                        config: this._config
                     });
                 } else {
-                    console.log('[DataBrowserPanel] Panel was disposed before init could be sent');
+                    DataBrowserPanel._log('[DataBrowserPanel] Waiting for webview ready signal...');
                 }
-            } else {
-                console.error('[DataBrowserPanel] Invalid channel details received');
-                vscode.window.showErrorMessage('Failed to retrieve UI channel details from Stata.');
             }
         } catch (err) {
-            console.error('[DataBrowserPanel] Error connecting:', err);
-            vscode.window.showErrorMessage(`Error connecting to Stata UI channel: ${err.message}`);
+            DataBrowserPanel._log(`[DataBrowserPanel] Error fetching channel: ${err.message}`);
         }
     }
 
-    static refresh() {
-        // Check if panel exists before trying to post message
-        if (DataBrowserPanel.currentPanel) {
-            try {
-                DataBrowserPanel.currentPanel.webview.postMessage({ type: 'refresh' });
-            } catch (err) {
-                console.warn('[DataBrowserPanel] Could not refresh - panel may be disposed:', err.message);
+    dispose() {
+        DataBrowserPanel.currentPanel = null;
+
+        // Clean up our resources
+        this._panel.dispose();
+
+        while (this._disposables.length) {
+            const x = this._disposables.pop();
+            if (x) {
+                x.dispose();
             }
         }
+    }
+
+    _update() {
+        this._panel.webview.html = this._getHtmlForWebview(this._panel.webview, this._extensionUri);
     }
 
     static _performRequest(urlStr, options, expectBinary = false) {
         return new Promise((resolve, reject) => {
             try {
                 const url = new URL(urlStr);
-                const headers = options.headers || {};
-
-                let body = options.body;
-
-                // Robustness: ensure body is a string if present.
-                if (body && typeof body !== 'string' && !Buffer.isBuffer(body)) {
-                    try {
-                        body = JSON.stringify(body);
-                        if (!headers['Content-Type']) {
-                            headers['Content-Type'] = 'application/json';
-                        }
-                    } catch (e) {
-                        // ignore
-                    }
-                }
+                const body = options.body;
+                const headers = { ...options.headers };
 
                 if (body) {
+                    DataBrowserPanel._log(`[DataBrowser Proxy] Sending ${options.method} request to ${url.toString()} with body length ${Buffer.byteLength(body)}`);
                     headers['Content-Length'] = Buffer.byteLength(body);
                     if (!headers['Content-Type']) {
                         headers['Content-Type'] = 'application/json';
                     }
+                } else {
+                    DataBrowserPanel._log(`[DataBrowser Proxy] Sending ${options.method} request to ${url.toString()}`);
                 }
 
                 const opts = {
-                    method: options.method || 'GET',
-                    headers: headers,
-                    hostname: url.hostname,
-                    port: url.port,
-                    path: url.pathname + url.search
+                    method: options.method,
+                    headers: headers
                 };
 
-                const req = http.request(opts, (res) => {
+                const req = http.request(url, opts, (res) => {
                     const chunks = [];
                     res.on('data', (chunk) => chunks.push(chunk));
                     res.on('end', () => {
                         const buffer = Buffer.concat(chunks);
+                        DataBrowserPanel._log(`[DataBrowser Proxy] Response from ${url.pathname}: Status ${res.statusCode}, Body length: ${buffer.byteLength}`);
                         if (res.statusCode >= 200 && res.statusCode < 300) {
                             if (expectBinary) {
                                 resolve(buffer);
                             } else {
                                 try {
-                                    const json = JSON.parse(buffer.toString());
-                                    resolve(json);
+                                    resolve(JSON.parse(buffer.toString()));
                                 } catch (e) {
-                                    reject(new Error('Invalid JSON response'));
+                                    reject(new Error(`Failed to parse JSON: ${e.message}`));
                                 }
                             }
                         } else {
@@ -195,7 +224,7 @@ class DataBrowserPanel {
         });
     }
 
-    static _getHtmlForWebview(webview, extensionUri) {
+    _getHtmlForWebview(webview, extensionUri) {
         const scriptUri = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'dist', 'ui-shared', 'data-browser.js'));
         const styleUri = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'src', 'ui-shared', 'data-browser.css'));
         const designUri = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'src', 'ui-shared', 'design.css'));
@@ -205,7 +234,7 @@ class DataBrowserPanel {
         const csp = `
             default-src 'none';
             style-src ${webview.cspSource} 'unsafe-inline' https://unpkg.com;
-            script-src 'nonce-${nonce}';
+            script-src ${webview.cspSource} 'nonce-${nonce}';
             connect-src http://127.0.0.1:* ws://127.0.0.1:*;
             img-src ${webview.cspSource} data:;
             font-src ${webview.cspSource} https://unpkg.com;
@@ -262,10 +291,21 @@ class DataBrowserPanel {
                                 <button id="btn-refresh" class="btn btn-sm btn-ghost" title="Refresh Data">
                                     <i class="codicon codicon-refresh"></i>
                                 </button>
-                                <div class="var-selector-wrapper">
-                                    <select id="variable-selector" class="btn btn-sm btn-ghost">
-                                        <option value="">Variables...</option>
-                                    </select>
+                                <div class="var-dropdown-container">
+                                    <button id="btn-variables">
+                                        <i class="codicon codicon-list-selection"></i>
+                                        <span>Variables</span>
+                                    </button>
+                                    <div id="var-dropdown-menu" class="var-dropdown-menu">
+                                        <div class="dropdown-header">
+                                            <input type="text" id="var-search-input" placeholder="Search...">
+                                            <div class="dropdown-actions">
+                                                <button id="btn-select-all" class="text-btn">Select All</button>
+                                                <button id="btn-select-none" class="text-btn">Select None</button>
+                                            </div>
+                                        </div>
+                                        <div id="var-list" class="dropdown-list"></div>
+                                    </div>
                                 </div>
                             </div>
                         </div>

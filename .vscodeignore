@@ -30,5 +30,6 @@ virtualenv/**
 dist/**
 !dist/extension.js
 !dist/extension.js.map
+!dist/ui-shared/**
 img/*.psd
 img/screenshot*
