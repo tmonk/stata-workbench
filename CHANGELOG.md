@@ -1,3 +1,10 @@
+# [0.12.0](https://github.com/tmonk/stata-workbench/compare/v0.11.0...v0.12.0) (2026-01-02)
+
+
+### Features
+
+* implement centralized log filtering and enhance log handling in MCP client and terminal panel ([3d4bb35](https://github.com/tmonk/stata-workbench/commit/3d4bb35a63946d2a3dda2e0e9cbe72c6f46400c6))
+
 # [0.11.0](https://github.com/tmonk/stata-workbench/compare/v0.10.0...v0.11.0) (2025-12-28)
 
 
