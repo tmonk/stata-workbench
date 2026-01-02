@@ -2,6 +2,7 @@ const { openArtifact, revealArtifact, copyToClipboard, resolveArtifactUri } = re
 const path = require('path');
 const vscode = require('vscode');
 const fs = require('fs');
+const { filterMcpLogs } = require('./log-utils');
 
 /**
  * Parse SMCL text and extract formatted error information
@@ -153,7 +154,19 @@ function smclToHtml(text) {
   if (!text) return '';
 
   // Handle case where . prompt is present but no {com} tag (fallback)
-  let lines = text.split(/\r?\n/);
+  // 0. Filter out mcp-stata internal lines from the stream/log using centralized utility
+  const filteredText = filterMcpLogs(text);
+
+  // Normalize newlines early to avoid split discrepancies
+  let normalized = filteredText.replace(/\r\n/g, '\n');
+
+  // Refinement: Collapse prompt-only lines.
+  // Stata often streams the prompt '. ' separately with a newline before the command or response.
+  // This normalization makes the streamed output match the final collapsed log and avoids extra line breaks.
+  normalized = normalized.replace(/^(\. ?)\n/gm, '$1');
+
+  let lines = normalized.split('\n');
+
   lines = lines.map(line => {
     // Only apply fallback if line looks like a prompt and doesn't already have HTML/SMCL tags
     if (line.trim().startsWith('.') && !line.includes('<span') && !line.includes('{com}')) {
@@ -2104,21 +2117,24 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
 
         // Populate Log tab or Main Output based on success/logPath availability
         const useBufferedLog = !!msg.logPath;
+        const LOG_VIEWER_THRESHOLD = 50_000;
         
         if (success && useBufferedLog && run.stdoutEl) {
-            // SUCCESS + LOG EXISTS: 
-            // Replace the main output content with the buffered log viewer.
-            // This gives "infinite scroll" behavior for the main result.
-            // Note: do NOT clear innerHTML here; let LogViewer handle seamless transition
-            // by inspecting existing content.
-            run.viewer = new LogViewer(run.stdoutEl, msg.logPath, msg.logSize, runId);
+            // SUCCESS + LOG EXISTS:
+            // Use LogViewer only if the file is large. Otherwise, use the backfilled string
+            // for a zero-flicker experience.
+            if (msg.logSize > LOG_VIEWER_THRESHOLD) {
+                run.viewer = new LogViewer(run.stdoutEl, msg.logPath, msg.logSize, runId);
+            } else {
+                const finalStdout = String(msg.stdout || '');
+                run.stdoutEl.innerHTML = finalStdout;
+            }
             run.stdoutEl.style.display = 'block';
         } else if (success) {
              // SUCCESS + NO LOG: 
              // Keep the streamed content (backfilled if needed)
              const finalStdout = String(msg.stdout || '');
              if (run.stdoutEl && finalStdout) {
-                 // ... existing backfill logic ...
                  const current = run.stdoutEl.innerHTML || '';
                  const MAX_STDOUT_DISPLAY = 20_000;
                  const normalizedFinal = safeSliceTail(finalStdout, MAX_STDOUT_DISPLAY);
@@ -2131,21 +2147,13 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
         
         if (run.logEl) {
              if (useBufferedLog) {
-                 // Always populate Log tab with buffered viewer if available
-                 // (Even if success, the Log tab exists, though maybe hidden. 
-                 // If we decided to hide tabs on success, this viewer is just ready if toggled).
-                 // Wait, if we put viewer in stdoutEl on success, do we also put it in logEl?
-                 // No, that would duplicate the viewer and fetches. 
-                 // If success, we hide tabs. Users see stdoutEl.
-                 // If failure, we show tabs. Users see stdoutEl (error) and logEl (full log).
-                 
-                 // So:
+                 // Always use LogViewer for the "Log" tab if a log exists, 
+                 // as it's the secondary view and flicking is less critical there than main pane.
                  if (!success) {
-            run.logEl.innerHTML = '';
-            run.viewer = new LogViewer(run.logEl, msg.logPath, msg.logSize, runId);
-        } else {
-                     // On success, we used stdoutEl for the viewer. 
-                     // We can leave logEl empty or put a note.
+                    run.logEl.innerHTML = '';
+                    run.viewer = new LogViewer(run.logEl, msg.logPath, msg.logSize, runId);
+                } else {
+                     // On success, we prioritize the Result pane.
                      run.logEl.innerHTML = '<div class="text-muted">Log viewed in Result pane</div>';
                  }
              } else {
@@ -2658,6 +2666,8 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
              const loader = this.container.querySelector('.log-loading');
              if (loader) loader.remove();
              
+             // When the first chunk arrives, we clear the container to replace the streamed/partial context.
+             // We do this JUST before adding the new content to minimize the "blank" window.
              if (this.isFirstLoad) {
                  this.container.innerHTML = '';
                  this.isFirstLoad = false;
@@ -2681,6 +2691,7 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
              } else {
                  // Append (Initial load or scroll down if implemented)
                  this.container.appendChild(div);
+                 scheduleHighlight();
                  // If initial tail load, autoscroll to bottom?
                  // Usually yes for terminal output.
                  // Only if we haven't scrolled manually? 

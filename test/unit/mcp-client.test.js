@@ -481,7 +481,7 @@ describe('McpClient', () => {
 
         it('_tailLogLoop should forward read_log data to onLog until cancelled', async () => {
             client._delay = sinon.stub().resolves();
-            client._readLogSlice = sinon.stub().resolves({ path: '/tmp/x.log', offset: 0, next_offset: 2, data: 'hi' });
+            client._readLogSlice = sinon.stub().resolves({ path: '/tmp/x.log', offset: 0, next_offset: 3, data: 'hi\n' });
 
             const run = {
                 logPath: '/tmp/x.log',
@@ -498,8 +498,8 @@ describe('McpClient', () => {
             await client._tailLogLoop({}, run);
 
             expect(run.onLog.calledOnce).toBe(true);
-            expect(run._logBuffer).toEqual('hi');
-            expect(run.logOffset).toEqual(2);
+            expect(run._logBuffer).toEqual('hi\n');
+            expect(run.logOffset).toEqual(3);
         });
 
         it('runSelection should drain read_log when log_path is only present in tool response', async () => {
@@ -530,7 +530,7 @@ describe('McpClient', () => {
                 if (name === 'read_log') {
                     // Return one chunk then empty.
                     const nextOffset = (args.offset || 0) === 0 ? 3 : 3;
-                    const data = (args.offset || 0) === 0 ? 'abc' : '';
+                    const data = (args.offset || 0) === 0 ? 'abc\n' : '';
                     return {
                         content: [{
                             type: 'text',
@@ -555,7 +555,7 @@ describe('McpClient', () => {
             expect(result.success).toBe(true);
             expect(result.rc).toEqual(0);
             expect(result.logPath).toEqual('/tmp/mcp_stata_test.log');
-            expect(result.stdout).toEqual('abc');
+            expect(result.stdout).toEqual('abc\n');
         });
     });
 

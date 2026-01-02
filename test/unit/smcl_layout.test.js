@@ -93,4 +93,12 @@ describe('SMCL Layout Principles', () => {
         // Optional: verify alignment if we implement it. 
         // "     hello" (5 spaces)
     });
+
+    it('should normalize \r\n to \n early', () => {
+        const input = 'line1\r\nline2';
+        const html = smclToHtml(input);
+        // Should not contain \r
+        assert(!html.includes('\r'));
+        assert(html.includes('line1\nline2'));
+    });
 });

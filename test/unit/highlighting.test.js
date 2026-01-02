@@ -25,7 +25,12 @@ describe('Syntax Highlighting Logic (main.js)', () => {
         window.hljs = {
             highlight: jest.fn((code, options) => {
                 return { value: 'HIGHLIGHTED_' + code };
-            })
+            }),
+            getLanguage: jest.fn().mockReturnValue(null),
+            registerLanguage: jest.fn(),
+            HASH_COMMENT_MODE: {},
+            C_BLOCK_COMMENT_MODE: {},
+            BACKSLASH_ESCAPE: {}
         };
 
         // Load main.js logic

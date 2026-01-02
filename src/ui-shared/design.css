@@ -483,29 +483,30 @@ textarea#command-input:focus {
   background: rgba(127, 29, 29, 0.1);
 }
 
-/* SMCL Types */
+.prompt {
+  color: #6ee7b7;
+  /* Emerald/Teal */
+  font-weight: 600;
+  display: inline-block;
+  min-width: 0.8em;
+}
+
+/* SMCL Types Fallbacks */
 .smcl-res {
   color: #5eb7ff;
 }
 
-/* Result - Blue/Cyan */
 .smcl-txt {
   color: var(--text-code);
 }
 
-/* Text - Default */
 .smcl-err {
   color: #f87171;
 }
 
-/* Error - Red */
 .smcl-com {
   color: #6ee7b7;
 }
-
-/* Command - Emerald */
-
-
 
 /* SMCL Formatting */
 .smcl-bf {
@@ -894,10 +895,14 @@ textarea#command-input:focus {
 }
 
 .scrollable-log {
-  max-height: 600px;
   overflow-y: auto;
   border-bottom: 1px solid var(--border-subtle);
 }
+
+.log-chunk {
+  display: contents;
+}
+
 /* Search Bar UI */
 .output-search-bar {
   display: flex;
@@ -914,8 +919,15 @@ textarea#command-input:focus {
 }
 
 @keyframes slideDownSearch {
-  from { opacity: 0; transform: translateY(-5px); }
-  to { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(-5px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .search-input-wrapper {

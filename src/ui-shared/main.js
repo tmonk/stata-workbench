@@ -49,26 +49,60 @@ window.stataUI = {
     // StataHighlighter removed in favor of highlight.js
 
     processSyntaxHighlighting: function (root = document) {
-        if (!window.hljs) return;
+        if (!window.hljs) {
+            console.error('[Terminal] Highlight.js not found');
+            return;
+        }
+
+        // Ensure Stata language is registered
+        if (!window.hljs.getLanguage('stata')) {
+            console.log('[Terminal] Registering basic Stata language support');
+            window.hljs.registerLanguage('stata', function (hljs) {
+                return {
+                    name: 'stata',
+                    aliases: ['do', 'ado'],
+                    keywords: {
+                        keyword: 'use sysuse clear save append merge collapse by sort g gen generate replace ' +
+                            'reg regress su summarize tab tabulate list count drop keep if in ' +
+                            'cap capture qui quietly noi noisily ' +
+                            'loc local glob global tempvar tempname tempfile ' +
+                            'foreach forvalues while if else continue break'
+                    },
+                    contains: [
+                        hljs.HASH_COMMENT_MODE,
+                        hljs.C_BLOCK_COMMENT_MODE,
+                        { className: 'comment', begin: '^\\*.*$', end: '$' },
+                        { className: 'string', begin: '"', end: '"', illegal: '\\n' },
+                        { className: 'string', begin: '`"', end: '"\'', contains: [hljs.BACKSLASH_ESCAPE] },
+                        { className: 'variable', begin: '`', end: '\'' },
+                        { className: 'variable', begin: '\\$', end: '[a-zA-Z_0-9]*' }
+                    ]
+                };
+            });
+        }
 
         const elements = root.querySelectorAll('.syntax-highlight:not(.highlighted)');
+        if (elements.length > 0) {
+            console.log('[Terminal] Highlighting ' + elements.length + ' elements');
+        }
+
         elements.forEach(el => {
             try {
                 let raw = el.textContent;
                 let prefix = '';
 
-                // Handling for standard Stata prompt ". "
+                // Handling for standard Stata prompt "." or ". "
                 if (raw.startsWith('. ')) {
                     prefix = '. ';
                     raw = raw.substring(2);
+                } else if (raw === '.' || raw.startsWith('.')) {
+                    prefix = '.';
+                    raw = raw.substring(1);
                 }
 
                 // FIX: If element contains HTML structure (like smcl-hline), DO NOT highlight
-                // This preserves horizontal lines and other rich content that shouldn't be parsed as code
                 if (el.children.length > 0) {
                     el.classList.add('highlighted');
-                    // We might want to bold the prompt if it exists, but for now just leave it alone
-                    // to avoid breaking the complex structure
                     return;
                 }
 
@@ -77,7 +111,6 @@ window.stataUI = {
                     const escapedPrefix = window.stataUI.escapeHtml(prefix);
                     el.innerHTML = '<span class="prompt">' + escapedPrefix + '</span>';
                     el.classList.add('highlighted');
-                    // Do NOT add 'hljs' class to avoid background/color changes for non-code
                     return;
                 }
 

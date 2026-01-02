@@ -4,6 +4,7 @@ const fs = require('fs');
 const os = require('os');
 const vscode = require('vscode');
 const pkg = require('../package.json');
+const { filterMcpLogs } = require('./log-utils');
 const MCP_PACKAGE_NAME = 'mcp-stata';
 const MCP_SERVER_ID = 'mcp_stata';
 const MCP_PACKAGE_SPEC = process.env.MCP_STATA_PACKAGE_SPEC || `${MCP_PACKAGE_NAME}@latest`;
@@ -114,25 +115,7 @@ class StataMcpClient {
     }
 
     _filterLogChunk(text) {
-        if (!text) return '';
-
-        let lines = text.split('\n');
-        let filteredLines = [];
-
-        for (const line of lines) {
-            // Filter out internal log closing command
-            if (/capture\s+log\s+close\s+_mcp_smcl_/i.test(line)) continue;
-
-            // Filter out log header metadata (tolerant of SMCL tags like {txt}, {res})
-            if (/log\s+type:\s+.*smcl/i.test(line)) continue;
-            if (/opened\s+on:\s+/i.test(line)) continue;
-            if (/log:\s+.*\.smcl/i.test(line)) continue;
-            if (/name:\s+.*_mcp_smcl_/i.test(line)) continue;
-
-            filteredLines.push(line);
-        }
-
-        return filteredLines.join('\n');
+        return filterMcpLogs(text);
     }
 
     async runFile(filePath, options = {}) {
@@ -509,11 +492,43 @@ class StataMcpClient {
                         this._ensureLogTail(client, run, String(parsed.path)).catch(() => { });
                         return;
                     }
-                    const filtered = this._filterLogChunk(text);
-                    if (!filtered) return;
-                    run._appendLog?.(filtered);
-                    if (typeof run.onLog === 'function') {
-                        run.onLog(filtered);
+
+                    // If we are already tailing a log file, suppress notifications for the same output
+                    // to prevent duplicate streaming in the terminal UI.
+                    if (run.logPath) return;
+
+                    // LINE BUFFERING: 
+                    // To ensure syntax highlighting and SMCL parsing are consistent, we must
+                    // only process full lines. Chunks cutting through lines lead to "leaked" 
+                    // unhighlighted text or broken tags in the webview.
+                    run._lineBuffer = (run._lineBuffer || '') + text;
+                    const lines = run._lineBuffer.split(/\r?\n/);
+
+                    // The last element is either an empty string (if chunk ended in \n)
+                    // or a partial line (if it didn't). We keep it in the buffer.
+                    run._lineBuffer = lines.pop();
+
+                    // SPECIAL: If the last complete line is just a prompt, move it back into buffer
+                    // to allow it to be collapsed with the next chunk in smclToHtml
+                    if (lines.length > 0) {
+                        const lastLine = lines[lines.length - 1];
+                        if (lastLine.trim() === '.') {
+                            run._lineBuffer = lines.pop() + '\n' + (run._lineBuffer || '');
+                        }
+                    }
+
+                    if (lines.length > 0) {
+                        // Join back the completed lines with newlines
+                        const completedText = lines.join('\n') + '\n';
+                        const filtered = this._filterLogChunk(completedText);
+                        if (!filtered) return;
+                        run._appendLog?.(filtered);
+                        if (typeof run.onLog === 'function') {
+                            try {
+                                run.onLog(filtered);
+                            } catch (_err) {
+                            }
+                        }
                     }
                 });
             }
@@ -633,6 +648,7 @@ class StataMcpClient {
             run._tailCancelled = false;
             run._tailPromise = null;
             run._logBuffer = '';
+            run._lineBuffer = '';
             run._appendLog = (text) => {
                 const chunk = String(text ?? '');
                 if (!chunk) return;
@@ -676,9 +692,24 @@ class StataMcpClient {
             }
             const data = String(slice.data ?? '');
             if (data) {
-                const filtered = this._filterLogChunk(data);
-                if (filtered) {
-                    run._appendLog?.(filtered);
+                // LINE BUFFERING: Apply same logic here
+                run._lineBuffer = (run._lineBuffer || '') + data;
+                const lines = run._lineBuffer.split(/\r?\n/);
+                run._lineBuffer = lines.pop();
+
+                if (lines.length > 0) {
+                    const lastLine = lines[lines.length - 1];
+                    if (lastLine.trim() === '.') {
+                        run._lineBuffer = lines.pop() + '\n' + (run._lineBuffer || '');
+                    }
+                }
+
+                if (lines.length > 0) {
+                    const completedText = lines.join('\n') + '\n';
+                    const filtered = this._filterLogChunk(completedText);
+                    if (filtered) {
+                        run._appendLog?.(filtered);
+                    }
                 }
                 emptyReads = 0;
             } else {
@@ -686,6 +717,18 @@ class StataMcpClient {
                 if (emptyReads >= 10) break;
                 await this._delay(50);
             }
+        }
+
+        // FINAL FLUSH: If any partial line remains in buffer, flush it now
+        if (run._lineBuffer) {
+            const filtered = this._filterLogChunk(run._lineBuffer);
+            if (filtered) {
+                run._appendLog?.(filtered);
+                if (typeof run.onLog === 'function') {
+                    run.onLog(filtered);
+                }
+            }
+            run._lineBuffer = '';
         }
     }
 
@@ -713,18 +756,40 @@ class StataMcpClient {
             }
             const data = String(slice.data ?? '');
             if (data) {
-                const filtered = this._filterLogChunk(data);
-                if (filtered) {
-                    run._appendLog?.(filtered);
-                    if (typeof run.onLog === 'function') {
-                        try {
-                            run.onLog(filtered);
-                        } catch (_err) {
+                // LINE BUFFERING: Apply same logic to tailing
+                run._lineBuffer = (run._lineBuffer || '') + data;
+                const lines = run._lineBuffer.split(/\r?\n/);
+                run._lineBuffer = lines.pop();
+
+                if (lines.length > 0) {
+                    const lastLine = lines[lines.length - 1];
+                    if (lastLine.trim() === '.') {
+                        run._lineBuffer = lines.pop() + '\n' + (run._lineBuffer || '');
+                    }
+                }
+
+                if (lines.length > 0) {
+                    const completedText = lines.join('\n') + '\n';
+                    const filtered = this._filterLogChunk(completedText);
+                    if (filtered) {
+                        run._appendLog?.(filtered);
+                        if (typeof run.onLog === 'function') {
+                            try {
+                                run.onLog(filtered);
+                            } catch (_err) {
+                            }
                         }
+                    } else {
+                        // All lines were filtered out
+                        await this._delay(200);
                     }
                 } else {
-                    await this._delay(200);
+                    // No full lines yet, need to wait for more data
+                    await this._delay(100);
                 }
+            } else {
+                // No data at all, wait longer
+                await this._delay(200);
             }
         }
     }

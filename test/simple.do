@@ -1,0 +1,1 @@
+sysuse auto
