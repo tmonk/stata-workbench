@@ -725,4 +725,69 @@ describe('McpClient', () => {
             expect(result.graphs[0].label).toEqual('g_wrapped');
         });
     });
+
+    describe('_formatRecentStderr', () => {
+        it('should prioritize critical error lines', () => {
+            const client = new McpClient();
+            client._recentStderr = [
+                '[mcp_stata] INFO: starting',
+                '[mcp_stata] FATAL: STATA INITIALIZATION FAILED',
+                'Error: RuntimeError("failed to initialize Stata")',
+                '[mcp_stata] DEBUG: cleanup'
+            ];
+
+            const formatted = client._formatRecentStderr();
+            expect(formatted).toContain('FATAL: STATA INITIALIZATION FAILED');
+            expect(formatted).toContain('RuntimeError');
+            expect(formatted).not.toContain('starting');
+            expect(formatted).not.toContain('cleanup');
+        });
+
+        it('should fall back to last 5 lines if no critical lines found', () => {
+            const client = new McpClient();
+            client._recentStderr = ['L1', 'L2', 'L3', 'L4', 'L5', 'L6'];
+
+            const formatted = client._formatRecentStderr();
+            expect(formatted).toContain('L2');
+            expect(formatted).toContain('L6');
+            expect(formatted).not.toContain('L1');
+        });
+
+        it('should clear buffer on createClient', async () => {
+            const client = new McpClient();
+            client._recentStderr = ['OLD ERROR'];
+
+            // We need to bypass the bridge check and SDK check to let it reach the stderr init
+            // but the simplest is just to test that the line is there in the source.
+            // Or we call it and let it fail, then check if it's cleared.
+            try { await client._createClient(); } catch (e) { /* expected to fail in test env */ }
+
+            expect(client._recentStderr).not.toContain('OLD ERROR');
+            expect(client._recentStderr.length).toBe(0);
+        });
+
+        it('should clear buffer when various success signals are seen', () => {
+            const client = new McpClient();
+
+            const scenarios = [
+                { msg: '[mcp_stata] INFO: StataClient initialized successfully', clearExpected: true },
+                { msg: '[mcp_stata] INFO: Auto-discovered Stata at /path', clearExpected: true },
+                { msg: '[mcp_stata] INFO: Discovery found Stata at: /path', clearExpected: true },
+                { msg: '[mcp_stata] Pre-flight succeeded for /path', clearExpected: true },
+                { msg: '[mcp_stata] INFO: starting up', clearExpected: false }
+            ];
+
+            for (const s of scenarios) {
+                client._recentStderr = ['OLD ERROR'];
+                client._handleStderrData(s.msg);
+                if (s.clearExpected) {
+                    expect(client._recentStderr).not.toContain('OLD ERROR');
+                    expect(client._recentStderr[0]).toBe(s.msg);
+                } else {
+                    expect(client._recentStderr).toContain('OLD ERROR');
+                    expect(client._recentStderr).toContain(s.msg);
+                }
+            }
+        });
+    });
 });

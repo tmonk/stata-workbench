@@ -156,7 +156,17 @@ function getMcpPackageVersion() {
             timeout: 5000
         });
         const pyOut = (pyResult?.stdout || '').toString().trim();
-        if (pyOut) return pyOut;
+        if (pyOut) {
+            // Filter out any potential log pollution if the backend printed anything to stdout
+            const lines = pyOut.split(/\r?\n/).map(l => l.trim()).filter(l => {
+                if (!l) return false;
+                // Version strings should not start with [ (log format) and should not contain ERROR/INFO
+                if (l.startsWith('[') && l.includes(']')) return false;
+                if (l.includes('INFO:') || l.includes('ERROR:') || l.includes('DEBUG:')) return false;
+                return true;
+            });
+            if (lines.length > 0) return lines[lines.length - 1];
+        }
     } catch (_err) {
         // ignore and fall back
     }
@@ -169,8 +179,13 @@ function getMcpPackageVersion() {
         });
         const stdout = result?.stdout?.toString?.() || '';
         const stderr = result?.stderr?.toString?.() || '';
-        const text = stdout.trim() || stderr.trim();
-        return text || 'unknown';
+        const text = (stdout.trim() || stderr.trim()).split(/\r?\n/).map(l => l.trim()).filter(l => {
+            if (!l) return false;
+            if (l.startsWith('[') && l.includes(']')) return false;
+            if (l.includes('INFO:') || l.includes('ERROR:') || l.includes('DEBUG:')) return false;
+            return true;
+        });
+        return text.length > 0 ? text[text.length - 1] : 'unknown';
     } catch (_err) {
         return 'unknown';
     }

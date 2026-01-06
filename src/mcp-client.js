@@ -357,6 +357,7 @@ class StataMcpClient {
 
     async _createClient() {
         this._statusEmitter.emit('status', 'connecting');
+        this._recentStderr = [];
 
         // Cursor: try a built-in bridge if present
         const commands = await vscode.commands.getCommands(true);
@@ -432,17 +433,7 @@ class StataMcpClient {
             this._log(`[mcp-stata] Found underlying process, setting up stderr capture`);
             if (proc.stderr && typeof proc.stderr.on === 'function') {
                 proc.stderr.setEncoding?.('utf8');
-                proc.stderr.on('data', (chunk) => {
-                    const text = typeof chunk === 'string' ? chunk : chunk.toString('utf8');
-                    if (text?.trim()) {
-                        const trimmed = text.trimEnd();
-                        this._log(`[mcp-stata stderr] ${trimmed}`);
-                        this._recentStderr.push(trimmed);
-                        if (this._recentStderr.length > 10) {
-                            this._recentStderr.shift();
-                        }
-                    }
-                });
+                proc.stderr.on('data', (chunk) => this._handleStderrData(chunk));
             }
         }
 
@@ -451,18 +442,7 @@ class StataMcpClient {
         if (stderrStream && typeof stderrStream.on === 'function') {
             this._log(`[mcp-stata] Setting up transport.stderr listener`);
             stderrStream.setEncoding?.('utf8');
-            stderrStream.on('data', (chunk) => {
-                const text = typeof chunk === 'string' ? chunk : chunk.toString('utf8');
-                if (text?.trim()) {
-                    const trimmed = text.trimEnd();
-                    this._log(`[mcp-stata stderr] ${trimmed}`);
-                    this._recentStderr.push(trimmed);
-                    // Keep only the last few stderr lines for error reporting.
-                    if (this._recentStderr.length > 10) {
-                        this._recentStderr.shift();
-                    }
-                }
-            });
+            stderrStream.on('data', (chunk) => this._handleStderrData(chunk));
         } else {
             this._log(`[mcp-stata] WARNING: transport.stderr not available for capture`);
         }
@@ -546,7 +526,14 @@ class StataMcpClient {
                 });
             }
         }
-        await client.connect(transport);
+        try {
+            await client.connect(transport);
+        } catch (err) {
+            this._resetClientState();
+            const context = this._formatRecentStderr();
+            const message = err?.message || String(err);
+            throw new Error(`Failed to connect to mcp-stata: ${message}${context}`);
+        }
         this._log(`mcp-stata connected (pid=${transport.pid ?? 'unknown'})`);
 
         // After connect, try again to capture stderr from the underlying process
@@ -556,17 +543,7 @@ class StataMcpClient {
             this._log(`[mcp-stata] Post-connect: Found process stderr, attaching listener`);
             postConnectProc.stderr._stataListenerAttached = true;
             postConnectProc.stderr.setEncoding?.('utf8');
-            postConnectProc.stderr.on('data', (chunk) => {
-                const text = typeof chunk === 'string' ? chunk : chunk.toString('utf8');
-                if (text?.trim()) {
-                    const trimmed = text.trimEnd();
-                    this._log(`[mcp-stata stderr] ${trimmed}`);
-                    this._recentStderr.push(trimmed);
-                    if (this._recentStderr.length > 10) {
-                        this._recentStderr.shift();
-                    }
-                }
-            });
+            postConnectProc.stderr.on('data', (chunk) => this._handleStderrData(chunk));
         }
 
         // Discover available tools so downstream calls choose the right names.
@@ -636,7 +613,14 @@ class StataMcpClient {
             }
             this._statusEmitter.emit('status', 'error');
             const detail = error?.message || String(error);
-            throw new Error(`MCP tool ${name} failed: ${detail}`);
+            let hint = '';
+            if (detail.includes('-32000') || detail.includes('Connection closed') || detail.includes('ECONNRESET')) {
+                this._resetClientState();
+                hint = '\n\nHint: This often happens if the mcp-stata server crashes during initialization or prints logs to its stdout pipe (breaking the MCP protocol).';
+                const context = this._formatRecentStderr();
+                if (context) hint += `\n\nRecent logs extension captured:${context}`;
+            }
+            throw new Error(`MCP tool ${name} failed: ${detail}${hint}`);
         }
     }
 
@@ -1121,9 +1105,50 @@ class StataMcpClient {
         return lines.join('\n');
     }
 
+    _resetClientState() {
+        this._clientPromise = null;
+        this._transport = null;
+        this._availableTools = new Set();
+        // NOTE: We don't always clear _recentStderr here because we might want to 
+        // show it to the user in the error message immediately after this call.
+        // It's cleared at the START of _createClient.
+    }
+
+    _handleStderrData(chunk) {
+        const text = typeof chunk === 'string' ? chunk : chunk.toString('utf8');
+        if (!text?.trim()) return;
+        const trimmed = text.trimEnd();
+
+        // If we see a success message or new discovery, clear previous errors (ghost failures from other candidates)
+        if (trimmed.includes('initialized successfully') ||
+            trimmed.includes('stata_setup.config succeeded') ||
+            trimmed.includes('Auto-discovered Stata') ||
+            trimmed.includes('Discovery found Stata') ||
+            trimmed.includes('Pre-flight succeeded')) {
+            this._recentStderr = [];
+        }
+
+        this._log(`[mcp-stata stderr] ${trimmed}`);
+        this._recentStderr.push(trimmed);
+        if (this._recentStderr.length > 10) {
+            this._recentStderr.shift();
+        }
+    }
+
     _formatRecentStderr() {
         if (!this._recentStderr?.length) return '';
-        return ` (recent stderr: ${this._recentStderr.slice(-5).join(' | ')})`;
+
+        // Prioritize lines that look like fatal errors or runtime crashes
+        const criticalLines = this._recentStderr.filter(line =>
+            line.includes('FATAL') ||
+            line.includes('ERROR') ||
+            line.includes('RuntimeError') ||
+            line.includes('PREFLIGHT_FAIL') ||
+            line.includes('failed to initialize Stata')
+        );
+
+        const displayedLines = criticalLines.length > 0 ? criticalLines : this._recentStderr.slice(-5);
+        return `\n\n>>> ${displayedLines.join('\n>>> ')}`;
     }
 
     _tryParseJson(text) {
