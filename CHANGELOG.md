@@ -1,3 +1,10 @@
+## [0.12.1](https://github.com/tmonk/stata-workbench/compare/v0.12.0...v0.12.1) (2026-01-06)
+
+
+### Bug Fixes
+
+* enhance stderr handling and error reporting in MCP client ([3a76568](https://github.com/tmonk/stata-workbench/commit/3a76568fae1b0e544b136f80e6c17a329425f1ed))
+
 # [0.12.0](https://github.com/tmonk/stata-workbench/compare/v0.11.0...v0.12.0) (2026-01-02)
 
 
