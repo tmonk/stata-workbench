@@ -494,6 +494,7 @@ class StataMcpClient {
                         if (taskId) {
                             run._taskDonePayload = parsed;
                             run._taskDoneTaskId = String(taskId);
+                            run._tailCancelled = true;
                             if (typeof run._taskDoneResolve === 'function') {
                                 run._taskDoneResolve(parsed);
                             }
@@ -918,6 +919,13 @@ class StataMcpClient {
         this._attachTaskCancellation(client, runState, cts);
         if (!taskId) return kickoff;
         await this._awaitTaskDone(runState, taskId, cts?.token);
+        if (runState?._tailPromise) {
+            runState._tailCancelled = true;
+            try {
+                await runState._tailPromise;
+            } catch (_err) {
+            }
+        }
         return this._callTool(client, 'get_task_result', { task_id: taskId });
     }
 
