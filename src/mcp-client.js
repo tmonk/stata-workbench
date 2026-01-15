@@ -74,7 +74,7 @@ class StataMcpClient {
     }
 
     async runSelection(selection, options = {}) {
-        const { normalizeResult, includeGraphs, onLog, onProgress, cancellationToken: externalCancellationToken, ...rest } = options || {};
+        const { normalizeResult, includeGraphs, onLog, onRawLog, onProgress, cancellationToken: externalCancellationToken, ...rest } = options || {};
         const config = vscode.workspace.getConfiguration('stataMcp');
         const maxOutputLines = Number.isFinite(config.get('maxOutputLines', 0)) && config.get('maxOutputLines', 0) > 0
             ? config.get('maxOutputLines', 0)
@@ -98,7 +98,7 @@ class StataMcpClient {
                 ? this._generateProgressToken()
                 : null;
 
-            const runState = { onLog, onProgress, progressToken };
+            const runState = { onLog, onRawLog, onProgress, progressToken };
             const result = await this._withActiveRun(runState, async () => {
                 return this._callTool(client, 'run_command', args, { progressToken, signal: cts.abortController.signal });
             });
@@ -119,7 +119,7 @@ class StataMcpClient {
     }
 
     async runFile(filePath, options = {}) {
-        const { normalizeResult, includeGraphs, onLog, onProgress, cancellationToken: externalCancellationToken, ...rest } = options || {};
+        const { normalizeResult, includeGraphs, onLog, onRawLog, onProgress, cancellationToken: externalCancellationToken, ...rest } = options || {};
         // Resolve working directory (configurable, defaults to the .do file folder).
         // Allow caller to override CWD (important for running temp files while preserving original CWD).
         const cwd = (rest && typeof rest.cwd === 'string') ? rest.cwd : this._resolveRunFileCwd(filePath);
@@ -147,7 +147,7 @@ class StataMcpClient {
                 ? this._generateProgressToken()
                 : null;
 
-            const runState = { onLog, onProgress, progressToken };
+            const runState = { onLog, onRawLog, onProgress, progressToken };
             const result = await this._withActiveRun(runState, async () => {
                 return this._callTool(client, 'run_do_file', args, { progressToken, signal: cts.abortController.signal });
             });
@@ -164,7 +164,7 @@ class StataMcpClient {
     }
 
     async run(code, options = {}) {
-        const { onLog, onProgress, cancellationToken: externalCancellationToken, ...rest } = options || {};
+        const { onLog, onRawLog, onProgress, cancellationToken: externalCancellationToken, ...rest } = options || {};
         const config = vscode.workspace.getConfiguration('stataMcp');
         const maxOutputLines = options.max_output_lines ??
             (config.get('maxOutputLines', 0) || undefined);
@@ -184,7 +184,7 @@ class StataMcpClient {
                 ? this._generateProgressToken()
                 : null;
 
-            const runState = { onLog, onProgress, progressToken };
+            const runState = { onLog, onRawLog, onProgress, progressToken };
             const result = await this._withActiveRun(runState, async () => {
                 return this._callTool(client, 'run_command', args, { progressToken, signal: cts.abortController.signal });
             });
@@ -500,6 +500,12 @@ class StataMcpClient {
                     if (lines.length > 0) {
                         // Join back the completed lines with newlines
                         const completedText = lines.join('\n') + '\n';
+                        if (typeof run.onRawLog === 'function') {
+                            try {
+                                run.onRawLog(completedText);
+                            } catch (_err) {
+                            }
+                        }
                         const filtered = this._filterLogChunk(completedText);
                         if (!filtered) return;
                         run._appendLog?.(filtered);
@@ -690,6 +696,12 @@ class StataMcpClient {
 
                 if (lines.length > 0) {
                     const completedText = lines.join('\n') + '\n';
+                    if (typeof run.onRawLog === 'function') {
+                        try {
+                            run.onRawLog(completedText);
+                        } catch (_err) {
+                        }
+                    }
                     const filtered = this._filterLogChunk(completedText);
                     if (filtered) {
                         run._appendLog?.(filtered);
@@ -705,6 +717,12 @@ class StataMcpClient {
 
         // FINAL FLUSH: If any partial line remains in buffer, flush it now
         if (run._lineBuffer) {
+            if (typeof run.onRawLog === 'function') {
+                try {
+                    run.onRawLog(run._lineBuffer);
+                } catch (_err) {
+                }
+            }
             const filtered = this._filterLogChunk(run._lineBuffer);
             if (filtered) {
                 run._appendLog?.(filtered);
@@ -754,6 +772,12 @@ class StataMcpClient {
 
                 if (lines.length > 0) {
                     const completedText = lines.join('\n') + '\n';
+                    if (typeof run.onRawLog === 'function') {
+                        try {
+                            run.onRawLog(completedText);
+                        } catch (_err) {
+                        }
+                    }
                     const filtered = this._filterLogChunk(completedText);
                     if (filtered) {
                         run._appendLog?.(filtered);

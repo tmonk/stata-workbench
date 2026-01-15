@@ -129,6 +129,11 @@
           "default": false,
           "description": "Automatically show the Stata output channel after runs."
         },
+        "stataMcp.showAllLogsInOutput": {
+          "type": "boolean",
+          "default": false,
+          "description": "Stream all raw mcp-stata logs to the Stata Workbench Output channel."
+        },
         "stataMcp.autoConfigureMcp": {
           "type": "boolean",
           "default": true,

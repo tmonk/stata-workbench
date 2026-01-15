@@ -469,12 +469,14 @@ describe('McpClient', () => {
                 _tailCancelled: false,
                 _tailPromise: null,
                 _logBuffer: '',
-                _appendLog: (t) => { run._logBuffer += String(t || ''); }
+                _appendLog: (t) => { run._logBuffer += String(t || ''); },
+                onRawLog: sinon.spy()
             };
 
             await client._drainActiveRunLog({}, run);
 
             expect(run._logBuffer).toEqual('abc');
+            expect(run.onRawLog.called).toBe(true);
             expect(run.logOffset).toEqual(3);
             expect(client._readLogSlice.called).toBe(true);
         });
@@ -494,10 +496,14 @@ describe('McpClient', () => {
                 // Stop after first chunk
                 run._tailCancelled = true;
             });
+            run.onRawLog = sinon.spy((data) => {
+                if (data) run._tailCancelled = true;
+            });
 
             await client._tailLogLoop({}, run);
 
             expect(run.onLog.calledOnce).toBe(true);
+            expect(run.onRawLog.calledOnce).toBe(true);
             expect(run._logBuffer).toEqual('hi\n');
             expect(run.logOffset).toEqual(3);
         });

@@ -29,17 +29,29 @@ describe('extension unit tests', () => {
         const mcpClientMock = {
             setLogger: jest.fn(),
             onStatusChanged: jest.fn().mockReturnValue({ dispose: jest.fn() }),
-            dispose: jest.fn()
+            dispose: jest.fn(),
+            runSelection: jest.fn().mockResolvedValue({}),
+            getUiChannel: jest.fn().mockResolvedValue(null)
         };
         jest.doMock('../../src/mcp-client', () => ({
             StataMcpClient: jest.fn().mockImplementation(() => mcpClientMock),
             client: mcpClientMock
         }));
         jest.doMock('../../src/terminal-panel', () => ({
-            TerminalPanel: { setExtensionUri: jest.fn(), addEntry: jest.fn(), show: jest.fn(), setLogProvider: jest.fn() }
+            TerminalPanel: {
+                setExtensionUri: jest.fn(),
+                addEntry: jest.fn(),
+                show: jest.fn(),
+                setLogProvider: jest.fn(),
+                startStreamingEntry: jest.fn().mockReturnValue(null),
+                appendStreamingLog: jest.fn(),
+                updateStreamingProgress: jest.fn(),
+                finishStreamingEntry: jest.fn(),
+                failStreamingEntry: jest.fn()
+            }
         }));
         jest.doMock('../../src/data-browser-panel', () => ({
-            DataBrowserPanel: { createOrShow: jest.fn(), setLogger: jest.fn() }
+            DataBrowserPanel: { createOrShow: jest.fn(), setLogger: jest.fn(), refresh: jest.fn() }
         }));
         jest.doMock('../../src/artifact-utils', () => ({
             openArtifact: jest.fn()
@@ -54,6 +66,59 @@ describe('extension unit tests', () => {
 
     beforeEach(() => {
         setupMocks();
+    });
+
+    describe('output log streaming', () => {
+        it('streams raw logs to Output channel when enabled', async () => {
+            const config = vscode.workspace.getConfiguration();
+            config.get.mockImplementation((key, def) => {
+                if (key === 'showAllLogsInOutput') return true;
+                if (key === 'autoRevealOutput') return false;
+                if (key === 'requestTimeoutMs') return 1000;
+                if (key === 'runFileWorkingDirectory') return '';
+                return def;
+            });
+
+            const handlers = new Map();
+            vscode.commands.registerCommand.mockImplementation((name, handler) => {
+                handlers.set(name, handler);
+                return { dispose: jest.fn() };
+            });
+
+            const context = {
+                subscriptions: [],
+                globalState: { get: jest.fn().mockReturnValue(true), update: jest.fn().mockResolvedValue() },
+                globalStoragePath: '/tmp/globalStorage',
+                extensionUri: {},
+                extensionPath: '/workspace'
+            };
+
+            await extension.activate(context);
+
+            const outputChannel = vscode.window.createOutputChannel.mock.results[0]?.value;
+
+            vscode.window.activeTextEditor = {
+                selection: { isEmpty: false },
+                document: {
+                    getText: jest.fn().mockReturnValue('display "hi"'),
+                    uri: { fsPath: '/tmp/test.do' }
+                }
+            };
+
+            extension.mcpClient.runSelection.mockImplementation(async (_code, opts) => {
+                if (opts?.onRawLog) {
+                    opts.onRawLog('RAW-LOG');
+                }
+                return { rc: 0, success: true, stdout: '' };
+            });
+
+            const runHandler = handlers.get('stata-workbench.runSelection');
+            expect(runHandler).toBeTruthy();
+            await runHandler();
+
+            expect(extension.mcpClient.runSelection).toHaveBeenCalled();
+            expect(outputChannel.append).toHaveBeenCalledWith('RAW-LOG');
+        });
     });
 
     describe('refreshMcpPackage', () => {

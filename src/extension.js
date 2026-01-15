@@ -34,6 +34,15 @@ function revealOutput() {
     }
 }
 
+function getOutputLogHandler() {
+    const config = vscode.workspace.getConfiguration('stataMcp');
+    if (!config.get('showAllLogsInOutput', false)) return null;
+    return (chunk) => {
+        if (!chunk) return;
+        outputChannel?.append?.(String(chunk));
+    };
+}
+
 function getUvInstallCommand(platform = process.platform) {
     if (platform === 'win32') {
         const display = 'powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -Command "iwr https://astral.sh/uv/install.ps1 -useb | iex"';
@@ -618,6 +627,7 @@ async function runSelection() {
 
     const filePath = editor.document.uri.fsPath;
     const cwd = filePath ? path.dirname(filePath) : null;
+    const rawLogHandler = getOutputLogHandler();
 
     await withStataProgress('Running selection', async (token) => {
         const runId = TerminalPanel.startStreamingEntry(text, filePath, terminalRunCommand, variableListProvider, cancelRequest, downloadGraphAsPdf);
@@ -627,6 +637,7 @@ async function runSelection() {
                 normalizeResult: true,
                 includeGraphs: true,
                 cwd,
+                onRawLog: rawLogHandler,
                 onLog: (chunk) => {
                     if (runId) TerminalPanel.appendStreamingLog(runId, chunk);
                 },
@@ -668,6 +679,7 @@ async function runFile() {
     const config = vscode.workspace.getConfiguration('stataMcp');
     const behavior = config.get('runFileBehavior', 'runDirtyFile');
     const originalDir = path.dirname(filePath);
+    const rawLogHandler = getOutputLogHandler();
     let effectiveFilePath = filePath;
     let tmpFile = null;
 
@@ -693,6 +705,7 @@ async function runFile() {
                     normalizeResult: true,
                     includeGraphs: true,
                     cwd: originalDir,
+                    onRawLog: rawLogHandler,
                     onLog: (chunk) => {
                         if (runId) TerminalPanel.appendStreamingLog(runId, chunk);
                     },
@@ -748,10 +761,12 @@ function showOutput(content) {
 // Defines the standard run command used by the Terminal Panel
 const terminalRunCommand = async (code, hooks) => {
     try {
+        const rawLogHandler = getOutputLogHandler();
         const res = await mcpClient.runSelection(code, {
             normalizeResult: true,
             includeGraphs: true,
             cwd: hooks?.cwd,
+            onRawLog: rawLogHandler,
             onLog: hooks?.onLog,
             onProgress: hooks?.onProgress
         });
@@ -770,9 +785,11 @@ const terminalRunCommand = async (code, hooks) => {
 // Clear-all convenience for terminal UI
 const clearAllCommand = async () => {
     try {
+        const rawLogHandler = getOutputLogHandler();
         const res = await mcpClient.runSelection('clear all', {
             normalizeResult: true,
-            includeGraphs: false
+            includeGraphs: false,
+            onRawLog: rawLogHandler
         });
         refreshDatasetSummary();
         return res;
