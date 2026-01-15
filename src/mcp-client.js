@@ -501,9 +501,9 @@ class StataMcpClient {
                         return;
                     }
 
-                    // If we are already tailing a log file, suppress notifications for the same output
-                    // to prevent duplicate streaming in the terminal UI.
-                    if (run.logPath) return;
+                    // Stream exclusively from the log file once available; ignore logMessage output
+                    // to avoid duplicate streaming and reduce latency variance.
+                    if (run.logPath || run._logOnly) return;
 
                     // LINE BUFFERING: 
                     // To ensure syntax highlighting and SMCL parsing are consistent, we must
@@ -672,6 +672,7 @@ class StataMcpClient {
                 if (!chunk) return;
                 run._logBuffer = this._appendBounded(run._logBuffer, chunk, this._maxLogBufferChars);
             };
+            run._logOnly = true;
             run._taskDonePayload = null;
             run._taskDoneTaskId = null;
             run._taskDoneResolve = null;
@@ -780,7 +781,7 @@ class StataMcpClient {
         while (run && !run._tailCancelled) {
             const slice = await this._readLogSlice(client, run.logPath, run.logOffset, 65536);
             if (!slice) {
-                await this._delay(200);
+                await this._delay(50);
                 continue;
             }
 
@@ -820,15 +821,15 @@ class StataMcpClient {
                         }
                     } else {
                         // All lines were filtered out
-                        await this._delay(200);
+                        await this._delay(50);
                     }
                 } else {
                     // No full lines yet, need to wait for more data
-                    await this._delay(100);
+                    await this._delay(25);
                 }
             } else {
                 // No data at all, wait longer
-                await this._delay(200);
+                await this._delay(50);
             }
         }
     }
