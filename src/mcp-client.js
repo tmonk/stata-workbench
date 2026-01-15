@@ -100,7 +100,8 @@ class StataMcpClient {
 
             const runState = { onLog, onRawLog, onProgress, progressToken };
             const result = await this._withActiveRun(runState, async () => {
-                return this._callTool(client, 'run_command', args, { progressToken, signal: cts.abortController.signal });
+                const kickoff = await this._callTool(client, 'run_command_background', args, { progressToken, signal: cts.abortController.signal });
+                return this._awaitBackgroundResult(client, runState, kickoff, cts);
             });
             if (!runState.logPath) {
                 runState.logPath = this._extractLogPathFromResponse(result);
@@ -108,6 +109,7 @@ class StataMcpClient {
             await this._drainActiveRunLog(client, runState);
             meta.logText = runState._logBuffer || '';
             meta.logPath = runState.logPath || null;
+            runState._cancelSubscription?.dispose?.();
             return result;
         }, meta, normalizeResult === true, includeGraphs === true);
         this._activeCancellation = null;
@@ -149,7 +151,8 @@ class StataMcpClient {
 
             const runState = { onLog, onRawLog, onProgress, progressToken };
             const result = await this._withActiveRun(runState, async () => {
-                return this._callTool(client, 'run_do_file', args, { progressToken, signal: cts.abortController.signal });
+                const kickoff = await this._callTool(client, 'run_do_file_background', args, { progressToken, signal: cts.abortController.signal });
+                return this._awaitBackgroundResult(client, runState, kickoff, cts);
             });
             if (!runState.logPath) {
                 runState.logPath = this._extractLogPathFromResponse(result);
@@ -157,6 +160,7 @@ class StataMcpClient {
             await this._drainActiveRunLog(client, runState);
             meta.logText = runState._logBuffer || '';
             meta.logPath = runState.logPath || null;
+            runState._cancelSubscription?.dispose?.();
             return result;
         }, meta, normalizeResult === true, includeGraphs === true);
         this._activeCancellation = null;
@@ -186,7 +190,8 @@ class StataMcpClient {
 
             const runState = { onLog, onRawLog, onProgress, progressToken };
             const result = await this._withActiveRun(runState, async () => {
-                return this._callTool(client, 'run_command', args, { progressToken, signal: cts.abortController.signal });
+                const kickoff = await this._callTool(client, 'run_command_background', args, { progressToken, signal: cts.abortController.signal });
+                return this._awaitBackgroundResult(client, runState, kickoff, cts);
             });
             if (!runState.logPath) {
                 runState.logPath = this._extractLogPathFromResponse(result);
@@ -194,6 +199,7 @@ class StataMcpClient {
             await this._drainActiveRunLog(client, runState);
             meta.logText = runState._logBuffer || '';
             meta.logPath = runState.logPath || null;
+            runState._cancelSubscription?.dispose?.();
             return result;
         };
         const cts = this._createCancellationSource(externalCancellationToken);
@@ -298,6 +304,15 @@ class StataMcpClient {
         // Stop log tailing on any active run
         if (this._activeRun) {
             this._activeRun._tailCancelled = true;
+            this._activeRun._cancelled = true;
+        }
+        if (this._activeRun?.taskId) {
+            try {
+                const client = await this._ensureClient();
+                await this._cancelTask(client, this._activeRun.taskId);
+            } catch (err) {
+                this._log(`[mcp-stata] cancel_task failed: ${err?.message || err}`);
+            }
         }
         this._statusEmitter.emit('status', this._pending > 0 ? 'queued' : 'connected');
         return true;
@@ -331,6 +346,7 @@ class StataMcpClient {
             }
             if (this._activeRun) {
                 this._activeRun._tailCancelled = true;
+                this._activeRun._cancelled = true;
             }
             return true;
         };
@@ -470,6 +486,18 @@ class StataMcpClient {
                     const event = parsed?.event;
                     if (event === 'log_path' && parsed?.path) {
                         this._ensureLogTail(client, run, String(parsed.path)).catch(() => { });
+                        return;
+                    }
+
+                    if (event === 'task_done') {
+                        const taskId = parsed?.task_id || parsed?.taskId;
+                        if (taskId) {
+                            run._taskDonePayload = parsed;
+                            run._taskDoneTaskId = String(taskId);
+                            if (typeof run._taskDoneResolve === 'function') {
+                                run._taskDoneResolve(parsed);
+                            }
+                        }
                         return;
                     }
 
@@ -644,6 +672,9 @@ class StataMcpClient {
                 if (!chunk) return;
                 run._logBuffer = this._appendBounded(run._logBuffer, chunk, this._maxLogBufferChars);
             };
+            run._taskDonePayload = null;
+            run._taskDoneTaskId = null;
+            run._taskDoneResolve = null;
         }
         this._activeRun = run;
         try {
@@ -843,6 +874,101 @@ class StataMcpClient {
         const lp = parsed?.log_path || parsed?.logPath || parsed?.error?.log_path || parsed?.error?.logPath;
         if (typeof lp === 'string' && lp.trim()) return lp;
         return null;
+    }
+
+    _extractTaskIdFromResponse(response) {
+        if (!response) return null;
+        const direct = response?.task_id || response?.taskId || response?.structuredContent?.task_id;
+        if (typeof direct === 'string' && direct.trim()) return direct;
+        const text = this._extractText(response);
+        const parsed = this._tryParseJson(text);
+        const taskId = parsed?.task_id || parsed?.taskId || parsed?.error?.task_id || parsed?.error?.taskId;
+        if (typeof taskId === 'string' && taskId.trim()) return taskId;
+        return null;
+    }
+
+    _parseToolJson(response) {
+        if (!response) return null;
+        if (typeof response === 'object' && !Array.isArray(response)) {
+            return response;
+        }
+        const text = this._extractText(response);
+        return this._tryParseJson(text);
+    }
+
+    _isTaskDone(status) {
+        if (!status || typeof status !== 'object') return false;
+        if (status.done === true) return true;
+        if (status.running === true) return false;
+        const value = String(status.status || status.state || '').toLowerCase();
+        return ['done', 'completed', 'finished', 'error', 'failed', 'cancelled', 'canceled'].includes(value);
+    }
+
+    async _awaitBackgroundResult(client, runState, kickoff, cts) {
+        if (!runState) return kickoff;
+        const logPath = runState.logPath || this._extractLogPathFromResponse(kickoff);
+        if (logPath) {
+            await this._ensureLogTail(client, runState, logPath);
+        }
+        const taskId = this._extractTaskIdFromResponse(kickoff);
+        if (taskId) {
+            runState.taskId = taskId;
+        }
+        this._attachTaskCancellation(client, runState, cts);
+        if (!taskId) return kickoff;
+        await this._awaitTaskDone(runState, taskId, cts?.token);
+        return this._callTool(client, 'get_task_result', { task_id: taskId });
+    }
+
+    _attachTaskCancellation(client, runState, cts) {
+        if (!runState || !cts?.token || typeof cts.token.onCancellationRequested !== 'function') return;
+        if (!runState.taskId || runState._cancelSubscription) return;
+        runState._cancelSubscription = cts.token.onCancellationRequested(async () => {
+            runState._cancelled = true;
+            if (!runState.taskId) return;
+            try {
+                await this._cancelTask(client, runState.taskId);
+            } catch (err) {
+                this._log(`[mcp-stata] cancel_task failed: ${err?.message || err}`);
+            }
+        });
+    }
+
+    async _cancelTask(client, taskId) {
+        if (!client || !taskId) return;
+        try {
+            await this._callTool(client, 'cancel_task', { task_id: taskId });
+        } catch (err) {
+            throw err;
+        }
+    }
+
+    async _awaitTaskDone(runState, taskId, cancellationToken) {
+        if (!runState || !taskId) return null;
+        const taskIdText = String(taskId);
+        if (runState._taskDonePayload && (!runState._taskDoneTaskId || runState._taskDoneTaskId === taskIdText)) {
+            return runState._taskDonePayload;
+        }
+
+        return new Promise((resolve, reject) => {
+            let cancelSub = null;
+            const finish = (payload) => {
+                if (cancelSub?.dispose) cancelSub.dispose();
+                resolve(payload);
+            };
+
+            runState._taskDoneResolve = finish;
+
+            if (runState._taskDonePayload && (!runState._taskDoneTaskId || runState._taskDoneTaskId === taskIdText)) {
+                return finish(runState._taskDonePayload);
+            }
+
+            if (cancellationToken?.onCancellationRequested) {
+                cancelSub = cancellationToken.onCancellationRequested(() => {
+                    reject(new Error('Request cancelled'));
+                });
+            }
+        });
     }
 
     _delay(ms) {

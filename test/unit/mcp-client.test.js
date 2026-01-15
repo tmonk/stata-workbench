@@ -351,7 +351,7 @@ describe('McpClient', () => {
             expect(meta.filePath).toEqual('/tmp/project/script.do');
             expect(meta.command).toEqual('do "/tmp/project/script.do"');
 
-            expect(result.taskResult.name).toEqual('run_do_file');
+            expect(result.taskResult.name).toEqual('run_do_file_background');
             expect(result.taskResult.args.cwd).toEqual(expectedCwd);
             expect(result.taskResult.args.path).toEqual('/tmp/project/script.do');
 
@@ -395,7 +395,7 @@ describe('McpClient', () => {
             expect(enqueueStub.calledOnce).toBe(true);
             expect(result.label).toEqual('run_selection');
             expect(result.meta.cwd).toEqual('/tmp/project');
-            expect(result.taskResult.name).toEqual('run_command');
+            expect(result.taskResult.name).toEqual('run_command_background');
             expect(result.taskResult.args.cwd).toEqual('/tmp/project');
             expect(result.taskResult.args.code).toEqual('display "hi"');
 
@@ -452,6 +452,24 @@ describe('McpClient', () => {
             expect(cancelSpy.calledOnce).toBe(true);
             expect(String(cancelSpy.firstCall.args[0] || '')).toMatch(/user cancelled/);
             client._pending = 0;
+        });
+
+        it('cancelAll calls cancel_task when a background task is active', async () => {
+            const cancelSpy = sinon.spy();
+            client._activeCancellation = { cancel: cancelSpy };
+            client._pending = 1;
+            client._activeRun = { taskId: 'task-123' };
+            client._ensureClient = sinon.stub().resolves({});
+            client._cancelTask = sinon.stub().resolves();
+
+            const result = await client.cancelAll();
+
+            expect(result).toBe(true);
+            expect(cancelSpy.calledOnce).toBe(true);
+            expect(client._cancelTask.calledOnce).toBe(true);
+            expect(client._cancelTask.firstCall.args[1]).toEqual('task-123');
+            client._pending = 0;
+            client._activeRun = null;
         });
     });
 
@@ -510,18 +528,36 @@ describe('McpClient', () => {
 
         it('runSelection should drain read_log when log_path is only present in tool response', async () => {
             client._delay = sinon.stub().resolves();
+            client._awaitTaskDone = sinon.stub().resolves();
 
             // Let the real _enqueue run (so normalization happens).
             // Ensure the MCP client exists.
             client._ensureClient = sinon.stub().resolves({});
 
-            // Stub _callTool for both run_command and read_log.
+            // Stub _callTool for background kickoff, result, and read_log.
             client._callTool = sinon.stub().callsFake(async (_client, name, args) => {
-                if (name === 'run_command') {
+                if (name === 'run_command_background') {
                     return {
                         structuredContent: {
                             result: JSON.stringify({
                                 command: args.code,
+                                rc: 0,
+                                stdout: '',
+                                stderr: null,
+                                log_path: '/tmp/mcp_stata_test.log',
+                                task_id: 'task-abc',
+                                success: true,
+                                error: null
+                            })
+                        },
+                        content: [{ type: 'text', text: '' }]
+                    };
+                }
+                if (name === 'get_task_result') {
+                    return {
+                        structuredContent: {
+                            result: JSON.stringify({
+                                command: args.code || 'display "HI"',
                                 rc: 0,
                                 stdout: '',
                                 stderr: null,
@@ -562,6 +598,50 @@ describe('McpClient', () => {
             expect(result.rc).toEqual(0);
             expect(result.logPath).toEqual('/tmp/mcp_stata_test.log');
             expect(result.stdout).toEqual('abc\n');
+        });
+    });
+
+    describe('background task helpers', () => {
+        it('_awaitTaskDone resolves after task_done notification', async () => {
+            const runState = {};
+            const cancellationToken = { onCancellationRequested: sinon.stub().returns({ dispose: sinon.stub() }) };
+
+            const promise = client._awaitTaskDone(runState, 'task-1', cancellationToken);
+            runState._taskDoneResolve({ event: 'task_done', task_id: 'task-1' });
+
+            const result = await promise;
+
+            expect(result).toBeTruthy();
+            expect(result.task_id).toEqual('task-1');
+        });
+
+        it('_awaitBackgroundResult wires task id and log path', async () => {
+            const runState = { logPath: null };
+            client._ensureLogTail = sinon.stub().callsFake(async (_client, run, logPath) => {
+                run.logPath = logPath;
+            });
+            client._awaitTaskDone = sinon.stub().resolves({ event: 'task_done', task_id: 'task-xyz' });
+            client._callTool = sinon.stub().callsFake(async (_client, name) => {
+                if (name === 'get_task_result') {
+                    return { ok: true };
+                }
+                return {};
+            });
+
+            const kickoff = {
+                log_path: '/tmp/background.log',
+                structuredContent: {
+                    log_path: '/tmp/background.log',
+                    task_id: 'task-xyz'
+                },
+                content: [{ type: 'text', text: '' }]
+            };
+
+            const result = await client._awaitBackgroundResult({}, runState, kickoff, { token: { onCancellationRequested: sinon.stub() } });
+
+            expect(runState.logPath).toEqual('/tmp/background.log');
+            expect(runState.taskId).toEqual('task-xyz');
+            expect(result).toEqual({ ok: true });
         });
     });
 

@@ -83,6 +83,17 @@ describe('McpClient integration (VS Code host)', () => {
         expect(names).toContain('price');
     });
 
+    runIfEnabled('streams output via log path and read_log', async () => {
+        const result = await client.runSelection('display "background-log-ok"', { normalizeResult: true, includeGraphs: false });
+        expect(result.success).toBe(true);
+        expect(result.logPath).toBeTruthy();
+
+        const slice = await client.readLog(result.logPath, 0, 65536);
+        expect(slice).toBeTruthy();
+        const data = String(slice?.data || '');
+        expect(data).toContain('background-log-ok');
+    });
+
 
 
     runIfEnabled('exports a graph to PDF without base64', async () => {
