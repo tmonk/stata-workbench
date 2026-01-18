@@ -228,7 +228,7 @@
     "compile": "node ./build/esbuild.js",
     "bundle": "node ./build/esbuild.js --production",
     "watch": "node ./build/esbuild.js --watch",
-    "test": "jest test/unit",
+    "test": "node --no-warnings=ExperimentalWarning ./node_modules/jest/bin/jest.js test/unit",
     "pretest:integration": "npm run compile",
     "test:integration": "node -e \"process.env.MCP_STATA_INTEGRATION='1'; require('./test/integration/runTest');\"",
     "vscode:prepublish": "npm run bundle",

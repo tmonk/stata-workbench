@@ -1518,8 +1518,8 @@ class StataMcpClient {
         if (!graphs || !Array.isArray(graphs)) return [];
 
         for (const g of graphs) {
-            // Check if graph already has file_path
-            const hasData = g && typeof g === 'object' && g.file_path;
+            // Check if graph already has data (file_path, path, url, etc)
+            const hasData = g && typeof g === 'object' && (g.file_path || g.path || g.url || g.href || g.link);
 
             if (hasData) {
                 // Graph already has data, just convert it
