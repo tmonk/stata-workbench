@@ -200,6 +200,23 @@ describe('McpClient', () => {
             expect(normalized.contentText).toEqual('');
             expect(normalized.stderr).toContain('variable y not found');
         });
+
+        it('preserves graph artifact arrays in normalized responses', () => {
+            const response = {
+                success: true,
+                graphArtifacts: [
+                    { label: 'g1', path: '/tmp/g1.png' }
+                ]
+            };
+
+            const normalized = client._normalizeResponse(response, { command: 'graph' });
+
+            expect(Array.isArray(normalized.graphArtifacts)).toBe(true);
+            expect(normalized.graphArtifacts.length).toBe(1);
+            expect(normalized.graphArtifacts[0].label).toBe('g1');
+            expect(Array.isArray(normalized.artifacts)).toBe(true);
+            expect(normalized.artifacts[0].path).toBe('/tmp/g1.png');
+        });
     });
 
     describe('Artifact Parsing', () => {
@@ -641,7 +658,11 @@ describe('McpClient', () => {
 
             expect(runState.logPath).toEqual('/tmp/background.log');
             expect(runState.taskId).toEqual('task-xyz');
-            expect(result).toEqual({ ok: true });
+            expect(result).toEqual({
+                event: 'task_done',
+                task_id: 'task-xyz',
+                log_path: '/tmp/background.log'
+            });
         });
     });
 

@@ -51,6 +51,8 @@ class StataMcpClient {
         this._recentStderr = [];
         this._workspaceRoot = null;
         this._activeRun = null;
+        this._runsByTaskId = new Map();
+        this._runCleanupTimers = new Map();
         // Allow larger captured logs so long .do files and errors are preserved.
         this._maxLogBufferChars = 500_000_000; // 500 MB
         this._clientVersion = pkg?.version || 'dev';
@@ -74,7 +76,7 @@ class StataMcpClient {
     }
 
     async runSelection(selection, options = {}) {
-        const { normalizeResult, includeGraphs, onLog, onRawLog, onProgress, cancellationToken: externalCancellationToken, ...rest } = options || {};
+        const { normalizeResult, includeGraphs, onLog, onRawLog, onProgress, onGraphReady, cancellationToken: externalCancellationToken, ...rest } = options || {};
         const config = vscode.workspace.getConfiguration('stataMcp');
         const maxOutputLines = Number.isFinite(config.get('maxOutputLines', 0)) && config.get('maxOutputLines', 0) > 0
             ? config.get('maxOutputLines', 0)
@@ -85,7 +87,7 @@ class StataMcpClient {
         const cts = this._createCancellationSource(externalCancellationToken);
         this._activeCancellation = cts;
 
-        const result = await this._enqueue('run_selection', { ...rest, cancellationToken: cts.token }, async (client) => {
+        const result = await this._enqueue('run_selection', { ...rest, cancellationToken: cts.token, deferArtifacts: true }, async (client) => {
             const args = { code: selection };
             if (maxOutputLines && maxOutputLines > 0) {
                 args.max_output_lines = maxOutputLines;
@@ -98,7 +100,7 @@ class StataMcpClient {
                 ? this._generateProgressToken()
                 : null;
 
-            const runState = { onLog, onRawLog, onProgress, progressToken };
+            const runState = { onLog, onRawLog, onProgress, onGraphReady, progressToken, baseDir: cwd };
             const result = await this._withActiveRun(runState, async () => {
                 const kickoff = await this._callTool(client, 'run_command_background', args, { progressToken, signal: cts.abortController.signal });
                 return this._awaitBackgroundResult(client, runState, kickoff, cts);
@@ -106,9 +108,17 @@ class StataMcpClient {
             if (!runState.logPath) {
                 runState.logPath = this._extractLogPathFromResponse(result);
             }
-            await this._drainActiveRunLog(client, runState);
+            if (!runState._skipDrain) {
+                await this._drainActiveRunLog(client, runState);
+            }
             meta.logText = runState._logBuffer || '';
             meta.logPath = runState.logPath || null;
+            if (result && typeof result === 'object') {
+                result.streamedLog = true;
+                if (Array.isArray(runState._graphArtifacts) && runState._graphArtifacts.length) {
+                    result.graphArtifacts = runState._graphArtifacts;
+                }
+            }
             runState._cancelSubscription?.dispose?.();
             return result;
         }, meta, normalizeResult === true, includeGraphs === true);
@@ -121,7 +131,7 @@ class StataMcpClient {
     }
 
     async runFile(filePath, options = {}) {
-        const { normalizeResult, includeGraphs, onLog, onRawLog, onProgress, cancellationToken: externalCancellationToken, ...rest } = options || {};
+        const { normalizeResult, includeGraphs, onLog, onRawLog, onProgress, onGraphReady, cancellationToken: externalCancellationToken, ...rest } = options || {};
         // Resolve working directory (configurable, defaults to the .do file folder).
         // Allow caller to override CWD (important for running temp files while preserving original CWD).
         const cwd = (rest && typeof rest.cwd === 'string') ? rest.cwd : this._resolveRunFileCwd(filePath);
@@ -134,7 +144,7 @@ class StataMcpClient {
         const cts = this._createCancellationSource(externalCancellationToken);
         this._activeCancellation = cts;
 
-        const result = await this._enqueue('run_file', { ...rest, cancellationToken: cts.token }, async (client) => {
+        const result = await this._enqueue('run_file', { ...rest, cancellationToken: cts.token, deferArtifacts: true }, async (client) => {
             const args = {
                 // Use absolute path so the server can locate the file, but also
                 // pass cwd so any relative includes resolve.
@@ -149,7 +159,7 @@ class StataMcpClient {
                 ? this._generateProgressToken()
                 : null;
 
-            const runState = { onLog, onRawLog, onProgress, progressToken };
+            const runState = { onLog, onRawLog, onProgress, onGraphReady, progressToken, baseDir: cwd };
             const result = await this._withActiveRun(runState, async () => {
                 const kickoff = await this._callTool(client, 'run_do_file_background', args, { progressToken, signal: cts.abortController.signal });
                 return this._awaitBackgroundResult(client, runState, kickoff, cts);
@@ -157,9 +167,17 @@ class StataMcpClient {
             if (!runState.logPath) {
                 runState.logPath = this._extractLogPathFromResponse(result);
             }
-            await this._drainActiveRunLog(client, runState);
+            if (!runState._skipDrain) {
+                await this._drainActiveRunLog(client, runState);
+            }
             meta.logText = runState._logBuffer || '';
             meta.logPath = runState.logPath || null;
+            if (result && typeof result === 'object') {
+                result.streamedLog = true;
+                if (Array.isArray(runState._graphArtifacts) && runState._graphArtifacts.length) {
+                    result.graphArtifacts = runState._graphArtifacts;
+                }
+            }
             runState._cancelSubscription?.dispose?.();
             return result;
         }, meta, normalizeResult === true, includeGraphs === true);
@@ -168,7 +186,7 @@ class StataMcpClient {
     }
 
     async run(code, options = {}) {
-        const { onLog, onRawLog, onProgress, cancellationToken: externalCancellationToken, ...rest } = options || {};
+        const { onLog, onRawLog, onProgress, onGraphReady, cancellationToken: externalCancellationToken, ...rest } = options || {};
         const config = vscode.workspace.getConfiguration('stataMcp');
         const maxOutputLines = options.max_output_lines ??
             (config.get('maxOutputLines', 0) || undefined);
@@ -188,7 +206,7 @@ class StataMcpClient {
                 ? this._generateProgressToken()
                 : null;
 
-            const runState = { onLog, onRawLog, onProgress, progressToken };
+            const runState = { onLog, onRawLog, onProgress, onGraphReady, progressToken, baseDir: cwd };
             const result = await this._withActiveRun(runState, async () => {
                 const kickoff = await this._callTool(client, 'run_command_background', args, { progressToken, signal: cts.abortController.signal });
                 return this._awaitBackgroundResult(client, runState, kickoff, cts);
@@ -196,16 +214,24 @@ class StataMcpClient {
             if (!runState.logPath) {
                 runState.logPath = this._extractLogPathFromResponse(result);
             }
-            await this._drainActiveRunLog(client, runState);
+            if (!runState._skipDrain) {
+                await this._drainActiveRunLog(client, runState);
+            }
             meta.logText = runState._logBuffer || '';
             meta.logPath = runState.logPath || null;
+            if (result && typeof result === 'object') {
+                result.streamedLog = true;
+                if (Array.isArray(runState._graphArtifacts) && runState._graphArtifacts.length) {
+                    result.graphArtifacts = runState._graphArtifacts;
+                }
+            }
             runState._cancelSubscription?.dispose?.();
             return result;
         };
         const cts = this._createCancellationSource(externalCancellationToken);
         this._activeCancellation = cts;
 
-        const result = await this._enqueue('run_command', { ...rest, cancellationToken: cts.token }, task, meta, true, true);
+        const result = await this._enqueue('run_command', { ...rest, cancellationToken: cts.token, deferArtifacts: true }, task, meta, true, true);
         this._activeCancellation = null;
         return result;
     }
@@ -478,23 +504,47 @@ class StataMcpClient {
         if (typeof client.setNotificationHandler === 'function') {
             if (LoggingMessageNotificationSchema) {
                 client.setNotificationHandler(LoggingMessageNotificationSchema, (notification) => {
-                    const run = this._activeRun;
-                    if (!run) return;
                     const text = String(notification?.params?.data ?? '');
                     if (!text) return;
                     const parsed = this._tryParseJson(text);
                     const event = parsed?.event;
+                    const taskId = parsed?.task_id || parsed?.taskId;
+                    let run = this._activeRun;
+                    if (!run && taskId) {
+                        run = this._runsByTaskId.get(String(taskId)) || null;
+                    } else if (run && taskId && run.taskId && String(run.taskId) !== String(taskId)) {
+                        run = this._runsByTaskId.get(String(taskId)) || null;
+                    }
+                    if (!run) return;
                     if (event === 'log_path' && parsed?.path) {
                         this._ensureLogTail(client, run, String(parsed.path)).catch(() => { });
                         return;
                     }
 
+                    if (event === 'graph_ready') {
+                        const graph = parsed?.graph;
+                        if (graph) {
+                            const artifact = this._graphToArtifact(graph, run.baseDir, parsed);
+                            if (artifact) {
+                                run._graphArtifacts.push(artifact);
+                                if (typeof run.onGraphReady === 'function') {
+                                    try {
+                                        run.onGraphReady(artifact);
+                                    } catch (_err) {
+                                    }
+                                }
+                            }
+                        }
+                        return;
+                    }
+
                     if (event === 'task_done') {
-                        const taskId = parsed?.task_id || parsed?.taskId;
                         if (taskId) {
                             run._taskDonePayload = parsed;
                             run._taskDoneTaskId = String(taskId);
                             run._tailCancelled = true;
+                            run._fastDrain = true;
+                            run._skipDrain = true;
                             if (typeof run._taskDoneResolve === 'function') {
                                 run._taskDoneResolve(parsed);
                             }
@@ -668,6 +718,9 @@ class StataMcpClient {
             run._tailPromise = null;
             run._logBuffer = '';
             run._lineBuffer = '';
+            run._fastDrain = false;
+            run._skipDrain = false;
+            run._graphArtifacts = [];
             run._appendLog = (text) => {
                 const chunk = String(text ?? '');
                 if (!chunk) return;
@@ -684,6 +737,9 @@ class StataMcpClient {
         } finally {
             // Restore previous run (defensive) rather than always clearing.
             this._activeRun = prev;
+            if (run?.taskId) {
+                this._scheduleRunCleanup(String(run.taskId));
+            }
         }
     }
 
@@ -706,8 +762,11 @@ class StataMcpClient {
             }
         }
 
+        const maxEmptyReads = run._fastDrain ? 1 : 10;
+        const maxIterations = run._fastDrain ? 6 : 200;
+        const idleDelay = run._fastDrain ? 10 : 50;
         let emptyReads = 0;
-        for (let i = 0; i < 200; i++) {
+        for (let i = 0; i < maxIterations; i++) {
             const slice = await this._readLogSlice(client, run.logPath, run.logOffset, 65536);
             if (!slice) break;
             if (typeof slice.next_offset === 'number') {
@@ -743,8 +802,8 @@ class StataMcpClient {
                 emptyReads = 0;
             } else {
                 emptyReads += 1;
-                if (emptyReads >= 10) break;
-                await this._delay(50);
+                if (emptyReads >= maxEmptyReads) break;
+                await this._delay(idleDelay);
             }
         }
 
@@ -915,18 +974,46 @@ class StataMcpClient {
         const taskId = this._extractTaskIdFromResponse(kickoff);
         if (taskId) {
             runState.taskId = taskId;
+            this._trackRunForTask(taskId, runState);
         }
         this._attachTaskCancellation(client, runState, cts);
         if (!taskId) return kickoff;
-        await this._awaitTaskDone(runState, taskId, cts?.token);
+        const taskDone = await this._awaitTaskDone(runState, taskId, cts?.token);
+        runState._fastDrain = true;
+        runState._skipDrain = true;
         if (runState?._tailPromise) {
             runState._tailCancelled = true;
-            try {
-                await runState._tailPromise;
-            } catch (_err) {
-            }
         }
-        return this._callTool(client, 'get_task_result', { task_id: taskId });
+        const taskPayload = taskDone?.result ?? taskDone;
+        const parsedTask = this._parseToolJson(taskPayload);
+        if (parsedTask && typeof parsedTask === 'object') {
+            if (!parsedTask.log_path && logPath) parsedTask.log_path = logPath;
+            if (!parsedTask.task_id) parsedTask.task_id = taskId;
+            return parsedTask;
+        }
+        return kickoff;
+    }
+
+    _trackRunForTask(taskId, runState) {
+        if (!taskId || !runState) return;
+        const key = String(taskId);
+        this._runsByTaskId.set(key, runState);
+        const existingTimer = this._runCleanupTimers.get(key);
+        if (existingTimer) {
+            clearTimeout(existingTimer);
+            this._runCleanupTimers.delete(key);
+        }
+    }
+
+    _scheduleRunCleanup(taskId, delayMs = 30000) {
+        if (!taskId) return;
+        const key = String(taskId);
+        if (this._runCleanupTimers.has(key)) return;
+        const timer = setTimeout(() => {
+            this._runsByTaskId.delete(key);
+            this._runCleanupTimers.delete(key);
+        }, delayMs);
+        this._runCleanupTimers.set(key, timer);
     }
 
     _attachTaskCancellation(client, runState, cts) {
@@ -1016,7 +1103,7 @@ class StataMcpClient {
                 const processed = normalize
                     ? this._normalizeResponse(result, normalizedMeta)
                     : (typeof result === 'object' && result !== null ? result : { raw: result, ...normalizedMeta });
-                if (collectArtifacts) {
+                if (collectArtifacts && !options?.deferArtifacts) {
                     const artifacts = await this._collectGraphArtifacts(client, meta);
                     if (artifacts.length) {
                         processed.artifacts = artifacts;
@@ -1116,6 +1203,21 @@ class StataMcpClient {
             raw: response
         };
 
+        const artifactList = firstArray([
+            payload.graphArtifacts,
+            parsed.graphArtifacts,
+            payload.artifacts,
+            parsed.artifacts
+        ]);
+        if (artifactList) {
+            normalized.graphArtifacts = artifactList;
+            if (Array.isArray(payload.artifacts) || Array.isArray(parsed.artifacts)) {
+                normalized.artifacts = Array.isArray(payload.artifacts) ? payload.artifacts : parsed.artifacts;
+            } else {
+                normalized.artifacts = artifactList;
+            }
+        }
+
         if (payload.success === false || parsed.success === false) normalized.success = false;
         if (typeof normalized.rc === 'number' && normalized.rc !== 0) normalized.success = false;
 
@@ -1197,6 +1299,13 @@ class StataMcpClient {
                 }
             }
             return '';
+        }
+
+        function firstArray(candidates) {
+            for (const v of candidates) {
+                if (Array.isArray(v)) return v;
+            }
+            return null;
         }
     }
 

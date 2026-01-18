@@ -86,7 +86,6 @@ function activate(context) {
         vscode.commands.registerCommand('stata-workbench.runSelection', runSelection),
         vscode.commands.registerCommand('stata-workbench.runFile', runFile),
         vscode.commands.registerCommand('stata-workbench.testMcpServer', testConnection),
-        vscode.commands.registerCommand('stata-workbench.showGraphs', showGraphs),
         vscode.commands.registerCommand('stata-workbench.viewData', viewData),
         vscode.commands.registerCommand('stata-workbench.installMcpCli', promptInstallMcpCli),
         vscode.commands.registerCommand('stata-workbench.cancelRequest', cancelRequest),
@@ -641,6 +640,9 @@ async function runSelection() {
                 onLog: (chunk) => {
                     if (runId) TerminalPanel.appendStreamingLog(runId, chunk);
                 },
+                onGraphReady: (artifact) => {
+                    if (runId) TerminalPanel.appendRunArtifact(runId, artifact);
+                },
                 onProgress: (progress, total, message) => {
                     if (runId) TerminalPanel.updateStreamingProgress(runId, progress, total, message);
                 }
@@ -709,6 +711,9 @@ async function runFile() {
                     onLog: (chunk) => {
                         if (runId) TerminalPanel.appendStreamingLog(runId, chunk);
                     },
+                    onGraphReady: (artifact) => {
+                        if (runId) TerminalPanel.appendRunArtifact(runId, artifact);
+                    },
                     onProgress: (progress, total, message) => {
                         if (runId) TerminalPanel.updateStreamingProgress(runId, progress, total, message);
                     }
@@ -768,6 +773,9 @@ const terminalRunCommand = async (code, hooks) => {
             cwd: hooks?.cwd,
             onRawLog: rawLogHandler,
             onLog: hooks?.onLog,
+            onGraphReady: (artifact) => {
+                if (hooks?.runId) TerminalPanel.appendRunArtifact(hooks.runId, artifact);
+            },
             onProgress: hooks?.onProgress
         });
         refreshDatasetSummary();
@@ -859,27 +867,6 @@ async function showTerminal() {
 
 async function viewData() {
     DataBrowserPanel.createOrShow(globalExtensionUri);
-}
-
-async function showGraphs() {
-    try {
-        // Use exportAllGraphs to get actual exported files with data URIs
-        const result = await mcpClient.exportAllGraphs();
-        const items = Array.isArray(result?.graphs) ? result.graphs : [];
-
-        // Items already have dataUri from _collectGraphArtifacts -> _fileToDataUri conversion
-        const detailed = items.map((g) => {
-            return {
-                name: g.label || g.name || 'graph',
-                dataUri: g.dataUri || null,
-                path: g.path || null,
-                error: g.error || null
-            };
-        });
-        openGraphPanel(detailed);
-    } catch (error) {
-        vscode.window.showErrorMessage(`Failed to export graphs: ${error.message}`);
-    }
 }
 
 async function downloadGraphAsPdf(graphName) {

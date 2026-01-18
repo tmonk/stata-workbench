@@ -37,6 +37,7 @@ function parseSMCL(smclText) {
         if (standaloneRC) {
           extractedRC = parseInt(standaloneRC[1], 10);
         }
+
       }
     }
 
@@ -534,10 +535,6 @@ class TerminalPanel {
           return;
         }
 
-        if (message.type === 'showGraphs') {
-          vscode.commands.executeCommand('stata-workbench.showGraphs');
-          return;
-        }
 
         if (message.type === 'run' && typeof message.code === 'string') {
           await TerminalPanel.handleRun(message.code, runCommand);
@@ -881,6 +878,11 @@ class TerminalPanel {
     TerminalPanel._postMessage({ type: 'busy', value: false });
   }
 
+  static appendRunArtifact(runId, artifact) {
+    if (!TerminalPanel.currentPanel || !runId || !artifact) return;
+    TerminalPanel._postMessage({ type: 'runArtifact', runId, artifact });
+  }
+
   static async _handleFetchLog(runId, path, offset, maxBytes) {
     console.log(`[TerminalPanel] _handleFetchLog: runId=${runId} path=${path} offset=${offset}`);
     if (!path) return;
@@ -1090,14 +1092,15 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
         <button class="btn btn-ghost btn-icon" id="btn-open-browser" title="Open Data Browser">
           <i class="codicon codicon-table"></i>
         </button>
-        <button class="btn btn-ghost btn-icon" id="btn-show-graphs" title="Show Graphs">
+        <!-- <button class="btn btn-ghost btn-icon" id="btn-show-graphs" title="Show Graphs">
           <i class="codicon codicon-graph"></i>
-        </button>
+        </button> -->
       </div>
     </div>
   </div>
 
   <main class="chat-stream" id="chat-stream">
+    <div id="session-artifacts"></div>
     <!--Entries injected here -->
   </main>
 
@@ -1222,7 +1225,6 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
     const stopBtn = document.getElementById('stop-btn');
     const clearBtn = document.getElementById('clear-btn');
     const btnOpenBrowser = document.getElementById('btn-open-browser');
-    const btnShowGraphs = document.getElementById('btn-show-graphs');
     const dataSummary = document.getElementById('data-summary');
     const obsCount = document.getElementById('obs-count');
     const varCount = document.getElementById('var-count');
@@ -1233,11 +1235,6 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
         });
     }
 
-    if (btnShowGraphs) {
-        btnShowGraphs.addEventListener('click', () => {
-            vscode.postMessage({ type: 'showGraphs' });
-        });
-    }
 
     // Initial history embedded from server
     const initialEntries = window.initialEntries || [];
@@ -1248,6 +1245,9 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
     let lastCompletion = null;
 
     const runs = Object.create(null);
+    const sessionArtifacts = [];
+    const sessionArtifactKeys = new Set();
+    const sessionArtifactsEl = document.getElementById('session-artifacts');
 
     let busy = false;
 
@@ -1260,6 +1260,12 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
         // Reset runs tracking
         for (const key in runs) {
             delete runs[key];
+        }
+
+        sessionArtifacts.length = 0;
+        sessionArtifactKeys.clear();
+        if (sessionArtifactsEl) {
+            sessionArtifactsEl.innerHTML = '';
         }
         
         // Reset history
@@ -1684,7 +1690,6 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
             +      '<div class="output-content" id="run-log-' + runId + '"></div>'
             +    '</div>'
             +  '</div>'
-            +  '<div id="run-artifacts-' + runId + '"></div>'
             + '</div>';
 
         const div = document.createElement('div');
@@ -1709,7 +1714,7 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
             logLinkEl: document.getElementById('run-log-link-' + runId),
             logEl: document.getElementById('run-log-' + runId),
             tabsContainer: document.getElementById('run-tabs-' + runId),
-            artifactsEl: document.getElementById('run-artifacts-' + runId)
+            artifacts: []
         };
 
         return runs[runId];
@@ -1748,8 +1753,6 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
             outputContent += '<div class="output-content">' + entry.stdout + '</div>';
         }
         
-        const artifactsHtml = renderArtifacts(entry.artifacts, entry.timestamp);
-
         // Determine traffic light color
         const statusColor = entry.success ? 'var(--accent-success)' : 'var(--accent-error)';
 
@@ -1797,7 +1800,6 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
             +       '<div class="output-content log-container" id="run-log-' + entry.timestamp + '" data-log-path="' + (entry.logPath || '') + '"></div>'
             +     '</div>'
             +   '</div>'
-            +   artifactsHtml
             + '</div>';
 
         const div = document.createElement('div');
@@ -1811,11 +1813,15 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
         if (!artifacts || !Array.isArray(artifacts) || artifacts.length === 0) return '';
         const artifactsId = window.stataUI.escapeHtml(String(id || Date.now()));
         const isCollapsed = collapsedArtifacts[artifactsId] === true;
+        const densityClass = artifacts.length >= 12
+            ? 'artifacts-compact'
+            : (artifacts.length >= 8 ? 'artifacts-dense' : '');
 
         const tiles = artifacts.map((a, idx) => {
           const label = window.stataUI.escapeHtml(a.label || 'graph');
           const preview = a.dataUri || a.path; // Already converted to data URI by Node.js code
           const canPreview = !!preview && (String(preview).indexOf('data:image/') !== -1);
+          const closeKey = window.stataUI.escapeHtml(String(a._key || ''));
           
           const error = a.error ? String(a.error) : '';
           const errorHtml = error
@@ -1835,7 +1841,10 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
                 + ' data-basedir="' + window.stataUI.escapeHtml(a.baseDir || '') + '"'
                 + ' data-label="' + label + '"'
                 + ' data-index="' + idx + '">' 
-                +   '<div class="artifact-thumb">' + thumbHtml + '</div>'
+                +   '<div class="artifact-thumb">'
+                +     '<button class="artifact-tile-close" type="button" data-action="remove-artifact" data-key="' + closeKey + '" title="Remove">×</button>'
+                +     thumbHtml
+                +   '</div>'
                 +   '<div class="artifact-tile-label" title="' + label + '">' + label + '</div>'
                 +   errorHtml
                 + '</div>'
@@ -1843,7 +1852,7 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
         }).join('');
 
         return (
-            '<section class="artifacts-card" data-artifacts-id="' + artifactsId + '" data-collapsed="' + (isCollapsed ? 'true' : 'false') + '">' 
+            '<section class="artifacts-card ' + densityClass + '" data-artifacts-id="' + artifactsId + '" data-collapsed="' + (isCollapsed ? 'true' : 'false') + '">' 
             + '<header class="artifacts-header">'
             +   '<div class="artifacts-title">Artifacts</div>'
             +   '<div class="artifacts-header-right">'
@@ -1859,6 +1868,32 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
     }
 
     const collapsedArtifacts = Object.create(null);
+
+    function renderSessionArtifacts() {
+        if (!sessionArtifactsEl) return;
+        const artifactsHtml = renderArtifacts(sessionArtifacts, 'session');
+        sessionArtifactsEl.innerHTML = artifactsHtml;
+    }
+
+    function addSessionArtifact(artifact) {
+        if (!artifact) return false;
+        const key = String(artifact.path || '') + '|' + String(artifact.label || '');
+        if (!key || sessionArtifactKeys.has(key)) return false;
+        sessionArtifactKeys.add(key);
+        sessionArtifacts.push({ ...artifact, _key: key });
+        return true;
+    }
+
+    function removeSessionArtifact(key) {
+        if (!key || !sessionArtifactKeys.has(key)) return false;
+        sessionArtifactKeys.delete(key);
+        const index = sessionArtifacts.findIndex(a => a._key === key);
+        if (index >= 0) {
+            sessionArtifacts.splice(index, 1);
+        }
+        renderSessionArtifacts();
+        return true;
+    }
 
     const modal = document.getElementById('artifact-modal');
     const modalTitle = document.getElementById('artifact-modal-title');
@@ -2031,6 +2066,16 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
         }
       }
 
+      if (msg.type === 'runArtifact') {
+        const runId = msg.runId;
+        const run = runs[runId];
+        if (!run || !msg.artifact) return;
+        const artifact = msg.artifact;
+        if (addSessionArtifact(artifact)) {
+            renderSessionArtifacts();
+        }
+      }
+
       if (msg.type === 'downloadStatus') {
         // Reset modal download button state
         if (modalDownloadBtn) {
@@ -2168,6 +2213,18 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
             run.tabsContainer.style.display = hasProblem ? 'flex' : 'none';
         }
 
+        if (Array.isArray(msg.artifacts) && msg.artifacts.length) {
+            let changed = false;
+            for (const artifact of msg.artifacts) {
+                if (addSessionArtifact(artifact)) {
+                    changed = true;
+                }
+            }
+            if (changed) {
+                renderSessionArtifacts();
+            }
+        }
+
         const stderr = String(msg.stderr || '');
         if (stderr && run.stderrEl) {
             run.stderrEl.style.display = 'block';
@@ -2215,10 +2272,24 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
             if (run.progressMeta) run.progressMeta.textContent = '';
         }
 
-        const artifactsHtml = renderArtifacts(msg.artifacts, runId);
+        const incomingArtifacts = Array.isArray(msg.artifacts) ? msg.artifacts : [];
+        const mergedArtifacts = (run.artifacts || []).slice();
+        run._artifactKeys = run._artifactKeys || new Set();
+        for (const artifact of mergedArtifacts) {
+            const key = String(artifact?.path || '') + '|' + String(artifact?.label || '');
+            run._artifactKeys.add(key);
+        }
+        for (const artifact of incomingArtifacts) {
+            const key = String(artifact?.path || '') + '|' + String(artifact?.label || '');
+            if (run._artifactKeys.has(key)) continue;
+            run._artifactKeys.add(key);
+            mergedArtifacts.push(artifact);
+        }
+        const artifactsHtml = renderArtifacts(mergedArtifacts, runId);
         if (run.artifactsEl) {
             run.artifactsEl.innerHTML = artifactsHtml;
         }
+        run.artifacts = mergedArtifacts;
         
         // Update header status indicator
         updateStatusIndicator(success, msg.rc);
@@ -2328,6 +2399,12 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
     }, { passive: true });
 
     document.addEventListener('click', (e) => {
+        const removeBtn = e.target.closest('[data-action="remove-artifact"]');
+        if (removeBtn) {
+            const key = removeBtn.getAttribute('data-key');
+            removeSessionArtifact(key);
+            return;
+        }
         const toggle = e.target.closest('[data-action="toggle-artifacts"]');
         if (toggle) {
             const id = toggle.getAttribute('data-artifacts-id');

@@ -56,13 +56,8 @@
         "title": "Stata: Test MCP Server Connection"
       },
       {
-        "command": "stata-workbench.showGraphs",
-        "title": "Stata: Show Graphs",
-        "icon": "$(graph)"
-      },
-      {
         "command": "stata-workbench.viewData",
-        "title": "Stata: Browse Data",
+        "title": "Stata: View Data",
         "icon": "$(table)"
       },
       {
