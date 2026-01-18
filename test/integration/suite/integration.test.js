@@ -96,7 +96,7 @@ describe('McpClient integration (VS Code host)', () => {
 
 
 
-    runIfEnabled('exports a graph to PDF without base64', async () => {
+    runIfEnabled('exports a graph to PDF', async () => {
         // Create a graph
         await client.runSelection('sysuse auto', { normalizeResult: true, includeGraphs: false });
         await client.runSelection('twoway scatter price mpg, name(gint, replace)', { normalizeResult: true, includeGraphs: true });

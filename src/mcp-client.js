@@ -58,6 +58,21 @@ class StataMcpClient {
         this._clientVersion = pkg?.version || 'dev';
     }
 
+    _attachStderrListener(stream, source) {
+        if (!stream || typeof stream.on !== 'function') return false;
+        if (this._stderrStreamAttached) {
+            return false;
+        }
+        if (stream._stataListenerAttached) {
+            return false;
+        }
+        stream._stataListenerAttached = true;
+        this._stderrStreamAttached = true;
+        stream.setEncoding?.('utf8');
+        stream.on('data', (chunk) => this._handleStderrData(chunk, source));
+        return true;
+    }
+
     setLogger(logger) {
         this._log = typeof logger === 'function' ? logger : () => { };
         // Immediately test that logging works
@@ -283,13 +298,12 @@ class StataMcpClient {
             let artifact = this._graphResponseToArtifact(primary, name, options.baseDir);
 
             // If the server returned a non-PDF artifact (e.g., SVG) and we need PDF, try again forcing PDF.
-            const hasPdfDataUri = artifact?.dataUri?.startsWith('data:application/pdf');
             const hasPdfPath = artifact?.path && /\.pdf$/i.test(artifact.path);
-            if (preferredFormat === 'pdf' && !hasPdfDataUri && !hasPdfPath) {
+            if (preferredFormat === 'pdf' && !hasPdfPath) {
                 try {
                     const fallback = await this._callTool(client, 'export_graph', { ...baseArgs, format: 'pdf' });
                     const fallbackArtifact = this._graphResponseToArtifact(fallback, name, options.baseDir);
-                    if (fallbackArtifact && (fallbackArtifact.dataUri?.startsWith('data:application/pdf') || (fallbackArtifact.path && /\.pdf$/i.test(fallbackArtifact.path)))) {
+                    if (fallbackArtifact && (fallbackArtifact.path && /\.pdf$/i.test(fallbackArtifact.path))) {
                         artifact = fallbackArtifact;
                     }
                 } catch (err) {
@@ -473,18 +487,14 @@ class StataMcpClient {
         const proc = transport._process || transport.process || transport._serverProcess;
         if (proc) {
             this._log(`[mcp-stata] Found underlying process, setting up stderr capture`);
-            if (proc.stderr && typeof proc.stderr.on === 'function') {
-                proc.stderr.setEncoding?.('utf8');
-                proc.stderr.on('data', (chunk) => this._handleStderrData(chunk));
-            }
+            this._attachStderrListener(proc.stderr, 'proc');
         }
 
         // Capture stderr from the MCP process for debugging (original approach as fallback).
         const stderrStream = transport.stderr;
         if (stderrStream && typeof stderrStream.on === 'function') {
             this._log(`[mcp-stata] Setting up transport.stderr listener`);
-            stderrStream.setEncoding?.('utf8');
-            stderrStream.on('data', (chunk) => this._handleStderrData(chunk));
+            this._attachStderrListener(stderrStream, 'transport');
         } else {
             this._log(`[mcp-stata] WARNING: transport.stderr not available for capture`);
         }
@@ -626,9 +636,7 @@ class StataMcpClient {
         const postConnectProc = transport._process || transport.process || transport._serverProcess;
         if (postConnectProc && postConnectProc.stderr && !postConnectProc.stderr._stataListenerAttached) {
             this._log(`[mcp-stata] Post-connect: Found process stderr, attaching listener`);
-            postConnectProc.stderr._stataListenerAttached = true;
-            postConnectProc.stderr.setEncoding?.('utf8');
-            postConnectProc.stderr.on('data', (chunk) => this._handleStderrData(chunk));
+            this._attachStderrListener(postConnectProc.stderr, 'post_connect');
         }
 
         // Discover available tools so downstream calls choose the right names.
@@ -712,6 +720,9 @@ class StataMcpClient {
     async _withActiveRun(run, fn) {
         const prev = this._activeRun;
         if (run && typeof run === 'object') {
+            if (!run._debugId) {
+                run._debugId = `run_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`;
+            }
             run.logPath = run.logPath || null;
             run.logOffset = typeof run.logOffset === 'number' ? run.logOffset : 0;
             run._tailCancelled = false;
@@ -1382,7 +1393,7 @@ class StataMcpClient {
         // It's cleared at the START of _createClient.
     }
 
-    _handleStderrData(chunk) {
+    _handleStderrData(chunk, source = 'unknown') {
         const text = typeof chunk === 'string' ? chunk : chunk.toString('utf8');
         if (!text?.trim()) return;
         const trimmed = text.trimEnd();
@@ -1483,10 +1494,7 @@ class StataMcpClient {
         try {
             let response;
             let lastError = null;
-            const config = vscode.workspace.getConfiguration('stataMcp');
-            const useBase64 = config.get('useBase64Graphs', false);
-
-            response = await this._callTool(client, 'export_graphs_all', { use_base64: useBase64 });
+            response = await this._callTool(client, 'export_graphs_all', {});
             this._log(`[mcp-stata graphs] export_graphs_all response: ${this._stringifySafe(response)}`);
 
             if (!response) {
@@ -1510,36 +1518,15 @@ class StataMcpClient {
         if (!graphs || !Array.isArray(graphs)) return [];
 
         for (const g of graphs) {
-            // Check if graph already has file_path or dataUri
-            const hasData = g && typeof g === 'object' && (g.file_path || g.dataUri || g.data);
+            // Check if graph already has file_path
+            const hasData = g && typeof g === 'object' && g.file_path;
 
             if (hasData) {
                 // Graph already has data, just convert it
                 const artifact = this._graphToArtifact(g, baseDir, response);
                 if (artifact) {
                     artifacts.push(artifact);
-
-                    // Deep copy and sanitize for logging
-                    const artifact_log = JSON.parse(JSON.stringify(artifact));
-
-                    // Remove base64 data from all locations
-                    const sanitize = (obj) => {
-                        for (const key in obj) {
-                            if (typeof obj[key] === 'string') {
-                                if (obj[key].startsWith('data:')) {
-                                    obj[key] = `[base64 data: ${obj[key].substring(0, 30)}...]`;
-                                } else if (obj[key].length > 100 && /^[A-Za-z0-9+/=]+$/.test(obj[key])) {
-                                    // Looks like raw base64
-                                    obj[key] = `[base64 string: ${obj[key].length} chars]`;
-                                }
-                            } else if (typeof obj[key] === 'object' && obj[key] !== null) {
-                                sanitize(obj[key]);
-                            }
-                        }
-                    };
-
-                    sanitize(artifact_log);
-                    this._log(`[mcp-stata graphs] parsed artifact: ${this._stringifySafe(artifact_log)}`);
+                    this._log(`[mcp-stata graphs] parsed artifact: ${this._stringifySafe(artifact)}`);
                 }
             } else {
                 // Graph needs to be exported - it only has metadata (name, active, etc)
@@ -1593,49 +1580,12 @@ class StataMcpClient {
         const label = graph.name || graph.label || graph.graph_name || 'graph';
         const base = graph.baseDir || graph.base_dir || baseDir || response?.baseDir || response?.base_dir || null;
         const href = graph.file_path || graph.url || graph.href || graph.link || graph.path || graph.file || graph.filename || null;
-        let dataUri = this._toDataUri(graph) || (href && href.startsWith('data:') ? href : null);
-
-        // If we have a file path but no dataUri, read the file and convert it to base64
-        if (!dataUri && href && !href.startsWith('http') && !href.startsWith('data:')) {
-            dataUri = this._fileToDataUri(href);
-        }
-
-        const pathOrData = href || dataUri;
-        if (!pathOrData) return null;
+        if (!href) return null;
         return {
             label,
-            path: pathOrData,
-            dataUri: dataUri || (href && href.startsWith('data:') ? href : null),
+            path: href,
             baseDir: base
         };
-    }
-
-    _fileToDataUri(filePath) {
-        try {
-            if (!filePath || !fs.existsSync(filePath)) {
-                this._log(`[mcp-stata] File not found for data URI: ${filePath}`);
-                return null;
-            }
-
-            const buffer = fs.readFileSync(filePath);
-            const ext = path.extname(filePath).toLowerCase();
-
-            const mimeTypes = {
-                '.svg': 'image/svg+xml',
-                '.png': 'image/png',
-                '.jpg': 'image/jpeg',
-                '.jpeg': 'image/jpeg',
-                '.pdf': 'application/pdf'
-            };
-            const mimeType = mimeTypes[ext] || 'application/octet-stream';
-
-            const dataUri = `data:${mimeType};base64,${buffer.toString('base64')}`;
-            this._log(`[mcp-stata] Converted file to data URI: ${filePath} (${buffer.length} bytes)`);
-            return dataUri;
-        } catch (err) {
-            this._log(`[mcp-stata] Failed to convert file to data URI: ${err?.message || err}`);
-            return null;
-        }
     }
 
     _graphResponseToArtifact(resp, label, baseDir) {
@@ -1759,33 +1709,13 @@ class StataMcpClient {
         return out;
     }
 
-    _toDataUri(graph) {
-        if (!graph || typeof graph !== 'object') return null;
-        if (graph.data && graph.mimeType) return `data:${graph.mimeType};base64,${graph.data}`;
-        if (graph.image && graph.image.data && graph.image.mimeType) {
-            return `data:${graph.image.mimeType};base64,${graph.image.data}`;
-        }
-        const content = Array.isArray(graph.content) ? graph.content : [];
-        for (const item of content) {
-            if (item?.data && item?.mimeType) return `data:${item.mimeType};base64,${item.data}`;
-            if (item?.url && item.url.startsWith('data:')) return item.url;
-            if (item?.text) {
-                const parsed = this._parseArtifactLikeJson(item.text, null);
-                if (parsed?.dataUri) return parsed.dataUri;
-            }
-        }
-        return null;
-    }
-
     _artifactFromText(text, baseDir) {
         const trimmed = (text || '').trim();
         if (!trimmed) return null;
-        const isData = trimmed.startsWith('data:');
         const label = path.basename(trimmed) || 'graph';
         return {
             label,
             path: trimmed,
-            dataUri: isData ? trimmed : null,
             baseDir: baseDir || null
         };
     }
@@ -1797,12 +1727,10 @@ class StataMcpClient {
         // Common shapes: { path, url, data, mimeType }, or nested in "graph" key.
         const candidate = parsed.graph || parsed;
         const href = candidate.url || candidate.path || candidate.file || candidate.href || null;
-        const dataUri = this._toDataUri(candidate) || (href && href.startsWith('data:') ? href : null);
-        if (!href && !dataUri) return null;
+        if (!href) return null;
         return {
             label: candidate.name || candidate.label || candidate.graph_name || path.basename(href || '') || 'graph',
-            path: href || dataUri,
-            dataUri: dataUri || null,
+            path: href,
             baseDir: baseDir || null
         };
     }

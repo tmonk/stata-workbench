@@ -879,56 +879,15 @@ async function downloadGraphAsPdf(graphName) {
         const response = await mcpClient.fetchGraph(graphName, { format: 'pdf' });
         outputChannel.appendLine(`[Download] Response received: ${JSON.stringify(response, null, 2)}`);
 
-        // Extract the PDF data
-        let pdfData = null;
         let pdfPath = null;
         let savedPath = null;
 
-        // Check if response has base64 data
-        if (response?.data && response?.mimeType === 'application/pdf') {
-            pdfData = response.data;
-            outputChannel.appendLine('[Download] Found base64 data in response.data');
-        }
-
-        // Check dataUri regardless of path presence
-        if (!pdfData && response?.dataUri && response.dataUri.startsWith('data:application/pdf')) {
-            const base64Match = response.dataUri.match(/^data:application\/pdf;base64,(.+)$/);
-            if (base64Match) {
-                pdfData = base64Match[1];
-                outputChannel.appendLine('[Download] Extracted base64 from dataUri');
-            }
-        }
-
-        if (!pdfData && (response?.path || response?.file_path)) {
+        if (response?.path || response?.file_path) {
             pdfPath = response.path || response.file_path;
             outputChannel.appendLine(`[Download] Found file path: ${pdfPath}`);
         }
 
-        // If we have base64 data, convert to buffer and save
-        if (pdfData) {
-            outputChannel.appendLine('[Download] Converting base64 to buffer...');
-            const buffer = Buffer.from(pdfData, 'base64');
-            outputChannel.appendLine(`[Download] Buffer created: ${buffer.length} bytes`);
-
-            const defaultUri = vscode.Uri.file(path.join(os.homedir(), 'Downloads', `${graphName}.pdf`));
-
-            outputChannel.appendLine('[Download] Showing save dialog...');
-            const saveUri = await vscode.window.showSaveDialog({
-                defaultUri,
-                filters: { 'PDF Files': ['pdf'] },
-                saveLabel: 'Save Graph'
-            });
-
-            if (saveUri) {
-                outputChannel.appendLine(`[Download] Saving to: ${saveUri.fsPath}`);
-                await vscode.workspace.fs.writeFile(saveUri, buffer);
-                outputChannel.appendLine('[Download] Save complete!');
-                savedPath = saveUri.fsPath;
-            } else {
-                outputChannel.appendLine('[Download] User cancelled save dialog');
-                savedPath = null;
-            }
-        } else if (pdfPath && fs.existsSync(pdfPath)) {
+        if (pdfPath && fs.existsSync(pdfPath)) {
             outputChannel.appendLine(`[Download] Reading file from: ${pdfPath}`);
             // If we have a file path, copy it
             const defaultUri = vscode.Uri.file(path.join(os.homedir(), 'Downloads', `${graphName}.pdf`));
@@ -957,7 +916,6 @@ async function downloadGraphAsPdf(graphName) {
         return {
             path: savedPath || pdfPath || response?.path || response?.file_path || response?.url || response?.href || null,
             url: response?.url || response?.href || null,
-            dataUri: response?.dataUri || null,
             label: response?.label || graphName
         };
     } catch (error) {
@@ -1029,21 +987,16 @@ function renderGraphHtml(graphDetails, webview, extensionUri) {
 
     const tiles = items.map(g => {
         const name = escapeHtml(g.name || g.label || 'graph');
-        // Use dataUri directly - it's already a base64 data URI from Node.js conversion
-        const preview = g.dataUri || g.previewDataUri || g.path || '';
-        const canPreview = preview && preview.indexOf('data:image/') !== -1;
+        const preview = g.path || '';
+        const canPreview = preview && preview.toLowerCase().endsWith('.svg');
 
         const error = g.error
             ? `<div class="artifact-tile-error">Error: ${escapeHtml(g.error)}</div>`
             : '';
 
         const thumbHtml = canPreview
-            ? `<div class="artifact-thumb">
-                 <img src="${preview}" class="artifact-thumb-img" alt="${name}">
-               </div>`
-            : `<div class="artifact-thumb">
-                 <div class="artifact-thumb-fallback">PDF</div>
-               </div>`;
+            ? `<img src="file://${preview}" class="artifact-thumb-img" alt="${name}">`
+            : `<div class="artifact-thumb-fallback">File</div>`;
 
         // Make tile clickable to open modal
         const dataPath = escapeHtml(preview);

@@ -101,7 +101,7 @@ describe('McpClient', () => {
                     // Case 2: Object with just name (needs export)
                     { name: "named_graph" },
                     // Case 3: Fully formed artifact (no export needed)
-                    { name: "existing_graph", path: "/tmp/graph.pdf", dataUri: "data:application/pdf;base64,..." }
+                    { name: "existing_graph", path: "/tmp/graph.pdf" }
                 ]
             };
 
@@ -110,19 +110,12 @@ describe('McpClient', () => {
             };
 
             // Setup mock responses for exports
-            const expectedDataUri = `data:image/png;base64,${Buffer.from('fake_image_data').toString('base64')}`;
-            client._fileToDataUri = sinon.stub().returns(expectedDataUri);
             client._exportGraphPreferred = sinon.stub().callsFake(async (c, name) => {
                 return { content: [{ type: 'text', text: `/tmp/${name}.pdf` }] };
             });
 
             // Configure the stubbed _callTool to return artifacts
             // Note: _callTool takes (client, name, args)
-            client._callTool.withArgs(mockClient, 'export_graph', { graph_name: 'simple_graph', format: 'png' })
-                .resolves({ content: [{ type: 'text', text: '/tmp/simple_graph.png' }] });
-
-            client._callTool.withArgs(mockClient, 'export_graph', { graph_name: 'named_graph', format: 'png' })
-                .resolves({ content: [{ type: 'text', text: '/tmp/named_graph.png' }] });
 
             const artifacts = await client._resolveArtifactsFromList(mockResponse, '/tmp', mockClient);
 
@@ -232,7 +225,6 @@ describe('McpClient', () => {
             const art = client._parseArtifactLikeJson(input);
             expect(art.label).toEqual('g2');
             expect(art.path).toEqual('https://example.com/image.png');
-            expect(art.dataUri).toBeNull();
         });
 
         it('_parseArtifactLikeJson should return null for invalid json', () => {
@@ -765,8 +757,6 @@ describe('McpClient', () => {
             client._exportGraphPreferred = sinon.stub().resolves({ content: [{ type: 'text', text: '/tmp/g1.pdf' }] });
             client._callTool.withArgs(sinon.match.any, 'export_graph', sinon.match.has('format', 'png'))
                 .resolves({ content: [{ type: 'text', text: '/tmp/g1.png' }] });
-            const expectedDataUri = `data:image/png;base64,${Buffer.from('fake_image_data').toString('base64')}`;
-            client._fileToDataUri = sinon.stub().returns(expectedDataUri);
 
 
             const result = await client.listGraphs({ baseDir: '/tmp' });

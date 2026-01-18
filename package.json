@@ -158,11 +158,6 @@
           "default": "runDirtyFile",
           "description": "Choose whether 'Run File' should run the current editor content (including unsaved changes) or the version saved on disk."
         },
-        "stataMcp.useBase64Graphs": {
-          "type": "boolean",
-          "default": false,
-          "description": "Export graphs as base64-encoded data instead of file paths. Base64 is more token-intensive but works better for some workflows."
-        },
         "stataMcp.defaultVariableLimit": {
           "type": "number",
           "default": 100,
