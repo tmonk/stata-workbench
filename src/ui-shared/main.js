@@ -31,10 +31,11 @@ window.stataUI = {
         const INTERNAL_PATTERNS = [
             /capture\s+log\s+close\s+_mcp_smcl_/i,
             /capture\s+_return\s+hold\s+mcp_hold_/i,
-            /log\s+type:\s+.*smcl/i,
-            /opened\s+on:\s+/i,
-            /log:\s+.*mcp_smcl_/i,
-            /name:\s+.*_mcp_smcl_/i,
+            /^\s*(\{smcl\})?\s*$/i,
+            /(\s*\{[^}]+\})*\s*log\s+type:\s+.*smcl/i,
+            /(\s*\{[^}]+\})*\s*opened\s+on:\s+/i,
+            /(\s*\{[^}]+\})*\s*log:\s+.*(mcp_smcl_|<unnamed>)/i,
+            /(\s*\{[^}]+\})*\s*name:\s+.*(_mcp_smcl_|<unnamed>)/i,
             /\{txt\}\{sf\}\{ul off\}\{\.-\}/i
         ];
         const lines = text.split(/\r?\n/);
