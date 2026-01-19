@@ -56,13 +56,8 @@
         "title": "Stata: Test MCP Server Connection"
       },
       {
-        "command": "stata-workbench.showGraphs",
-        "title": "Stata: Show Graphs",
-        "icon": "$(graph)"
-      },
-      {
         "command": "stata-workbench.viewData",
-        "title": "Stata: Browse Data",
+        "title": "Stata: View Data",
         "icon": "$(table)"
       },
       {
@@ -129,6 +124,11 @@
           "default": false,
           "description": "Automatically show the Stata output channel after runs."
         },
+        "stataMcp.showAllLogsInOutput": {
+          "type": "boolean",
+          "default": false,
+          "description": "Stream all raw mcp-stata logs to the Stata Workbench Output channel."
+        },
         "stataMcp.autoConfigureMcp": {
           "type": "boolean",
           "default": true,
@@ -157,11 +157,6 @@
           ],
           "default": "runDirtyFile",
           "description": "Choose whether 'Run File' should run the current editor content (including unsaved changes) or the version saved on disk."
-        },
-        "stataMcp.useBase64Graphs": {
-          "type": "boolean",
-          "default": false,
-          "description": "Export graphs as base64-encoded data instead of file paths. Base64 is more token-intensive but works better for some workflows."
         },
         "stataMcp.defaultVariableLimit": {
           "type": "number",
@@ -233,7 +228,7 @@
     "compile": "node ./build/esbuild.js",
     "bundle": "node ./build/esbuild.js --production",
     "watch": "node ./build/esbuild.js --watch",
-    "test": "jest test/unit",
+    "test": "node --no-warnings=ExperimentalWarning ./node_modules/jest/bin/jest.js test/unit",
     "pretest:integration": "npm run compile",
     "test:integration": "node -e \"process.env.MCP_STATA_INTEGRATION='1'; require('./test/integration/runTest');\"",
     "vscode:prepublish": "npm run bundle",

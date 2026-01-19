@@ -29,6 +29,7 @@ const vscode = {
         showErrorMessage: jest.fn().mockResolvedValue(),
         showInformationMessage: jest.fn().mockResolvedValue(),
         createOutputChannel: jest.fn().mockReturnValue({
+            append: jest.fn(),
             appendLine: jest.fn(),
             show: jest.fn(),
             clear: jest.fn()
@@ -41,7 +42,8 @@ const vscode = {
             tooltip: '',
             command: undefined,
             backgroundColor: undefined
-        })
+        }),
+        withProgress: jest.fn().mockImplementation((_options, task) => task({ isCancellationRequested: false }))
     },
     commands: {
         registerCommand: jest.fn(),

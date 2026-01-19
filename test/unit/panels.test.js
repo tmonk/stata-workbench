@@ -13,11 +13,11 @@ jest.mock('../../src/artifact-utils', () => ({
 describe('Panels', () => {
     let terminalPanelModule;
 
-    let toEntry, smclToHtml, normalizeArtifacts, parseSMCL;
+    let toEntry, normalizeArtifacts, parseSMCL;
 
     beforeAll(() => {
         terminalPanelModule = require('../../src/terminal-panel');
-        ({ toEntry, smclToHtml, normalizeArtifacts, parseSMCL } = terminalPanelModule);
+        ({ toEntry, normalizeArtifacts, parseSMCL } = terminalPanelModule);
     });
 
     describe('TerminalPanel helpers', () => {
@@ -67,51 +67,6 @@ describe('Panels', () => {
             expect(entry.hasError).toBe(true);
             expect(entry.success).toBe(true); // as per determineSuccess logic for RC 0
             expect(entry.stdout).toContain('warning');
-        });
-
-        it('smclToHtml should handle global smcl tags and state switches', () => {
-            const input = '{smcl}{com}{sf}{ul off}{txt}Text';
-            const html = smclToHtml(input);
-            expect(html).not.toContain('{smcl}');
-            expect(html).toContain('class="smcl-com syntax-highlight"');
-            expect(html).toContain('class="smcl-txt"');
-            expect(html).toContain('Text');
-        });
-
-        it('smclToHtml should prevent nesting of mode tags', () => {
-            const input = '{com}Command{txt}Result';
-            const html = smclToHtml(input);
-            // Should close com before opening txt
-            // Using flexible regex but ensuring end tag comes before start tag
-            const comIndex = html.indexOf('smcl-com');
-            const txtIndex = html.indexOf('smcl-txt');
-            const closeSpanIndex = html.toLowerCase().indexOf('</span>', comIndex);
-
-            expect(comIndex).not.toBe(-1);
-            expect(txtIndex).not.toBe(-1);
-            expect(closeSpanIndex).not.toBe(-1);
-            expect(closeSpanIndex).toBeLessThan(txtIndex);
-        });
-
-        it('smclToHtml fallback should NOT nest other tags inside com', () => {
-            const input = '. some command {txt} output';
-            const html = smclToHtml(input);
-            // Fallback wraps ". some command ..." in standard span
-            // But if {txt} is inside, it should be closed first
-            // We want: <span class="com">. some command </span><span class="txt"> output</span>
-            // NOT: <span class="com">. some command <span class="txt"> output</span></span>
-
-            const comIndex = html.indexOf('smcl-com');
-            const txtIndex = html.indexOf('smcl-txt');
-            // Find the *first* closing span after com starts
-            const firstClose = html.indexOf('</span>', comIndex);
-
-            expect(comIndex).not.toBe(-1);
-            expect(txtIndex).not.toBe(-1);
-            expect(firstClose).not.toBe(-1);
-            // The first closing span should happen BEFORE the txt span starts
-            // indicating that we closed the 'com' mode before opening 'txt'
-            expect(firstClose).toBeLessThan(txtIndex);
         });
 
         it('normalizeArtifacts should filter nulls', () => {

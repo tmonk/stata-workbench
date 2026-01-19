@@ -136,17 +136,6 @@ describe('UI Integration', () => {
 
     //     await api.TerminalPanel._handleDownloadGraphPdf('gint');
 
-    //     assert.isOk(downloadResult, 'download result should exist');
-    //     const resolvedPath = downloadResult.path || downloadResult.file_path || downloadResult.url || null;
-    //     const resolvedDataUri = downloadResult.dataUri || null;
-    //     assert.isTrue(!!resolvedPath || !!resolvedDataUri, 'download result should contain a path/url or dataUri');
-    //     if (resolvedPath) {
-    //         assert.match(resolvedPath, /\.pdf$/i, 'result path/url should be a PDF');
-    //     }
-    //     if (resolvedDataUri) {
-    //         assert.match(resolvedDataUri, /^data:application\/pdf;base64,/i, 'dataUri should be a PDF data URI');
-    //     }
-    // });
 
     test('Stop button cancels a running command', async () => {
         if (!enabled) {

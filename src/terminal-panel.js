@@ -1,453 +1,99 @@
 const { openArtifact, revealArtifact, copyToClipboard, resolveArtifactUri } = require('./artifact-utils');
 const path = require('path');
+const os = require('os');
 const vscode = require('vscode');
 const fs = require('fs');
 const { filterMcpLogs } = require('./log-utils');
-
 /**
  * Parse SMCL text and extract formatted error information
  * @param {string} smclText -Raw SMCL text
  * @returns {{rc: number|null, formattedText: string}}
  */
 function parseSMCL(smclText) {
-  if (!smclText) return { rc: null, formattedText: '' };
+    if (!smclText) return { rc: null, formattedText: '' };
+    const lines = smclText.split('\n');
+    let extractedRC = null;
+    let callStack = [];
+    let commandHistory = [];
+    let errorMessages = [];
+    let errorLineIndex = -1;
+    let hasError = false;
 
-  const lines = smclText.split('\n');
-  let extractedRC = null;
-  let callStack = [];
-  let commandHistory = [];
-  let errorMessages = [];
-  let errorLineIndex = -1;
-  let hasError = false;
-
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    const trimmedLine = line.trim();
-    if (!trimmedLine) continue;
-
-    // 1. Extract return code from explicit tags as a priority
-    if (!extractedRC) {
-      // Look for Stata's standard return code search tag
-      const searchMatch = line.match(/\{search r\((\d+)\)/i);
-      if (searchMatch) {
-        extractedRC = parseInt(searchMatch[1], 10);
-      } else {
-        // Look for the standard standalone return code line at the end
-        const standaloneRC = trimmedLine.match(/^r\((\d+)\);$/);
-        if (standaloneRC) {
-          extractedRC = parseInt(standaloneRC[1], 10);
-        }
-      }
-    }
-
-    // 2. Detect error messages -ONLY capture from {err} tags
-    const errMatch = line.match(/^\{err\}(.+)$/);
-    if (errMatch) {
-      hasError = true;
-      const errorText = errMatch[1].trim().replace(/\{[^}]+\}/g, '');
-      if (errorText) {
-        errorMessages.push(errorText);
-        if (errorLineIndex === -1) errorLineIndex = i;
-      }
-    }
-
-    // 3. Track call stack -look for begin/end blocks
-    const beginMatch = line.match(/begin\s+(\S+)/);
-    if (beginMatch) {
-      const funcName = beginMatch[1];
-      if (errorLineIndex === -1 || i < errorLineIndex) {
-        callStack.push(funcName);
-      }
-    }
-
-    const endMatch = line.match(/end\s+(\S+)/);
-    if (endMatch && callStack.length > 0) {
-      // ONLY pop if we haven't found an error yet. This effectively "freezes" the stack state at the error.
-      if (errorLineIndex === -1 || i < errorLineIndex) {
-        const funcName = endMatch[1];
-        if (callStack[callStack.length - 1] === funcName) {
-          callStack.pop();
-        }
-      }
-    }
-
-    // 4. Capture executed commands -ONLY capture from {com} or '= ' lines
-    if (trimmedLine.startsWith('= ')) {
-      let cmd = trimmedLine.substring(2).trim();
-      // Handle multiple prefixes
-      cmd = cmd.replace(/^((cap(ture)?|qui(etly)?|noi(sily)?)\s+)+/gi, '').trim();
-
-      const isUtilityCmd = /^(loc(al)?|if|else|args|return|exit|scalar|matrix|global|tempvar|tempname|tempfile|macro|while|foreach|forvalues|continue|Cleanup|Drop|Clear)\b/i.test(cmd);
-      if (!isUtilityCmd && cmd.length > 0 && (errorLineIndex === -1 || i < errorLineIndex)) {
-        commandHistory.push(cmd);
-        if (commandHistory.length > 3) commandHistory.shift();
-      }
-    } else {
-      const comMatch = line.match(/^\{com\}(.+)$/);
-      if (comMatch) {
-        let cmd = comMatch[1].trim().replace(/\{[^}]+\}/g, '');
-
-        // Strip prompt early so it doesn't trigger utility check for "."
-        if (cmd.startsWith('. ')) {
-          cmd = cmd.substring(2).trim();
-        }
-
-        // Handle multiple prefixes
-        cmd = cmd.replace(/^((cap(ture)?|qui(etly)?|noi(sily)?)\s+)+/gi, '').trim();
-
-        const isUtilityCmd = /^(loc(al)?|if|else|args|\.|\*|while|foreach|forvalues|continue|Cleanup|Drop|Clear)\b/i.test(cmd);
-        if (!isUtilityCmd && cmd.length > 0 && (errorLineIndex === -1 || i < errorLineIndex)) {
-          commandHistory.push(cmd);
-          if (commandHistory.length > 3) commandHistory.shift();
-        }
-      }
-    }
-  }
-
-  // Formatting return
-  if (errorMessages.length === 0) {
-    return {
-      rc: extractedRC,
-      formattedText: '',
-      hasError: hasError
-    };
-  }
-
-  // Filter out redundant "error ###" if we have more specific errors
-  let filteredErrors = errorMessages.filter(e => e.length > 0);
-  if (filteredErrors.length > 1) {
-    const hasSpecificError = filteredErrors.some(e => !e.match(/^error \d+$/i));
-    if (hasSpecificError) {
-      filteredErrors = filteredErrors.filter(e => !e.match(/^error \d+$/i));
-    }
-  }
-
-  const uniqueErrors = [...new Set(filteredErrors)];
-  let parts = [];
-
-  if (callStack.length > 0) {
-    parts.push(`In: ${callStack.join(' → ')}`);
-  }
-  if (commandHistory.length > 0) {
-    const cmd = commandHistory[commandHistory.length - 1];
-    // Indent subsequent lines of the command for readability
-    const formattedCmd = cmd.replace(/,\s+/g, ',\n    ').replace(/\s+(if|in|using)\s+/gi, '\n    $1 ').trim();
-    parts.push(`\nCommand:\n  ${formattedCmd}`);
-  }
-  if (uniqueErrors.length > 0) {
-    parts.push(`\nError: ${uniqueErrors.join('\n       ')}`);
-  }
-
-  return {
-    rc: extractedRC,
-    formattedText: parts.join('\n').trim(),
-    hasError: hasError
-  };
-}
-
-/**
- * Convert SMCL markup to HTML for display
- * @param {string} text -SMCL formatted text
- * @returns {string} HTML formatted text
- */
-function smclToHtml(text) {
-  if (!text) return '';
-
-  // Handle case where . prompt is present but no {com} tag (fallback)
-  // 0. Filter out mcp-stata internal lines from the stream/log using centralized utility
-  const filteredText = filterMcpLogs(text);
-
-  // Normalize newlines early to avoid split discrepancies
-  let normalized = filteredText.replace(/\r\n/g, '\n');
-
-  // Refinement: Collapse prompt-only lines.
-  // Stata often streams the prompt '. ' separately with a newline before the command or response.
-  // This normalization makes the streamed output match the final collapsed log and avoids extra line breaks.
-  normalized = normalized.replace(/^(\. ?)\n/gm, '$1');
-
-  let lines = normalized.split('\n');
-
-  lines = lines.map(line => {
-    // Only apply fallback if line looks like a prompt and doesn't already have HTML/SMCL tags
-    if (line.trim().startsWith('.') && !line.includes('<span') && !line.includes('{com}')) {
-      return `{com}${line}{/com}`;
-    }
-    return line;
-  });
-  let processedText = lines.join('\n');
-
-  // Remove global SMCL wrappers
-  let html = processedText.replace(/\{smcl\}|\{\/smcl\}/gi, '');
-
-  // 1. Basic entity cleaning
-  html = html
-    .replace(/&/g, '&amp;')
-    .replace(/\{c -\}/g, '-')
-    .replace(/\{c \|\}/g, '|')
-    .replace(/\{c \+\}/g, '+')
-    .replace(/\{c B\+\}/g, '+')
-    .replace(/\{c \+T\}/g, '+')
-    .replace(/\{c T\+\}/g, '+')
-    .replace(/\{c TT\}/g, '+')
-    .replace(/\{c BT\}/g, '+')
-    .replace(/\{c TR\}/g, '+')
-    .replace(/\{c TL\}/g, '+')
-    .replace(/\{c BR\}/g, '+')
-    .replace(/\{c BL\}/g, '+')
-    .replace(/\{c -(?:-)*\}/g, (m) => '-'.repeat(m.length - 4))
-    .replace(/\{c \+(?:\+)*\}/g, (m) => '+'.repeat(m.length - 4));
-
-  // Handle character escapes for braces matches
-  html = html.replace(/\{c -\(\}/g, '__BRACE_OPEN__').replace(/\{c \)-\}/g, '__BRACE_CLOSE__');
-
-  // Regex for tokenization
-  const tokenRegex = /(\{[^}]+\})|(\n)|([^{}\n]+)/g;
-
-  let match;
-  let result = '';
-  // "First Principles": track column position to handle {col N}
-  let currentLineLen = 0;
-
-  // State for mode nesting prevention
-  const MODE_TAGS = ['com', 'res', 'err', 'txt', 'input', 'result', 'text', 'error'];
-  const openTags = [];
-
-  while ((match = tokenRegex.exec(html)) !== null) {
-    const fullMatch = match[0];
-    const tag = match[1];
-    const newline = match[2];
-    const text = match[3];
-
-    if (newline) {
-      result += '\n';
-      currentLineLen = 0;
-      continue;
-    }
-
-    if (text) {
-      result += text;
-      // Decode entities for length calculation approximation
-      let visibleLen = text.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').length;
-      currentLineLen += visibleLen;
-      continue;
-    }
-
-    if (tag) {
-      // Strip braces for parsing
-      const inner = tag.substring(1, tag.length - 1);
-
-      // Handle {tag:content} syntax
-      let tagName = inner;
-      let tagContent = null;
-      const firstColon = inner.indexOf(':');
-
-      if (firstColon !== -1) {
-        // Heuristic: Command is always first word.
-        const cmdCandidate = inner.substring(0, firstColon).split(/\s+/)[0].toLowerCase();
-
-        // If the command is NOT one of the positioning commands that typically use space-separated parameters,
-        // then treat it as a tag:content structure.
-        if (!['col', 'column', 'space', 'hline', '.-'].includes(cmdCandidate)) {
-          tagName = inner.substring(0, firstColon);
-          tagContent = inner.substring(firstColon + 1);
-        }
-      }
-
-      const parts = tagName.split(/\s+/); // only split command part
-      const command = parts[0].toLowerCase();
-
-      // 1. Positioning Commands
-      if (command === 'col' || command === 'column') {
-        const dest = parseInt(parts[1], 10);
-        if (!isNaN(dest)) {
-          let spacesNeeded = (dest - 1) - currentLineLen;
-          if (spacesNeeded > 0) {
-            const spacer = ' '.repeat(spacesNeeded);
-            result += spacer;
-            currentLineLen += spacesNeeded;
-          }
-        }
-        continue;
-      }
-
-      if (command === 'space') {
-        const amt = parts[1] ? parseInt(parts[1], 10) : 1;
-        if (!isNaN(amt)) {
-          const spacer = ' '.repeat(amt);
-          result += spacer;
-          currentLineLen += amt;
-        }
-        continue;
-      }
-
-      if (command.startsWith('hline')) {
-        let len = 12; // default
-        if (parts[1] && !isNaN(parseInt(parts[1]))) {
-          len = parseInt(parts[1], 10);
-        }
-        const dashes = '-'.repeat(len);
-        result += dashes;
-        currentLineLen += len;
-        continue;
-      }
-
-      if (command === '.-') {
-        result += '-';
-        currentLineLen += 1;
-        continue;
-      }
-
-      // 2. Styling/Mode Commands
-      if (command === 'ralign' || command === 'lalign' || command === 'center') {
-        if (tagContent !== null) {
-          let width = parseInt(parts[1], 10);
-          let innerHtml = smclToHtml(tagContent);
-
-          if (!isNaN(width)) {
-            let visibleText = innerHtml.replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>');
-            let len = visibleText.length;
-            let padding = Math.max(0, width - len);
-
-            if (padding > 0) {
-              let leftPad = 0, rightPad = 0;
-              if (command === 'ralign') leftPad = padding;
-              else if (command === 'lalign') rightPad = padding;
-              else if (command === 'center') { leftPad = Math.floor(padding / 2); rightPad = padding - leftPad; }
-
-              if (leftPad) { result += ' '.repeat(leftPad); currentLineLen += leftPad; }
-              result += innerHtml;
-              currentLineLen += len;
-              if (rightPad) { result += ' '.repeat(rightPad); currentLineLen += rightPad; }
-              continue;
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        const trimmedLine = line.trim();
+        if (!trimmedLine) continue;
+        if (!extractedRC) {
+            const searchMatch = line.match(/\{search r\((\d+)\)/i);
+            if (searchMatch) {
+                extractedRC = parseInt(searchMatch[1], 10);
+            } else {
+                const standaloneRC = trimmedLine.match(/^r\((\d+)\);$/);
+                if (standaloneRC) {
+                    extractedRC = parseInt(standaloneRC[1], 10);
+                }
             }
-          }
-          result += innerHtml;
-          let visibleText = innerHtml.replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>');
-          currentLineLen += visibleText.length;
-          continue;
         }
-      }
-
-      // Standard Mode Tags
-      if (MODE_TAGS.includes(command) || command === '/' + openTags[openTags.length - 1]) {
-        // If we have content {res:text}, wrap strict.
-        if (tagContent !== null && MODE_TAGS.includes(command)) {
-          result += startTag(command);
-          let innerC = smclToHtml(tagContent);
-          result += innerC;
-          result += '</span>';
-
-          let visibleText = innerC.replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>');
-          currentLineLen += visibleText.length;
-          continue;
+        const errMatch = line.match(/^\{err\}(.+)$/);
+        if (errMatch) {
+            hasError = true;
+            const errorText = errMatch[1].trim().replace(/\{[^}]+\}/g, '');
+            if (errorText) {
+                errorMessages.push(errorText);
+                if (errorLineIndex === -1) errorLineIndex = i;
+            }
         }
-
-        // Close existing if open
-        if (openTags.length > 0) {
-          const current = openTags[openTags.length - 1];
-          if (MODE_TAGS.includes(command)) {
-            result += `</span>`;
-            openTags.pop();
-          } else if (command === '/' + current) {
-            result += `</span>`;
-            openTags.pop();
-            continue;
-          }
+        const beginMatch = line.match(/begin\s+(\S+)/);
+        if (beginMatch) {
+            const funcName = beginMatch[1];
+            if (errorLineIndex === -1 || i < errorLineIndex) callStack.push(funcName);
         }
-
-        // Open new
-        if (MODE_TAGS.includes(command)) {
-          const className = `smcl-${command}`;
-          let extraClass = '';
-          if (command === 'com') extraClass = ' syntax-highlight';
-          result += `<span class="${className}${extraClass}">`;
-          openTags.push(command);
+        const endMatch = line.match(/end\s+(\S+)/);
+        if (endMatch && callStack.length > 0) {
+            if (errorLineIndex === -1 || i < errorLineIndex) {
+                const funcName = endMatch[1];
+                if (callStack[callStack.length - 1] === funcName) callStack.pop();
+            }
         }
-        continue;
-      }
-
-      // 3. Links and other complex tags (skip but keep simple)
-      if (command === 'browse' || command === 'view') {
-        continue;
-      }
+        if (trimmedLine.startsWith('= ')) {
+            let cmd = trimmedLine.substring(2).trim();
+            cmd = cmd.replace(/^((cap(ture)?|qui(etly)?|noi(sily)?)\s+)+/gi, '').trim();
+            const isUtilityCmd = /^(loc(al)?|if|else|args|return|exit|scalar|matrix|global|tempvar|tempname|tempfile|macro|while|foreach|forvalues|continue|Cleanup|Drop|Clear)\b/i.test(cmd);
+            if (!isUtilityCmd && cmd.length > 0 && (errorLineIndex === -1 || i < errorLineIndex)) {
+                commandHistory.push(cmd);
+                if (commandHistory.length > 3) commandHistory.shift();
+            }
+        } else {
+            const comMatch = line.match(/^\{com\}(.+)$/);
+            if (comMatch) {
+                let cmd = comMatch[1].trim().replace(/\{[^}]+\}/g, '');
+                if (cmd.startsWith('. ')) cmd = cmd.substring(2).trim();
+                cmd = cmd.replace(/^((cap(ture)?|qui(etly)?|noi(sily)?)\s+)+/gi, '').trim();
+                const isUtilityCmd = /^(loc(al)?|if|else|args|\.|\*|while|foreach|forvalues|continue|Cleanup|Drop|Clear)\b/i.test(cmd);
+                if (!isUtilityCmd && cmd.length > 0 && (errorLineIndex === -1 || i < errorLineIndex)) {
+                    commandHistory.push(cmd);
+                    if (commandHistory.length > 3) commandHistory.shift();
+                }
+            }
+        }
     }
-  }
-
-  // Close any remaining tags
-  while (openTags.length > 0) {
-    result += '</span>';
-    openTags.pop();
-  }
-
-  // Restore placeholders
-  result = result.replace(/__BRACE_OPEN__/g, '{').replace(/__BRACE_CLOSE__/g, '}');
-
-  // Fallback for lines starting with . (legacy support)
-  if (!result.includes('smcl-com')) {
-    if (result.trim().startsWith('.') && !result.includes('smcl-')) {
-      result = `<span class="smcl-com syntax-highlight">${result}</span>`;
+    if (errorMessages.length === 0) return { rc: extractedRC, formattedText: '', hasError: hasError };
+    let filteredErrors = errorMessages.filter(e => e.length > 0);
+    if (filteredErrors.length > 1) {
+        const hasSpecificError = filteredErrors.some(e => !e.match(/^error \d+$/i));
+        if (hasSpecificError) filteredErrors = filteredErrors.filter(e => !e.match(/^error \d+$/i));
     }
-  }
-
-  return result;
+    const uniqueErrors = [...new Set(filteredErrors)];
+    let parts = [];
+    if (callStack.length > 0) parts.push(`In: ${callStack.join(' → ')}`);
+    if (commandHistory.length > 0) {
+        const cmd = commandHistory[commandHistory.length - 1];
+        const formattedCmd = cmd.replace(/,\s+/g, ',\n    ').replace(/\s+(if|in|using)\s+/gi, '\n    $1 ').trim();
+        parts.push(`\nCommand:\n  ${formattedCmd}`);
+    }
+    if (uniqueErrors.length > 0) parts.push(`\nError: ${uniqueErrors.join('\n       ')}`);
+    return { rc: extractedRC, formattedText: parts.join('\n').trim(), hasError: hasError };
 }
-
-/**
- * Helper to start an HTML tag for SMCL
- */
-function startTag(tagName) {
-  const meta = getTagMeta(tagName);
-  let className = meta.class ? ` class="${meta.class}"` : '';
-  if (tagName === 'com') {
-    className = ' class="smcl-com syntax-highlight"';
-  }
-  const dataAttrs = meta.data ? ` ${meta.data}` : '';
-  return `<span${className}${dataAttrs}>`;
-}
-
-/**
- * Helper to wrap content in an HTML tag for SMCL
- */
-function wrapTag(tagName, content) {
-  const meta = getTagMeta(tagName);
-  if (tagName === 'com') {
-    // SPECIAL: Trigger syntax highlighting for command blocks
-    // This is a marker for the UI to process the content
-    return `<span class="smcl-com syntax-highlight">${content}</span>`;
-  }
-  const className = meta.class ? ` class="${meta.class}"` : '';
-  const dataAttrs = meta.data ? ` ${meta.data}` : '';
-  return `<span${className}${dataAttrs}>${content}</span>`;
-}
-
-/**
- * Maps SMCL tags to CSS classes and metadata
- */
-function getTagMeta(tagName) {
-  // Normalize tag name
-  const tag = tagName.toLowerCase().split(/\s+/)[0];
-
-  switch (tag) {
-    case 'res': return { class: 'smcl-res' };
-    case 'txt': return { class: 'smcl-txt' };
-    case 'err': return { class: 'smcl-err' };
-    case 'com': return { class: 'smcl-com' };
-    case 'bf': return { class: 'smcl-bf' };
-    case 'it': return { class: 'smcl-it' };
-    case 'sf': return { class: 'smcl-sf' };
-    case 'ul': return { class: 'smcl-ul' };
-    case 'stata':
-      // Handle {stata "cmd":label} -we'll just style it for now
-      return { class: 'smcl-link', data: 'data-type="stata"' };
-    case 'help':
-      return { class: 'smcl-link', data: 'data-type="help"' };
-    case 'browse':
-      return { class: 'smcl-link', data: 'data-type="browse"' };
-    default:
-      return { class: '' };
-  }
-}
-
 
 class TerminalPanel {
   static currentPanel = null;
@@ -463,6 +109,7 @@ class TerminalPanel {
   static _activeFilePath = null;
   static _webviewReady = true;
   static _pendingWebviewMessages = [];
+  static _panelInstanceId = 0;
 
   static setExtensionUri(uri) {
     TerminalPanel.extensionUri = uri;
@@ -504,10 +151,13 @@ class TerminalPanel {
           enableScripts: true,
           retainContextWhenHidden: true,
           localResourceRoots: [
-            vscode.Uri.joinPath(TerminalPanel.extensionUri, 'src', 'ui-shared')
+            vscode.Uri.joinPath(TerminalPanel.extensionUri, 'src', 'ui-shared'),
+            vscode.Uri.file(os.tmpdir())
           ]
         }
       );
+      TerminalPanel._panelInstanceId += 1;
+      TerminalPanel.currentPanel.__stataPanelId = TerminalPanel._panelInstanceId;
 
       TerminalPanel.currentPanel.onDidDispose(() => {
         TerminalPanel.currentPanel = null;
@@ -534,10 +184,6 @@ class TerminalPanel {
           return;
         }
 
-        if (message.type === 'showGraphs') {
-          vscode.commands.executeCommand('stata-workbench.showGraphs');
-          return;
-        }
 
         if (message.type === 'run' && typeof message.code === 'string') {
           await TerminalPanel.handleRun(message.code, runCommand);
@@ -628,7 +274,11 @@ class TerminalPanel {
     if (!webview || typeof webview.postMessage !== 'function') return;
     if (!TerminalPanel._webviewReady) {
       TerminalPanel._pendingWebviewMessages.push(msg);
+      if (msg && msg.type && msg.type !== 'runLogAppend') {
+      }
       return;
+    }
+    if (msg && (msg.type === 'taskDoneOutput' || msg.type === 'runFinished')) {
     }
     webview.postMessage(msg);
   }
@@ -662,12 +312,25 @@ class TerminalPanel {
     try {
       const cwd = TerminalPanel._activeFilePath ? path.dirname(TerminalPanel._activeFilePath) : null;
       const hooks = {
+        runId,
         onLog: (text) => {
           if (!text) return;
-          TerminalPanel._postMessage({ type: 'runLogAppend', runId, text: smclToHtml(String(text)) });
+        TerminalPanel._postMessage({ type: 'runLogAppend', runId, text: formatStreamChunk(text), streamFormat: 'plain' });
         },
         onProgress: (progress, total, message) => {
           TerminalPanel._postMessage({ type: 'runProgress', runId, progress, total, message });
+        },
+        onTaskDone: (payload) => {
+          let stdout = null;
+          if (payload?.logPath) {
+            try {
+              const stats = fs.statSync(payload.logPath);
+              if (stats.size > 0 && stats.size <= 50000) {
+                stdout = fs.readFileSync(payload.logPath, 'utf8');
+              }
+            } catch (_err) { }
+          }
+          TerminalPanel.notifyTaskDone(runId, payload?.logPath, payload?.logSize, stdout, payload?.rc);
         },
         cwd
       };
@@ -723,10 +386,10 @@ class TerminalPanel {
         hasError: parsed.hasError,
         durationMs: result?.durationMs ?? null,
         // Main stdout: only show if success=true.
-        stdout: success ? smclToHtml(result?.stdout || result?.contentText || '') : '',
+        stdout: success ? (result?.stdout || result?.contentText || '') : '',
         // fullStdout: always available for the 'Log' tab.
-        fullStdout: smclToHtml(result?.stdout || result?.contentText || ''),
-        stderr: success ? '' : smclToHtml(finalStderr),
+        fullStdout: (result?.stdout || result?.contentText || ''),
+        stderr: success ? '' : finalStderr,
         artifacts: normalizeArtifacts(result),
         baseDir: result?.cwd || ''
       });
@@ -813,7 +476,7 @@ class TerminalPanel {
     if (!TerminalPanel.currentPanel || !runId) return;
     const chunk = String(text ?? '');
     if (!chunk) return;
-    TerminalPanel._postMessage({ type: 'runLogAppend', runId, text: smclToHtml(chunk) });
+    TerminalPanel._postMessage({ type: 'runLogAppend', runId, text: formatStreamChunk(chunk), streamFormat: 'plain' });
   }
 
   static updateStreamingProgress(runId, progress, total, message) {
@@ -869,10 +532,10 @@ class TerminalPanel {
       durationMs: result?.durationMs ?? null,
       // Do not ship full stdout on failure; rely on stderr/tail.
       // Apply smclToHtml to the final result
-      stdout: success ? smclToHtml(result?.stdout || result?.contentText || '') : '',
+      stdout: success ? (result?.stdout || result?.contentText || '') : '',
       // fullStdout: OMITTED intentionally if we have a log path to safe memory
       // The frontend will now use the LogViewer to fetch data from disk.
-      stderr: success ? '' : smclToHtml(finalStderr),
+      stderr: success ? '' : finalStderr,
       logPath: result?.logPath || null,
       logSize,
       artifacts: normalizeArtifacts(result),
@@ -881,25 +544,55 @@ class TerminalPanel {
     TerminalPanel._postMessage({ type: 'busy', value: false });
   }
 
+  static notifyTaskDone(runId, logPath, logSize, stdout, rc) {
+    if (!TerminalPanel.currentPanel || !runId) return;
+    TerminalPanel._postMessage({ 
+      type: 'taskDone', 
+      runId, 
+      logPath: logPath || null, 
+      logSize: logSize ?? null, 
+      stdout: stdout || null,
+      rc: rc ?? null
+    });
+  }
+
+  static appendRunArtifact(runId, artifact) {
+    if (!TerminalPanel.currentPanel || !runId || !artifact) return;
+    const webview = TerminalPanel.currentPanel.webview;
+    const baseDir = artifact.baseDir || null;
+    const resolved = artifact.path ? resolveArtifactUri(artifact.path, baseDir) : null;
+    const previewPath = (webview && resolved && resolved.scheme === 'file' && resolved.fsPath.toLowerCase().endsWith('.svg'))
+      ? webview.asWebviewUri(resolved).toString()
+      : null;
+    if (previewPath) {
+      console.log('[TerminalPanel] SVG previewPath', previewPath);
+    } else if (artifact.path) {
+      console.log('[TerminalPanel] No previewPath for', artifact.path);
+    }
+    TerminalPanel._postMessage({
+      type: 'runArtifact',
+      runId,
+      artifact: { ...artifact, previewPath }
+    });
+  }
+
   static async _handleFetchLog(runId, path, offset, maxBytes) {
     console.log(`[TerminalPanel] _handleFetchLog: runId=${runId} path=${path} offset=${offset}`);
     if (!path) return;
+    if (offset === 0) {
+    }
     try {
       // Lazy require to avoid circularity if possible, or assume mcpClient is globally available 
       if (TerminalPanel._logProvider) {
         const slice = await TerminalPanel._logProvider(path, offset, maxBytes);
         const rawData = slice?.data || '';
-        // Apply SMCL formatting so the frontend displays styled text
-        // Note: partial chunks might split chunks of tags. A robust solution would need a streaming parser state.
-        // For now, stateless formatting on chunks is a reasonable approximation for viewing logs.
-        const formatted = smclToHtml(rawData);
 
         TerminalPanel._postMessage({
           type: 'logChunk',
           runId,
           path,
           offset,
-          data: formatted,
+          data: rawData,
           nextOffset: slice?.next_offset
         });
       }
@@ -993,7 +686,7 @@ class TerminalPanel {
 
 }
 
-module.exports = { TerminalPanel, toEntry, normalizeArtifacts, parseSMCL, smclToHtml, determineSuccess };
+module.exports = { TerminalPanel, toEntry, normalizeArtifacts, parseSMCL, determineSuccess };
 
 function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = []) {
   const designUri = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'src', 'ui-shared', 'design.css'));
@@ -1010,7 +703,7 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${webview.cspSource} https: data:; script-src 'nonce-${nonce}' ${webview.cspSource}; style-src 'unsafe-inline' ${webview.cspSource} https://unpkg.com; font-src ${webview.cspSource} https://unpkg.com;">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${webview.cspSource} https: data:; script-src 'nonce-${nonce}' ${webview.cspSource}; style-src 'unsafe-inline' ${webview.cspSource} https://unpkg.com; font-src ${webview.cspSource} https://unpkg.com; connect-src ${webview.cspSource} http://127.0.0.1:7245;">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <link rel="stylesheet" href="${designUri}">
   <link rel="stylesheet" href="${highlightCssUri}">
@@ -1090,14 +783,15 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
         <button class="btn btn-ghost btn-icon" id="btn-open-browser" title="Open Data Browser">
           <i class="codicon codicon-table"></i>
         </button>
-        <button class="btn btn-ghost btn-icon" id="btn-show-graphs" title="Show Graphs">
+        <!-- <button class="btn btn-ghost btn-icon" id="btn-show-graphs" title="Show Graphs">
           <i class="codicon codicon-graph"></i>
-        </button>
+        </button> -->
       </div>
     </div>
   </div>
 
   <main class="chat-stream" id="chat-stream">
+    <div id="session-artifacts"></div>
     <!--Entries injected here -->
   </main>
 
@@ -1191,14 +885,20 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
     };
 
     let highlightTimer = null;
+    let highlightScheduled = 0;
     function scheduleHighlight() {
-        if (highlightTimer) clearTimeout(highlightTimer);
-        highlightTimer = setTimeout(() => {
+        if (highlightTimer) return;
+        highlightScheduled += 1;
+        console.log('[Highlight] scheduled ' + highlightScheduled);
+        highlightTimer = requestAnimationFrame(() => {
+            const start = Date.now();
             if (window.stataUI && window.stataUI.processSyntaxHighlighting) {
                 window.stataUI.processSyntaxHighlighting();
             }
+            const elapsed = Date.now() - start;
+            console.log('[Highlight] ran in ' + elapsed + 'ms');
             highlightTimer = null;
-        }, 100);
+        });
     }
     
     // Initial load
@@ -1208,21 +908,48 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
         }
     });
 
-    // Listen for new messages
-    window.addEventListener('message', event => {
-        const message = event.data;
-        if (message.type === 'runLogAppend' || message.type === 'append' || message.type === 'runFinished') {
-            scheduleHighlight();
-        }
-    });
+    const taskDoneRuns = new Set();
     
     const chatStream = document.getElementById('chat-stream');
+    const originalConsole = {
+        log: console.log.bind(console),
+        warn: console.warn.bind(console),
+        error: console.error.bind(console)
+    };
+    const forwardConsole = (level, args) => {
+        try {
+            const message = args.map(arg => {
+                if (typeof arg === 'string') return arg;
+                try {
+                    return JSON.stringify(arg);
+                } catch (_err) {
+                    return String(arg);
+                }
+            }).join(' ');
+            vscode.postMessage({ type: 'log', level, message });
+        } catch (_err) {
+        }
+    };
+    console.log = (...args) => {
+        originalConsole.log(...args);
+        forwardConsole('info', args);
+    };
+    console.warn = (...args) => {
+        originalConsole.warn(...args);
+        forwardConsole('warn', args);
+    };
+    console.error = (...args) => {
+        originalConsole.error(...args);
+        forwardConsole('error', args);
+    };
+    window.addEventListener('error', (event) => {
+        forwardConsole('error', [event?.message || 'Webview error', event?.filename, event?.lineno, event?.colno]);
+    });
     const input = document.getElementById('command-input');
     const runBtn = document.getElementById('run-btn');
     const stopBtn = document.getElementById('stop-btn');
     const clearBtn = document.getElementById('clear-btn');
     const btnOpenBrowser = document.getElementById('btn-open-browser');
-    const btnShowGraphs = document.getElementById('btn-show-graphs');
     const dataSummary = document.getElementById('data-summary');
     const obsCount = document.getElementById('obs-count');
     const varCount = document.getElementById('var-count');
@@ -1233,11 +960,6 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
         });
     }
 
-    if (btnShowGraphs) {
-        btnShowGraphs.addEventListener('click', () => {
-            vscode.postMessage({ type: 'showGraphs' });
-        });
-    }
 
     // Initial history embedded from server
     const initialEntries = window.initialEntries || [];
@@ -1248,6 +970,10 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
     let lastCompletion = null;
 
     const runs = Object.create(null);
+    const runMetrics = Object.create(null);
+    const sessionArtifacts = [];
+    const sessionArtifactKeys = new Set();
+    const sessionArtifactsEl = document.getElementById('session-artifacts');
 
     let busy = false;
 
@@ -1260,6 +986,12 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
         // Reset runs tracking
         for (const key in runs) {
             delete runs[key];
+        }
+
+        sessionArtifacts.length = 0;
+        sessionArtifactKeys.clear();
+        if (sessionArtifactsEl) {
+            sessionArtifactsEl.innerHTML = '';
         }
         
         // Reset history
@@ -1283,33 +1015,27 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
 
     function safeSliceTail(html, limit) {
         if (!html || html.length <= limit) return html || '';
-        let start = html.length -limit;
-        // Search for the first newline after the potential cut point.
-        // This ensures we start on a fresh line, avoiding broken tags.
+        let start = html.length - limit;
+        
         const firstNewline = html.indexOf(String.fromCharCode(10), start);
-        const firstTagStart = html.indexOf('<', start);
+        const firstHtmlTag = html.indexOf('<', start);
+        const firstSmclTag = html.indexOf('{', start);
         
         let cutPoint = -1;
-        let offset = 1; // default to skipping the delimiter (like newline)
+        let offset = 0;
 
-        if (firstNewline !== -1 && firstTagStart !== -1) {
-            // Both found, take earliest
-            if (firstNewline < firstTagStart) {
-                cutPoint = firstNewline;
-                offset = 1; // skip \n
-            } else {
-                cutPoint = firstTagStart;
-                offset = 0; // keep <
-            }
-        } else if (firstNewline !== -1) {
-            cutPoint = firstNewline;
-            offset = 1;
-        } else if (firstTagStart !== -1) {
-            cutPoint = firstTagStart;
-            offset = 0;
+        const candidates = [];
+        if (firstNewline !== -1) candidates.push({ pos: firstNewline, offset: 1 });
+        if (firstHtmlTag !== -1) candidates.push({ pos: firstHtmlTag, offset: 0 });
+        if (firstSmclTag !== -1) candidates.push({ pos: firstSmclTag, offset: 0 });
+
+        if (candidates.length > 0) {
+            candidates.sort((a, b) => a.pos - b.pos);
+            cutPoint = candidates[0].pos;
+            offset = candidates[0].offset;
         }
 
-        if (cutPoint !== -1 && cutPoint < html.length -1) {
+        if (cutPoint !== -1 && cutPoint < html.length - 1) {
             return html.substring(cutPoint + offset);
         }
         return html.slice(-limit);
@@ -1589,6 +1315,8 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
 
     function setBusy(value) {
         busy = value;
+        const reason = window._lastMsgType || null;
+        console.log('[Busy] value=' + value + ' reason=' + (reason || 'unknown'));
         if (runBtn) {
             runBtn.disabled = value;
             runBtn.style.opacity = value ? 0.7 : 1;
@@ -1608,11 +1336,7 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
         const div = document.createElement('div');
         div.className = 'message-group';
         div.dataset.optimistic = 'true';
-        div.innerHTML = \`
-            <div class="user-bubble">
-                \${window.stataUI.escapeHtml(code)}
-            </div>
-        \`;
+        div.innerHTML = '<div class="user-bubble">' + window.stataUI.escapeHtml(code) + '</div>';
         chatStream.appendChild(div);
         if (autoScrollPinned) scrollToBottom();
     }
@@ -1684,7 +1408,6 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
             +      '<div class="output-content" id="run-log-' + runId + '"></div>'
             +    '</div>'
             +  '</div>'
-            +  '<div id="run-artifacts-' + runId + '"></div>'
             + '</div>';
 
         const div = document.createElement('div');
@@ -1709,7 +1432,7 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
             logLinkEl: document.getElementById('run-log-link-' + runId),
             logEl: document.getElementById('run-log-' + runId),
             tabsContainer: document.getElementById('run-tabs-' + runId),
-            artifactsEl: document.getElementById('run-artifacts-' + runId)
+            artifacts: []
         };
 
         return runs[runId];
@@ -1742,14 +1465,12 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
         let outputContent = '';
         const statusLabel = entry.success ? 'Stata Output' : 'Stata Output (error)';
         if (entry.stderr) {
-            outputContent += \`<div class="output-content error">\${entry.stderr}</div>\`;
+            outputContent += \`<div class="output-content error">\${window.stataUI.smclToHtml(entry.stderr)}</div>\`;
         }
         if (entry.stdout) {
-            outputContent += '<div class="output-content">' + entry.stdout + '</div>';
+            outputContent += '<div class="output-content">' + window.stataUI.smclToHtml(entry.stdout) + '</div>';
         }
         
-        const artifactsHtml = renderArtifacts(entry.artifacts, entry.timestamp);
-
         // Determine traffic light color
         const statusColor = entry.success ? 'var(--accent-success)' : 'var(--accent-error)';
 
@@ -1790,14 +1511,13 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
             +       '<button class="tab-btn" data-run-id="' + entry.timestamp + '" data-tab="log">Log</button>'
             +     '</div>'
             +     '<div class="output-pane active" data-tab="result">'
-            +       (entry.stderr ? ('<div class="output-content error">' + entry.stderr + '</div>') : '')
-            +       (entry.stdout ? ('<div class="output-content">' + entry.stdout + '</div>') : '')
+            +       (entry.stderr ? ('<div class="output-content error">' + window.stataUI.smclToHtml(entry.stderr) + '</div>') : '')
+            +       (entry.stdout ? ('<div class="output-content">' + window.stataUI.smclToHtml(entry.stdout) + '</div>') : '')
             +     '</div>'
             +     '<div class="output-pane" data-tab="log">'
             +       '<div class="output-content log-container" id="run-log-' + entry.timestamp + '" data-log-path="' + (entry.logPath || '') + '"></div>'
             +     '</div>'
             +   '</div>'
-            +   artifactsHtml
             + '</div>';
 
         const div = document.createElement('div');
@@ -1811,11 +1531,18 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
         if (!artifacts || !Array.isArray(artifacts) || artifacts.length === 0) return '';
         const artifactsId = window.stataUI.escapeHtml(String(id || Date.now()));
         const isCollapsed = collapsedArtifacts[artifactsId] === true;
+        const densityClass = artifacts.length >= 12
+            ? 'artifacts-compact'
+            : (artifacts.length >= 8 ? 'artifacts-dense' : '');
 
         const tiles = artifacts.map((a, idx) => {
           const label = window.stataUI.escapeHtml(a.label || 'graph');
-          const preview = a.dataUri || a.path; // Already converted to data URI by Node.js code
-          const canPreview = !!preview && (String(preview).indexOf('data:image/') !== -1);
+          const preview = a.previewPath || a.path || '';
+          const canPreview = !!preview && (String(a.path || preview).toLowerCase().indexOf('.svg') !== -1);
+          if (canPreview) {
+              console.log('[Artifacts] previewPath', preview, 'path', a.path || '');
+          }
+          const closeKey = window.stataUI.escapeHtml(String(a._key || ''));
           
           const error = a.error ? String(a.error) : '';
           const errorHtml = error
@@ -1823,7 +1550,7 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
               : '';
           const thumbHtml = canPreview
               ? '<img src="' + window.stataUI.escapeHtml(preview) + '" class="artifact-thumb-img" alt="' + label + '">' 
-              : '<div class="artifact-thumb-fallback">PDF</div>';
+              : '<div class="artifact-thumb-fallback">File</div>';
 
             const tileAttrs = canPreview
                 ? ('data-action="preview-graph" data-src="' + window.stataUI.escapeHtml(preview) + '"')
@@ -1835,7 +1562,10 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
                 + ' data-basedir="' + window.stataUI.escapeHtml(a.baseDir || '') + '"'
                 + ' data-label="' + label + '"'
                 + ' data-index="' + idx + '">' 
-                +   '<div class="artifact-thumb">' + thumbHtml + '</div>'
+                +   '<div class="artifact-thumb">'
+                +     '<button class="artifact-tile-close" type="button" data-action="remove-artifact" data-key="' + closeKey + '" title="Remove">×</button>'
+                +     thumbHtml
+                +   '</div>'
                 +   '<div class="artifact-tile-label" title="' + label + '">' + label + '</div>'
                 +   errorHtml
                 + '</div>'
@@ -1843,7 +1573,7 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
         }).join('');
 
         return (
-            '<section class="artifacts-card" data-artifacts-id="' + artifactsId + '" data-collapsed="' + (isCollapsed ? 'true' : 'false') + '">' 
+            '<section class="artifacts-card ' + densityClass + '" data-artifacts-id="' + artifactsId + '" data-collapsed="' + (isCollapsed ? 'true' : 'false') + '">' 
             + '<header class="artifacts-header">'
             +   '<div class="artifacts-title">Artifacts</div>'
             +   '<div class="artifacts-header-right">'
@@ -1858,7 +1588,63 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
         );
     }
 
+    function bindArtifactImageEvents(container, runId) {
+        if (!container) return;
+        const images = container.querySelectorAll('img.artifact-thumb-img');
+        images.forEach((img) => {
+            if (img.dataset.bound === 'true') return;
+            img.dataset.bound = 'true';
+            const src = img.getAttribute('src') || '';
+            const label = img.getAttribute('alt') || '';
+            const started = Date.now();
+            img.addEventListener('load', () => {
+                const elapsed = Date.now() - started;
+                vscode.postMessage({
+                    type: 'log',
+                    level: 'info',
+                    message: '[Artifacts] img load (' + runId + ') ' + label + ' ' + elapsed + 'ms ' + src
+                });
+            }, { once: true });
+            img.addEventListener('error', () => {
+                const elapsed = Date.now() - started;
+                vscode.postMessage({
+                    type: 'log',
+                    level: 'error',
+                    message: '[Artifacts] img error (' + runId + ') ' + label + ' ' + elapsed + 'ms ' + src
+                });
+            }, { once: true });
+        });
+    }
+
     const collapsedArtifacts = Object.create(null);
+
+    function renderSessionArtifacts() {
+        if (!sessionArtifactsEl) return;
+        const artifactsHtml = renderArtifacts(sessionArtifacts, 'session');
+        sessionArtifactsEl.innerHTML = artifactsHtml;
+        bindArtifactImageEvents(sessionArtifactsEl, 'session');
+        console.log('[Artifacts] session render count=' + sessionArtifacts.length);
+    }
+
+    function addSessionArtifact(artifact) {
+        if (!artifact) return false;
+        const key = String(artifact.path || '') + '|' + String(artifact.label || '');
+        if (!key || sessionArtifactKeys.has(key)) return false;
+        sessionArtifactKeys.add(key);
+        sessionArtifacts.push({ ...artifact, _key: key });
+        return true;
+    }
+
+    function removeSessionArtifact(key) {
+        if (!key || !sessionArtifactKeys.has(key)) return false;
+        sessionArtifactKeys.delete(key);
+        const index = sessionArtifacts.findIndex(a => a._key === key);
+        if (index >= 0) {
+            sessionArtifacts.splice(index, 1);
+        }
+        renderSessionArtifacts();
+        return true;
+    }
 
     const modal = document.getElementById('artifact-modal');
     const modalTitle = document.getElementById('artifact-modal-title');
@@ -1969,6 +1755,7 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
 
     window.addEventListener('message', event => {
       const msg = event.data;
+      window._lastMsgType = msg?.type || null;
       if (msg.type === 'cleared') {
           clearAllOutput();
           setBusy(false);
@@ -1981,8 +1768,62 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
       }
       if (msg.type === 'append') {
         appendEntry(msg.entry);
+        scheduleHighlight();
+        return;
       }
-      if (msg.type === 'busy') setBusy(msg.value);
+      if (msg.type === 'busy') {
+          setBusy(msg.value);
+          return;
+      }
+
+      if (msg.type === 'taskDone') {
+        const runId = msg.runId;
+        const run = runs[runId];
+        if (runId) taskDoneRuns.add(runId);
+        if (!run) return;
+
+        // Clear local progress bars
+        if (run.progressWrap) {
+            run.progressWrap.style.display = 'none';
+            if (run.progressText) run.progressText.textContent = '';
+            if (run.progressMeta) run.progressMeta.textContent = '';
+        }
+
+        // Update RC and Status Indicator if present
+        if (msg.rc !== null && msg.rc !== undefined) {
+             const success = (msg.rc === 0);
+             if (run.statusDot) {
+                 run.statusDot.style.color = success ? 'var(--accent-success)' : 'var(--accent-error)';
+             }
+             if (run.rcEl) {
+                 run.rcEl.textContent = 'RC ' + String(msg.rc);
+             }
+             updateStatusIndicator(success, msg.rc);
+        }
+
+        // Fill HTML immediately if provided
+        if (msg.stdout && run.stdoutEl) {
+            const finalStdout = window.stataUI.smclToHtml(String(msg.stdout || ''));
+            const currentStdout = run.stdoutEl.innerHTML;
+            // No-replacement optimization: if what we have looks like a match for what just came in, avoid flicker.
+            if (currentStdout && finalStdout && Math.abs(currentStdout.length - finalStdout.length) < 20) {
+                 // close enough to avoid flicker
+            } else {
+                 run.stdoutEl.innerHTML = finalStdout;
+            }
+            run._taskDoneApplied = true;
+        }
+
+        // Clear busy state immediately on task_done so graphs don't block UI.
+        setBusy(false);
+
+        // Ensure highlight happens
+        if (!run._highlighted && !run.viewer) {
+            run._highlighted = true;
+            scheduleHighlight();
+        }
+        return;
+      }
 
       if (msg.type === 'datasetSummary') {
         if (dataSummary && obsCount && varCount) {
@@ -1999,6 +1840,7 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
       if (msg.type === 'runStarted') {
         const runId = msg.runId;
         const code = String(msg.code || '');
+        runMetrics[runId] = { start: Date.now(), logChunks: 0, logChars: 0 };
         ensureRunGroup(runId, code);
         updateStatusIndicator(null, null); // Reset status when run starts
       }
@@ -2031,6 +1873,17 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
         }
       }
 
+      if (msg.type === 'runArtifact') {
+        const runId = msg.runId;
+        const run = runs[runId];
+        if (!run || !msg.artifact) return;
+        const artifact = msg.artifact;
+
+        if (addSessionArtifact(artifact)) {
+            renderSessionArtifacts();
+        }
+      }
+
       if (msg.type === 'downloadStatus') {
         // Reset modal download button state
         if (modalDownloadBtn) {
@@ -2046,28 +1899,41 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
         const runId = msg.runId;
         const run = runs[runId];
         if (!run) return;
-        const shouldStick = autoScrollPinned;
+
         const chunk = String(msg.text ?? '');
         if (!chunk) return;
-        if (run.logEl) {
-            run.logEl.insertAdjacentHTML('beforeend', chunk);
+
+        // Cumulative buffer for live-streaming of SMCL. 
+        // We re-render the whole buffer for the Result pane to handle tags joining across chunks.
+        if (run.rawStdout === undefined) run.rawStdout = '';
+        run.rawStdout += chunk;
+
+        // Keep raw buffer bounded to avoid performance degradation on extremely long live output.
+        // 25KB is plenty for a live 'tail', and the full log is always accurate in the Log tab/file.
+        const MAX_RAW_BUF = 25_000;
+        if (run.rawStdout.length > MAX_RAW_BUF) {
+            run.rawStdout = safeSliceTail(run.rawStdout, MAX_RAW_BUF);
         }
-        if (!run.stdoutEl) return;
-        const MAX_STREAM_CHARS = 20_000; // keep a bounded tail while streaming
-        run.stdoutEl.insertAdjacentHTML('beforeend', chunk);
+
+        const shouldStick = autoScrollPinned;
+        
+        if (run.stdoutEl) {
+            run.stdoutEl.innerHTML = window.stataUI.smclToHtml(run.rawStdout);
+        }
+        
+        if (run.logEl) {
+            run.logEl.innerHTML = window.stataUI.smclToHtml(run.rawStdout);
+        }
         
         scheduleHighlight();
-        const currentLen = run.stdoutEl.innerHTML.length;
-        if (currentLen > MAX_STREAM_CHARS) {
-            run.stdoutEl.innerHTML = safeSliceTail(run.stdoutEl.innerHTML, MAX_STREAM_CHARS);
-        }
         if (shouldStick) scheduleScrollToBottom();
+        return;
       }
 
       if (msg.type === 'runProgress') {
         const runId = msg.runId;
         const run = runs[runId];
-        if (!run) return;
+        if (!run || run._taskDoneApplied) return;
         const progress = msg.progress;
         const total = msg.total;
         const message = msg.message;
@@ -2087,11 +1953,10 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
         }
       }
 
-      if (msg.type === 'runFinished') {
+      const applyRunFinished = (msg) => {
         const runId = msg.runId;
         const run = runs[runId];
         if (!run) return;
-
         const success = msg.success === true;
         const hasError = msg.hasError === true;
         
@@ -2126,14 +1991,20 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
             if (msg.logSize > LOG_VIEWER_THRESHOLD) {
                 run.viewer = new LogViewer(run.stdoutEl, msg.logPath, msg.logSize, runId);
             } else {
-                const finalStdout = String(msg.stdout || '');
+                const finalStdout = window.stataUI.smclToHtml(String(msg.stdout || ''));
+                const currentStdout = run.stdoutEl ? run.stdoutEl.innerHTML : '';
+                const skipReplace = run._taskDoneApplied === true || (currentStdout && Math.abs(currentStdout.length - finalStdout.length) < 20);
+                if (skipReplace) {
+                    if (autoScrollPinned) scrollToBottomSmooth();
+                    return;
+                }
                 run.stdoutEl.innerHTML = finalStdout;
             }
             run.stdoutEl.style.display = 'block';
         } else if (success) {
              // SUCCESS + NO LOG: 
              // Keep the streamed content (backfilled if needed)
-             const finalStdout = String(msg.stdout || '');
+             const finalStdout = window.stataUI.smclToHtml(String(msg.stdout || ''));
              if (run.stdoutEl && finalStdout) {
                  const current = run.stdoutEl.innerHTML || '';
                  const MAX_STDOUT_DISPLAY = 20_000;
@@ -2147,8 +2018,6 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
         
         if (run.logEl) {
              if (useBufferedLog) {
-                 // Always use LogViewer for the "Log" tab if a log exists, 
-                 // as it's the secondary view and flicking is less critical there than main pane.
                  if (!success) {
                     run.logEl.innerHTML = '';
                     run.viewer = new LogViewer(run.logEl, msg.logPath, msg.logSize, runId);
@@ -2158,7 +2027,7 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
                  }
              } else {
                  // Fallback to memory content
-                 run.logEl.innerHTML = String(msg.fullStdout || '');
+                 run.logEl.innerHTML = window.stataUI.smclToHtml(String(msg.fullStdout || ''));
              }
         }
 
@@ -2168,10 +2037,22 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
             run.tabsContainer.style.display = hasProblem ? 'flex' : 'none';
         }
 
+        if (Array.isArray(msg.artifacts) && msg.artifacts.length) {
+            let changed = false;
+            for (const artifact of msg.artifacts) {
+                if (addSessionArtifact(artifact)) {
+                    changed = true;
+                }
+            }
+            if (changed) {
+                renderSessionArtifacts();
+            }
+        }
+
         const stderr = String(msg.stderr || '');
         if (stderr && run.stderrEl) {
             run.stderrEl.style.display = 'block';
-            run.stderrEl.innerHTML = stderr;
+            run.stderrEl.innerHTML = window.stataUI.smclToHtml(stderr);
         } else if (!success && run.stderrEl) {
             const fallback = msg.rc != null ? ('Run failed (RC ' + msg.rc + ')') : 'Run failed';
             run.stderrEl.style.display = 'block';
@@ -2180,49 +2061,43 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
 
         // If the run failed, prioritize showing the error and hide the bulky stdout content.
         if (!success && run.stdoutEl) {
-            // Keep error visible, hide stdout (if not using viewer)
-            // If using viewer in logEl, stdoutEl is just for error context?
-            // Actually stdoutEl usually contains the "Result" tab content.
-            // On failure, Result tab shows stderr. 
-            // So we hide any partial stdout that might have been streamed there to focus on error.
-            if (!useBufferedLog) {
-                 // Only hide if we aren't using it for something else (we aren't on failure)
-                 run.stdoutEl.style.display = "none";
-            } else {
-                 // If we have buffered log, we put it in logEl. 
-                 // stdoutEl shows error. 
-                 // So yes, hide "streaming" stdout residue.
-                 // But wait, stderrEl provides the error message. 
-                 // stdoutEl is the container for "Result" pane content. 
-                 // stderrEl is typically INSIDE stdoutEl or separate?
-                 // Let's check structure.
-                 // Structure: 
-                 // <div class="output-pane active" data-tab="result">
-                 //   <div id="run-stderr-...">...</div>
-                 //   <div id="run-stdout-...">...</div>
-                 // </div>
-                 // <div class="output-pane" data-tab="log">...</div>
-                 
-                 // So stderrEl is SEPARATE from stdoutEl.
-                 // So yes, we can hide stdoutEl on failure to show just stderrEl in the Result pane.
-                 run.stdoutEl.style.display = 'none';
-            }
+            run.stdoutEl.style.display = 'none';
         }
 
         if (run.progressWrap) {
-            // Keep progress visible if it was ever shown, but it is now final.
+            run.progressWrap.style.display = 'none';
             if (run.progressText) run.progressText.textContent = '';
             if (run.progressMeta) run.progressMeta.textContent = '';
         }
 
-        const artifactsHtml = renderArtifacts(msg.artifacts, runId);
+        const incomingArtifacts = Array.isArray(msg.artifacts) ? msg.artifacts : [];
+        const mergedArtifacts = (run.artifacts || []).slice();
+        run._artifactKeys = run._artifactKeys || new Set();
+        for (const artifact of mergedArtifacts) {
+            const key = String(artifact?.path || '') + '|' + String(artifact?.label || '');
+            run._artifactKeys.add(key);
+        }
+        for (const artifact of incomingArtifacts) {
+            const key = String(artifact?.path || '') + '|' + String(artifact?.label || '');
+            if (run._artifactKeys.has(key)) continue;
+            run._artifactKeys.add(key);
+            mergedArtifacts.push(artifact);
+        }
+        const artifactsHtml = renderArtifacts(mergedArtifacts, runId);
         if (run.artifactsEl) {
             run.artifactsEl.innerHTML = artifactsHtml;
+            bindArtifactImageEvents(run.artifactsEl, runId);
         }
+        run.artifacts = mergedArtifacts;
         
         // Update header status indicator
         updateStatusIndicator(success, msg.rc);
         setBusy(false);
+
+        if (taskDoneRuns.has(runId) && !run._highlighted && !run.viewer) {
+            run._highlighted = true;
+            scheduleHighlight();
+        }
 
         if (autoScrollPinned) scrollToBottomSmooth();
         if (typeof searchControllers !== 'undefined') {
@@ -2231,6 +2106,19 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
                 controller.performSearch();
             }
         }
+      };
+
+      if (msg.type === 'runFinished') {
+        const runId = msg.runId;
+        const run = runs[runId];
+        if (!run) return;
+        if (run._taskDoneApplied && !msg._deferred) {
+            console.log('[RunFinished] deferring runId=' + runId);
+            const deferredMsg = Object.assign({}, msg, { _deferred: true });
+            requestAnimationFrame(() => applyRunFinished(deferredMsg));
+            return;
+        }
+        applyRunFinished(msg);
       }
 
       if (msg.type === 'runFailed') {
@@ -2328,6 +2216,12 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
     }, { passive: true });
 
     document.addEventListener('click', (e) => {
+        const removeBtn = e.target.closest('[data-action="remove-artifact"]');
+        if (removeBtn) {
+            const key = removeBtn.getAttribute('data-key');
+            removeSessionArtifact(key);
+            return;
+        }
         const toggle = e.target.closest('[data-action="toggle-artifacts"]');
         if (toggle) {
             const id = toggle.getAttribute('data-artifacts-id');
@@ -2675,7 +2569,7 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
              
              const div = document.createElement('div');
              div.className = 'log-chunk';
-             div.innerHTML = data;
+             div.innerHTML = window.stataUI.smclToHtml(data);
              
              if (this.pendingPrepend) {
                  // Prepend
@@ -2769,10 +2663,6 @@ function toEntry(code, result) {
   let stdout = success ? (result?.stdout || result?.contentText || '') : '';
   let stderr = success ? '' : finalStderr;
 
-  // Process SMCL for history entries
-  stdout = stdout ? smclToHtml(stdout) : '';
-  stderr = stderr ? smclToHtml(stderr) : '';
-
   // Return the complete entry object
   return {
     code,
@@ -2781,7 +2671,7 @@ function toEntry(code, result) {
     rc: finalRC,
     durationMs: result?.durationMs ?? null,
     stdout,
-    fullStdout: smclToHtml(result?.stdout || result?.contentText || ''),
+    fullStdout: result?.stdout || result?.contentText || '',
     stderr,
     artifacts: normalizeArtifacts(result),
     timestamp: Date.now()
@@ -2790,9 +2680,6 @@ function toEntry(code, result) {
 
 /**
  * Normalizes artifact objects for display in the terminal panel.
- * The `previewDataUri` field is generated by the extension (mcp-client) from a local file path
- * to provide a base64 preview for the UI. This base64 data is NOT exposed to AI agents
- * as part of tool outputs, ensuring token efficiency.
  * @param {object} result
  * @returns {Array<object>}
  */
@@ -2801,16 +2688,19 @@ function normalizeArtifacts(result) {
     ? result.graphArtifacts
     : (result?.artifacts || []);
   if (!Array.isArray(preferred)) return [];
+  const webview = TerminalPanel.currentPanel?.webview || null;
   const normalized = preferred.map((a) => {
     if (!a) return null;
     const label = a.label || path.basename(a.path || '') || 'artifact';
-    const dataUri = a.dataUri && typeof a.dataUri === 'string' ? a.dataUri : null;
     const baseDir = a.baseDir || result?.cwd || (result?.filePath ? path.dirname(result.filePath) : null);
+    const resolved = a.path ? resolveArtifactUri(a.path, baseDir) : null;
+    const previewPath = (webview && resolved && resolved.scheme === 'file' && resolved.fsPath.toLowerCase().endsWith('.svg'))
+      ? webview.asWebviewUri(resolved).toString()
+      : null;
     return {
       label,
-      path: a.path || a.dataUri || '',
-      dataUri,
-      previewDataUri: a.previewDataUri || null,
+      path: a.path || '',
+      previewPath,
       error: a.error || null,
       baseDir
     };
@@ -2859,6 +2749,16 @@ function escapeHtml(text) {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#039;');
+}
+
+function stripSmclTags(text) {
+  return String(text ?? '')
+    .replace(/\{hline\}/g, '--------------------------------------------------')
+    .replace(/\{[^}]+\}/g, '');
+}
+
+function formatStreamChunk(text) {
+  return String(text ?? '').replace(/\r\n/g, '\n');
 }
 
 

@@ -34,6 +34,15 @@ function revealOutput() {
     }
 }
 
+function getOutputLogHandler() {
+    const config = vscode.workspace.getConfiguration('stataMcp');
+    if (!config.get('showAllLogsInOutput', false)) return null;
+    return (chunk) => {
+        if (!chunk) return;
+        outputChannel?.append?.(String(chunk));
+    };
+}
+
 function getUvInstallCommand(platform = process.platform) {
     if (platform === 'win32') {
         const display = 'powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -Command "iwr https://astral.sh/uv/install.ps1 -useb | iex"';
@@ -66,6 +75,13 @@ function activate(context) {
     if (typeof mcpClient.setLogger === 'function') {
         mcpClient.setLogger((msg) => outputChannel.appendLine(msg));
     }
+    if (typeof mcpClient.setTaskDoneHandler === 'function') {
+        mcpClient.setTaskDoneHandler((payload) => {
+            if (payload?.runId) {
+                TerminalPanel.notifyTaskDone(payload.runId);
+            }
+        });
+    }
     DataBrowserPanel.setLogger((msg) => outputChannel.appendLine(msg));
 
     statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
@@ -77,7 +93,6 @@ function activate(context) {
         vscode.commands.registerCommand('stata-workbench.runSelection', runSelection),
         vscode.commands.registerCommand('stata-workbench.runFile', runFile),
         vscode.commands.registerCommand('stata-workbench.testMcpServer', testConnection),
-        vscode.commands.registerCommand('stata-workbench.showGraphs', showGraphs),
         vscode.commands.registerCommand('stata-workbench.viewData', viewData),
         vscode.commands.registerCommand('stata-workbench.installMcpCli', promptInstallMcpCli),
         vscode.commands.registerCommand('stata-workbench.cancelRequest', cancelRequest),
@@ -618,6 +633,7 @@ async function runSelection() {
 
     const filePath = editor.document.uri.fsPath;
     const cwd = filePath ? path.dirname(filePath) : null;
+    const rawLogHandler = getOutputLogHandler();
 
     await withStataProgress('Running selection', async (token) => {
         const runId = TerminalPanel.startStreamingEntry(text, filePath, terminalRunCommand, variableListProvider, cancelRequest, downloadGraphAsPdf);
@@ -627,8 +643,12 @@ async function runSelection() {
                 normalizeResult: true,
                 includeGraphs: true,
                 cwd,
+                onRawLog: rawLogHandler,
                 onLog: (chunk) => {
                     if (runId) TerminalPanel.appendStreamingLog(runId, chunk);
+                },
+                onGraphReady: (artifact) => {
+                    if (runId) TerminalPanel.appendRunArtifact(runId, artifact);
                 },
                 onProgress: (progress, total, message) => {
                     if (runId) TerminalPanel.updateStreamingProgress(runId, progress, total, message);
@@ -668,6 +688,7 @@ async function runFile() {
     const config = vscode.workspace.getConfiguration('stataMcp');
     const behavior = config.get('runFileBehavior', 'runDirtyFile');
     const originalDir = path.dirname(filePath);
+    const rawLogHandler = getOutputLogHandler();
     let effectiveFilePath = filePath;
     let tmpFile = null;
 
@@ -686,6 +707,8 @@ async function runFile() {
     try {
         await withStataProgress(`Running ${path.basename(filePath)}`, async (token) => {
             const commandText = `do "${path.basename(filePath)}"`;
+            let taskDoneSeen = false;
+            const runStart = Date.now();
             const runId = TerminalPanel.startStreamingEntry(commandText, filePath, terminalRunCommand, variableListProvider, cancelRequest, downloadGraphAsPdf);
             try {
                 const result = await mcpClient.runFile(effectiveFilePath, {
@@ -693,8 +716,38 @@ async function runFile() {
                     normalizeResult: true,
                     includeGraphs: true,
                     cwd: originalDir,
+                    runId,
+                    onRawLog: rawLogHandler,
                     onLog: (chunk) => {
+                        if (taskDoneSeen) {
+                        }
                         if (runId) TerminalPanel.appendStreamingLog(runId, chunk);
+                    },
+                    onGraphReady: (artifact) => {
+                        if (runId) TerminalPanel.appendRunArtifact(runId, artifact);
+                    },
+                    onTaskDone: (payload) => {
+                        taskDoneSeen = true;
+                        let logSize = null;
+                        const logPath = payload?.logPath || null;
+                        let taskDoneStdout = null;
+                        let rawLen = null;
+                        let readErr = null;
+                        let convertErr = null;
+                        if (logPath) {
+                            try {
+                                const stats = fs.statSync(logPath);
+                                logSize = stats.size;
+                                if (logSize > 0 && logSize <= 50_000) {
+                                    const raw = fs.readFileSync(logPath, 'utf8');
+                                    rawLen = raw.length;
+                                    taskDoneStdout = raw;
+                                }
+                            } catch (err) {
+                                readErr = err?.message || String(err);
+                            }
+                        }
+                        if (runId) TerminalPanel.notifyTaskDone(runId, logPath, logSize, taskDoneStdout, payload?.rc);
                     },
                     onProgress: (progress, total, message) => {
                         if (runId) TerminalPanel.updateStreamingProgress(runId, progress, total, message);
@@ -748,11 +801,20 @@ function showOutput(content) {
 // Defines the standard run command used by the Terminal Panel
 const terminalRunCommand = async (code, hooks) => {
     try {
+        const rawLogHandler = getOutputLogHandler();
         const res = await mcpClient.runSelection(code, {
             normalizeResult: true,
             includeGraphs: true,
             cwd: hooks?.cwd,
+            runId: hooks?.runId,
+            onRawLog: rawLogHandler,
             onLog: hooks?.onLog,
+            onGraphReady: (artifact) => {
+                if (hooks?.runId) TerminalPanel.appendRunArtifact(hooks.runId, artifact);
+            },
+            onTaskDone: (payload) => {
+                if (hooks?.onTaskDone) hooks.onTaskDone(payload);
+            },
             onProgress: hooks?.onProgress
         });
         refreshDatasetSummary();
@@ -770,9 +832,11 @@ const terminalRunCommand = async (code, hooks) => {
 // Clear-all convenience for terminal UI
 const clearAllCommand = async () => {
     try {
+        const rawLogHandler = getOutputLogHandler();
         const res = await mcpClient.runSelection('clear all', {
             normalizeResult: true,
-            includeGraphs: false
+            includeGraphs: false,
+            onRawLog: rawLogHandler
         });
         refreshDatasetSummary();
         return res;
@@ -844,27 +908,6 @@ async function viewData() {
     DataBrowserPanel.createOrShow(globalExtensionUri);
 }
 
-async function showGraphs() {
-    try {
-        // Use exportAllGraphs to get actual exported files with data URIs
-        const result = await mcpClient.exportAllGraphs();
-        const items = Array.isArray(result?.graphs) ? result.graphs : [];
-
-        // Items already have dataUri from _collectGraphArtifacts -> _fileToDataUri conversion
-        const detailed = items.map((g) => {
-            return {
-                name: g.label || g.name || 'graph',
-                dataUri: g.dataUri || null,
-                path: g.path || null,
-                error: g.error || null
-            };
-        });
-        openGraphPanel(detailed);
-    } catch (error) {
-        vscode.window.showErrorMessage(`Failed to export graphs: ${error.message}`);
-    }
-}
-
 async function downloadGraphAsPdf(graphName) {
     try {
         revealOutput();
@@ -875,56 +918,15 @@ async function downloadGraphAsPdf(graphName) {
         const response = await mcpClient.fetchGraph(graphName, { format: 'pdf' });
         outputChannel.appendLine(`[Download] Response received: ${JSON.stringify(response, null, 2)}`);
 
-        // Extract the PDF data
-        let pdfData = null;
         let pdfPath = null;
         let savedPath = null;
 
-        // Check if response has base64 data
-        if (response?.data && response?.mimeType === 'application/pdf') {
-            pdfData = response.data;
-            outputChannel.appendLine('[Download] Found base64 data in response.data');
-        }
-
-        // Check dataUri regardless of path presence
-        if (!pdfData && response?.dataUri && response.dataUri.startsWith('data:application/pdf')) {
-            const base64Match = response.dataUri.match(/^data:application\/pdf;base64,(.+)$/);
-            if (base64Match) {
-                pdfData = base64Match[1];
-                outputChannel.appendLine('[Download] Extracted base64 from dataUri');
-            }
-        }
-
-        if (!pdfData && (response?.path || response?.file_path)) {
+        if (response?.path || response?.file_path) {
             pdfPath = response.path || response.file_path;
             outputChannel.appendLine(`[Download] Found file path: ${pdfPath}`);
         }
 
-        // If we have base64 data, convert to buffer and save
-        if (pdfData) {
-            outputChannel.appendLine('[Download] Converting base64 to buffer...');
-            const buffer = Buffer.from(pdfData, 'base64');
-            outputChannel.appendLine(`[Download] Buffer created: ${buffer.length} bytes`);
-
-            const defaultUri = vscode.Uri.file(path.join(os.homedir(), 'Downloads', `${graphName}.pdf`));
-
-            outputChannel.appendLine('[Download] Showing save dialog...');
-            const saveUri = await vscode.window.showSaveDialog({
-                defaultUri,
-                filters: { 'PDF Files': ['pdf'] },
-                saveLabel: 'Save Graph'
-            });
-
-            if (saveUri) {
-                outputChannel.appendLine(`[Download] Saving to: ${saveUri.fsPath}`);
-                await vscode.workspace.fs.writeFile(saveUri, buffer);
-                outputChannel.appendLine('[Download] Save complete!');
-                savedPath = saveUri.fsPath;
-            } else {
-                outputChannel.appendLine('[Download] User cancelled save dialog');
-                savedPath = null;
-            }
-        } else if (pdfPath && fs.existsSync(pdfPath)) {
+        if (pdfPath && fs.existsSync(pdfPath)) {
             outputChannel.appendLine(`[Download] Reading file from: ${pdfPath}`);
             // If we have a file path, copy it
             const defaultUri = vscode.Uri.file(path.join(os.homedir(), 'Downloads', `${graphName}.pdf`));
@@ -953,7 +955,6 @@ async function downloadGraphAsPdf(graphName) {
         return {
             path: savedPath || pdfPath || response?.path || response?.file_path || response?.url || response?.href || null,
             url: response?.url || response?.href || null,
-            dataUri: response?.dataUri || null,
             label: response?.label || graphName
         };
     } catch (error) {
@@ -1025,21 +1026,16 @@ function renderGraphHtml(graphDetails, webview, extensionUri) {
 
     const tiles = items.map(g => {
         const name = escapeHtml(g.name || g.label || 'graph');
-        // Use dataUri directly - it's already a base64 data URI from Node.js conversion
-        const preview = g.dataUri || g.previewDataUri || g.path || '';
-        const canPreview = preview && preview.indexOf('data:image/') !== -1;
+        const preview = g.path || '';
+        const canPreview = preview && preview.toLowerCase().endsWith('.svg');
 
         const error = g.error
             ? `<div class="artifact-tile-error">Error: ${escapeHtml(g.error)}</div>`
             : '';
 
         const thumbHtml = canPreview
-            ? `<div class="artifact-thumb">
-                 <img src="${preview}" class="artifact-thumb-img" alt="${name}">
-               </div>`
-            : `<div class="artifact-thumb">
-                 <div class="artifact-thumb-fallback">PDF</div>
-               </div>`;
+            ? `<img src="file://${preview}" class="artifact-thumb-img" alt="${name}">`
+            : `<div class="artifact-thumb-fallback">File</div>`;
 
         // Make tile clickable to open modal
         const dataPath = escapeHtml(preview);
@@ -1229,7 +1225,8 @@ function renderGraphHtml(graphDetails, webview, extensionUri) {
 async function withStataProgress(title, task, sample) {
     const cancellable = true;
     const hints = sample && sample.length > 180 ? `${sample.slice(0, 180)}…` : sample;
-    return vscode.window.withProgress(
+    const startedAt = Date.now();
+    const result = await vscode.window.withProgress(
         {
             location: vscode.ProgressLocation.Notification,
             title,
@@ -1244,9 +1241,11 @@ async function withStataProgress(title, task, sample) {
                 vscode.window.showErrorMessage(`${title} failed: ${detail}${hints ? ` (snippet: ${hints})` : ''}`);
                 showOutput(error?.stack || detail);
                 throw error;
+            } finally {
             }
         }
     );
+    return result;
 }
 
 function isStataFailure(result) {

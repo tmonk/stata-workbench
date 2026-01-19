@@ -26,6 +26,354 @@ window.stataUI = {
         return d.toLocaleString(undefined, { hour: 'numeric', minute: 'numeric', second: 'numeric' });
     },
 
+    filterMcpLogs: function (text) {
+        if (!text) return '';
+        const INTERNAL_PATTERNS = [
+            /capture\s+log\s+close\s+_mcp_smcl_/i,
+            /capture\s+_return\s+hold\s+mcp_hold_/i,
+            /^\s*(\{smcl\})?\s*$/i,
+            /(\s*\{[^}]+\})*\s*log\s+type:\s+.*smcl/i,
+            /(\s*\{[^}]+\})*\s*opened\s+on:\s+/i,
+            /(\s*\{[^}]+\})*\s*log:\s+.*(mcp_smcl_|<unnamed>)/i,
+            /(\s*\{[^}]+\})*\s*name:\s+.*(_mcp_smcl_|<unnamed>)/i,
+            /\{txt\}\{sf\}\{ul off\}\{\.-\}/i
+        ];
+        const lines = text.split(/\r?\n/);
+        const filtered = lines.filter(line => {
+            const trimmed = line.trim();
+            if (!trimmed) return true;
+            for (const pattern of INTERNAL_PATTERNS) {
+                if (pattern.test(line)) return false;
+            }
+            return true;
+        });
+        return filtered.join('\n');
+    },
+
+    smclToHtml: function (text) {
+        if (!text) return '';
+
+        // 0. Filter out mcp-stata internal lines
+        const filteredText = window.stataUI.filterMcpLogs(text);
+
+        // Normalize newlines early
+        let normalized = filteredText.replace(/\r\n/g, '\n');
+
+        // Collapse prompt-only lines
+        normalized = normalized.replace(/^(\. ?)\n/gm, '$1');
+
+        let lines = normalized.split('\n');
+        lines = lines.map(line => {
+            if (line.trim().startsWith('.') && !line.includes('<span') && !line.includes('{com}')) {
+                return `{com}${line}{/com}`;
+            }
+            return line;
+        });
+        let processedText = lines.join('\n');
+
+        // Remove global SMCL wrappers
+        let html = processedText.replace(/\{smcl\}|\{\/smcl\}/gi, '');
+
+        // 1. Basic entity cleaning - we ONLY escape specific SMCL constants here.
+        // Generic content escaping moved to the token loop for correctness.
+        html = html
+            .replace(/\{c -\}/g, '-')
+            .replace(/\{c \|\}/g, '|')
+            .replace(/\{c \+\}/g, '+')
+            .replace(/\{c B\+\}/g, '+')
+            .replace(/\{c \+T\}/g, '+')
+            .replace(/\{c T\+\}/g, '+')
+            .replace(/\{c TT\}/g, '+')
+            .replace(/\{c BT\}/g, '+')
+            .replace(/\{c TR\}/g, '+')
+            .replace(/\{c TL\}/g, '+')
+            .replace(/\{c BR\}/g, '+')
+            .replace(/\{c BL\}/g, '+')
+            .replace(/\{c -(?:-)*\}/g, (m) => '-'.repeat(m.length - 4))
+            .replace(/\{c \+(?:\+)*\}/g, (m) => '+'.repeat(m.length - 4));
+
+        html = html.replace(/\{c -\(\}/g, '__BRACE_OPEN__').replace(/\{c \)-\}/g, '__BRACE_CLOSE__');
+
+        const tokenRegex = /(\{[^}]+\})|(\n)|([^{}\n]+)|(.)/g;
+        let match;
+        let result = '';
+        let currentLineLen = 0;
+        const MODE_TAGS = ['com', 'res', 'err', 'txt', 'input', 'result', 'text', 'error'];
+        const openTags = [];
+
+        while ((match = tokenRegex.exec(html)) !== null) {
+            const tag = match[1];
+            const newline = match[2];
+            const textContent = match[3] || match[4];
+
+            if (newline) {
+                result += '\n';
+                currentLineLen = 0;
+                continue;
+            }
+
+            if (textContent) {
+                // Escape HTML entities in raw text content
+                result += textContent
+                    .replace(/&/g, '&amp;')
+                    .replace(/</g, '&lt;')
+                    .replace(/>/g, '&gt;');
+                currentLineLen += textContent.length;
+                continue;
+            }
+
+            if (tag) {
+                const inner = tag.substring(1, tag.length - 1);
+                let tagName = inner;
+                let tagContent = null;
+                const firstColon = inner.indexOf(':');
+
+                if (firstColon !== -1) {
+                    const cmdCandidate = inner.substring(0, firstColon).split(/\s+/)[0].toLowerCase();
+                    if (!['col', 'column', 'space', 'hline', '.-'].includes(cmdCandidate)) {
+                        tagName = inner.substring(0, firstColon);
+                        tagContent = inner.substring(firstColon + 1);
+                    }
+                }
+
+                const parts = tagName.split(/\s+/);
+                const command = parts[0].toLowerCase();
+
+                if (command === 'col' || command === 'column') {
+                    const dest = parseInt(parts[1], 10);
+                    if (!isNaN(dest)) {
+                        let spacesNeeded = (dest - 1) - currentLineLen;
+                        if (spacesNeeded > 0) {
+                            const spacer = ' '.repeat(spacesNeeded);
+                            result += spacer;
+                            currentLineLen += spacesNeeded;
+                        }
+                    }
+                    continue;
+                }
+
+                if (command === 'space') {
+                    const amt = parts[1] ? parseInt(parts[1], 10) : 1;
+                    if (!isNaN(amt)) {
+                        const spacer = ' '.repeat(amt);
+                        result += spacer;
+                        currentLineLen += amt;
+                    }
+                    continue;
+                }
+
+                if (command.startsWith('hline')) {
+                    let len = 12;
+                    if (parts[1] && !isNaN(parseInt(parts[1]))) {
+                        len = parseInt(parts[1], 10);
+                    }
+                    const dashes = '-'.repeat(len);
+                    result += dashes;
+                    currentLineLen += len;
+                    continue;
+                }
+
+                if (command === '.-') {
+                    result += '-';
+                    currentLineLen += 1;
+                    continue;
+                }
+
+                if (command === 'ralign' || command === 'lalign' || command === 'center') {
+                    if (tagContent !== null) {
+                        let width = parseInt(parts[1], 10);
+                        let innerHtml = window.stataUI.smclToHtml(tagContent);
+                        if (!isNaN(width)) {
+                            let visibleText = innerHtml.replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>');
+                            let len = visibleText.length;
+                            let padding = Math.max(0, width - len);
+                            if (padding > 0) {
+                                let leftPad = 0, rightPad = 0;
+                                if (command === 'ralign') leftPad = padding;
+                                else if (command === 'lalign') rightPad = padding;
+                                else if (command === 'center') { leftPad = Math.floor(padding / 2); rightPad = padding - leftPad; }
+                                if (leftPad) { result += ' '.repeat(leftPad); currentLineLen += leftPad; }
+                                result += innerHtml;
+                                currentLineLen += len;
+                                if (rightPad) { result += ' '.repeat(rightPad); currentLineLen += rightPad; }
+                                continue;
+                            }
+                        }
+                        result += innerHtml;
+                        let visibleText = innerHtml.replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>');
+                        currentLineLen += visibleText.length;
+                        continue;
+                    }
+                }
+
+                if (MODE_TAGS.includes(command) || command === '/' + openTags[openTags.length - 1]) {
+                    if (tagContent !== null && MODE_TAGS.includes(command)) {
+                        result += window.stataUI._startTag(command);
+                        let innerC = window.stataUI.smclToHtml(tagContent);
+                        result += innerC;
+                        result += '</span>';
+                        let visibleText = innerC.replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>');
+                        currentLineLen += visibleText.length;
+                        continue;
+                    }
+
+                    if (openTags.length > 0) {
+                        const current = openTags[openTags.length - 1];
+                        if (MODE_TAGS.includes(command)) {
+                            result += `</span>`;
+                            openTags.pop();
+                        } else if (command === '/' + current) {
+                            result += `</span>`;
+                            openTags.pop();
+                            continue;
+                        }
+                    }
+
+                    if (MODE_TAGS.includes(command)) {
+                        const className = `smcl-${command}`;
+                        let extraClass = '';
+                        if (command === 'com') extraClass = ' syntax-highlight';
+                        result += `<span class="${className}${extraClass}">`;
+                        openTags.push(command);
+                    }
+                    continue;
+                }
+
+                if (command === 'browse' || command === 'view') {
+                    continue;
+                }
+            }
+        }
+
+        while (openTags.length > 0) {
+            result += '</span>';
+            openTags.pop();
+        }
+
+        result = result.replace(/__BRACE_OPEN__/g, '{').replace(/__BRACE_CLOSE__/g, '}');
+
+        if (!result.includes('smcl-com')) {
+            if (result.trim().startsWith('.') && !result.includes('smcl-')) {
+                result = `<span class="smcl-com syntax-highlight">${result}</span>`;
+            }
+        }
+        return result;
+    },
+
+    _startTag: function (tagName) {
+        const meta = window.stataUI._getTagMeta(tagName);
+        let className = meta.class ? ` class="${meta.class}"` : '';
+        if (tagName === 'com') {
+            className = ' class="smcl-com syntax-highlight"';
+        }
+        const dataAttrs = meta.data ? ` ${meta.data}` : '';
+        return `<span${className}${dataAttrs}>`;
+    },
+
+    _getTagMeta: function (tagName) {
+        const tag = tagName.toLowerCase().split(/\s+/)[0];
+        switch (tag) {
+            case 'res': return { class: 'smcl-res' };
+            case 'txt': return { class: 'smcl-txt' };
+            case 'err': return { class: 'smcl-err' };
+            case 'com': return { class: 'smcl-com' };
+            case 'bf': return { class: 'smcl-bf' };
+            case 'it': return { class: 'smcl-it' };
+            case 'sf': return { class: 'smcl-sf' };
+            case 'ul': return { class: 'smcl-ul' };
+            case 'stata': return { class: 'smcl-link', data: 'data-type="stata"' };
+            case 'help': return { class: 'smcl-link', data: 'data-type="help"' };
+            case 'browse': return { class: 'smcl-link', data: 'data-type="browse"' };
+            default: return { class: '' };
+        }
+    },
+
+    parseSMCL: function (smclText) {
+        if (!smclText) return { rc: null, formattedText: '' };
+        const lines = smclText.split('\n');
+        let extractedRC = null;
+        let callStack = [];
+        let commandHistory = [];
+        let errorMessages = [];
+        let errorLineIndex = -1;
+        let hasError = false;
+
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+            const trimmedLine = line.trim();
+            if (!trimmedLine) continue;
+            if (!extractedRC) {
+                const searchMatch = line.match(/\{search r\((\d+)\)/i);
+                if (searchMatch) {
+                    extractedRC = parseInt(searchMatch[1], 10);
+                } else {
+                    const standaloneRC = trimmedLine.match(/^r\((\d+)\);$/);
+                    if (standaloneRC) {
+                        extractedRC = parseInt(standaloneRC[1], 10);
+                    }
+                }
+            }
+            const errMatch = line.match(/^\{err\}(.+)$/);
+            if (errMatch) {
+                hasError = true;
+                const errorText = errMatch[1].trim().replace(/\{[^}]+\}/g, '');
+                if (errorText) {
+                    errorMessages.push(errorText);
+                    if (errorLineIndex === -1) errorLineIndex = i;
+                }
+            }
+            const beginMatch = line.match(/begin\s+(\S+)/);
+            if (beginMatch) {
+                const funcName = beginMatch[1];
+                if (errorLineIndex === -1 || i < errorLineIndex) callStack.push(funcName);
+            }
+            const endMatch = line.match(/end\s+(\S+)/);
+            if (endMatch && callStack.length > 0) {
+                if (errorLineIndex === -1 || i < errorLineIndex) {
+                    const funcName = endMatch[1];
+                    if (callStack[callStack.length - 1] === funcName) callStack.pop();
+                }
+            }
+            if (trimmedLine.startsWith('= ')) {
+                let cmd = trimmedLine.substring(2).trim();
+                cmd = cmd.replace(/^((cap(ture)?|qui(etly)?|noi(sily)?)\s+)+/gi, '').trim();
+                const isUtilityCmd = /^(loc(al)?|if|else|args|return|exit|scalar|matrix|global|tempvar|tempname|tempfile|macro|while|foreach|forvalues|continue|Cleanup|Drop|Clear)\b/i.test(cmd);
+                if (!isUtilityCmd && cmd.length > 0 && (errorLineIndex === -1 || i < errorLineIndex)) {
+                    commandHistory.push(cmd);
+                    if (commandHistory.length > 3) commandHistory.shift();
+                }
+            } else {
+                const comMatch = line.match(/^\{com\}(.+)$/);
+                if (comMatch) {
+                    let cmd = comMatch[1].trim().replace(/\{[^}]+\}/g, '');
+                    if (cmd.startsWith('. ')) cmd = cmd.substring(2).trim();
+                    cmd = cmd.replace(/^((cap(ture)?|qui(etly)?|noi(sily)?)\s+)+/gi, '').trim();
+                    const isUtilityCmd = /^(loc(al)?|if|else|args|\.|\*|while|foreach|forvalues|continue|Cleanup|Drop|Clear)\b/i.test(cmd);
+                    if (!isUtilityCmd && cmd.length > 0 && (errorLineIndex === -1 || i < errorLineIndex)) {
+                        commandHistory.push(cmd);
+                        if (commandHistory.length > 3) commandHistory.shift();
+                    }
+                }
+            }
+        }
+        if (errorMessages.length === 0) return { rc: extractedRC, formattedText: '', hasError: hasError };
+        let filteredErrors = errorMessages.filter(e => e.length > 0);
+        if (filteredErrors.length > 1) {
+            const hasSpecificError = filteredErrors.some(e => !e.match(/^error \d+$/i));
+            if (hasSpecificError) filteredErrors = filteredErrors.filter(e => !e.match(/^error \d+$/i));
+        }
+        const uniqueErrors = [...new Set(filteredErrors)];
+        let parts = [];
+        if (callStack.length > 0) parts.push(`In: ${callStack.join(' → ')}`);
+        if (commandHistory.length > 0) {
+            const cmd = commandHistory[commandHistory.length - 1];
+            const formattedCmd = cmd.replace(/,\s+/g, ',\n    ').replace(/\s+(if|in|using)\s+/gi, '\n    $1 ').trim();
+            parts.push(`\nCommand:\n  ${formattedCmd}`);
+        }
+        if (uniqueErrors.length > 0) parts.push(`\nError: ${uniqueErrors.join('\n       ')}`);
+        return { rc: extractedRC, formattedText: parts.join('\n').trim(), hasError: hasError };
+    },
+
     // Common setup for artifact buttons
     bindArtifactEvents: function (vscode) {
         document.addEventListener('click', (e) => {
@@ -56,7 +404,6 @@ window.stataUI = {
 
         // Ensure Stata language is registered
         if (!window.hljs.getLanguage('stata')) {
-            console.log('[Terminal] Registering basic Stata language support');
             window.hljs.registerLanguage('stata', function (hljs) {
                 return {
                     name: 'stata',
@@ -82,9 +429,12 @@ window.stataUI = {
         }
 
         const elements = root.querySelectorAll('.syntax-highlight:not(.highlighted)');
-        if (elements.length > 0) {
-            console.log('[Terminal] Highlighting ' + elements.length + ' elements');
-        }
+        const start = Date.now();
+        let totalChars = 0;
+        elements.forEach(el => {
+            totalChars += (el.textContent || '').length;
+        });
+        console.log('[Highlight] elements=' + elements.length + ' chars=' + totalChars);
 
         elements.forEach(el => {
             try {
@@ -129,6 +479,16 @@ window.stataUI = {
                 el.classList.add('highlighted'); // prevent infinite retries
             }
         });
+        const totalNow = root.querySelectorAll('.syntax-highlight').length;
+        const highlightedNow = root.querySelectorAll('.syntax-highlight.highlighted').length;
+        const sampleEl = root.querySelector('.syntax-highlight.highlighted');
+        const sampleColor = sampleEl ? window.getComputedStyle(sampleEl).color : null;
+        const sampleBg = sampleEl ? window.getComputedStyle(sampleEl).backgroundColor : null;
+        const sampleString = root.querySelector('.hljs-string');
+        const stringColor = sampleString ? window.getComputedStyle(sampleString).color : null;
+        console.log('[Highlight] style sample color=' + sampleColor + ' bg=' + sampleBg);
+        const elapsed = Date.now() - start;
+        console.log('[Highlight] elements=' + elements.length + ' chars=' + totalChars + ' done in ' + elapsed + 'ms');
     }
 };
 

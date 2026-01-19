@@ -101,7 +101,7 @@ describe('McpClient', () => {
                     // Case 2: Object with just name (needs export)
                     { name: "named_graph" },
                     // Case 3: Fully formed artifact (no export needed)
-                    { name: "existing_graph", path: "/tmp/graph.pdf", dataUri: "data:application/pdf;base64,..." }
+                    { name: "existing_graph", path: "/tmp/graph.pdf" }
                 ]
             };
 
@@ -110,19 +110,12 @@ describe('McpClient', () => {
             };
 
             // Setup mock responses for exports
-            const expectedDataUri = `data:image/png;base64,${Buffer.from('fake_image_data').toString('base64')}`;
-            client._fileToDataUri = sinon.stub().returns(expectedDataUri);
             client._exportGraphPreferred = sinon.stub().callsFake(async (c, name) => {
                 return { content: [{ type: 'text', text: `/tmp/${name}.pdf` }] };
             });
 
             // Configure the stubbed _callTool to return artifacts
             // Note: _callTool takes (client, name, args)
-            client._callTool.withArgs(mockClient, 'export_graph', { graph_name: 'simple_graph', format: 'png' })
-                .resolves({ content: [{ type: 'text', text: '/tmp/simple_graph.png' }] });
-
-            client._callTool.withArgs(mockClient, 'export_graph', { graph_name: 'named_graph', format: 'png' })
-                .resolves({ content: [{ type: 'text', text: '/tmp/named_graph.png' }] });
 
             const artifacts = await client._resolveArtifactsFromList(mockResponse, '/tmp', mockClient);
 
@@ -200,6 +193,23 @@ describe('McpClient', () => {
             expect(normalized.contentText).toEqual('');
             expect(normalized.stderr).toContain('variable y not found');
         });
+
+        it('preserves graph artifact arrays in normalized responses', () => {
+            const response = {
+                success: true,
+                graphArtifacts: [
+                    { label: 'g1', path: '/tmp/g1.png' }
+                ]
+            };
+
+            const normalized = client._normalizeResponse(response, { command: 'graph' });
+
+            expect(Array.isArray(normalized.graphArtifacts)).toBe(true);
+            expect(normalized.graphArtifacts.length).toBe(1);
+            expect(normalized.graphArtifacts[0].label).toBe('g1');
+            expect(Array.isArray(normalized.artifacts)).toBe(true);
+            expect(normalized.artifacts[0].path).toBe('/tmp/g1.png');
+        });
     });
 
     describe('Artifact Parsing', () => {
@@ -215,7 +225,6 @@ describe('McpClient', () => {
             const art = client._parseArtifactLikeJson(input);
             expect(art.label).toEqual('g2');
             expect(art.path).toEqual('https://example.com/image.png');
-            expect(art.dataUri).toBeNull();
         });
 
         it('_parseArtifactLikeJson should return null for invalid json', () => {
@@ -351,7 +360,7 @@ describe('McpClient', () => {
             expect(meta.filePath).toEqual('/tmp/project/script.do');
             expect(meta.command).toEqual('do "/tmp/project/script.do"');
 
-            expect(result.taskResult.name).toEqual('run_do_file');
+            expect(result.taskResult.name).toEqual('run_do_file_background');
             expect(result.taskResult.args.cwd).toEqual(expectedCwd);
             expect(result.taskResult.args.path).toEqual('/tmp/project/script.do');
 
@@ -395,7 +404,7 @@ describe('McpClient', () => {
             expect(enqueueStub.calledOnce).toBe(true);
             expect(result.label).toEqual('run_selection');
             expect(result.meta.cwd).toEqual('/tmp/project');
-            expect(result.taskResult.name).toEqual('run_command');
+            expect(result.taskResult.name).toEqual('run_command_background');
             expect(result.taskResult.args.cwd).toEqual('/tmp/project');
             expect(result.taskResult.args.code).toEqual('display "hi"');
 
@@ -453,6 +462,24 @@ describe('McpClient', () => {
             expect(String(cancelSpy.firstCall.args[0] || '')).toMatch(/user cancelled/);
             client._pending = 0;
         });
+
+        it('cancelAll calls cancel_task when a background task is active', async () => {
+            const cancelSpy = sinon.spy();
+            client._activeCancellation = { cancel: cancelSpy };
+            client._pending = 1;
+            client._activeRun = { taskId: 'task-123' };
+            client._ensureClient = sinon.stub().resolves({});
+            client._cancelTask = sinon.stub().resolves();
+
+            const result = await client.cancelAll();
+
+            expect(result).toBe(true);
+            expect(cancelSpy.calledOnce).toBe(true);
+            expect(client._cancelTask.calledOnce).toBe(true);
+            expect(client._cancelTask.firstCall.args[1]).toEqual('task-123');
+            client._pending = 0;
+            client._activeRun = null;
+        });
     });
 
     describe('log tailing', () => {
@@ -469,12 +496,14 @@ describe('McpClient', () => {
                 _tailCancelled: false,
                 _tailPromise: null,
                 _logBuffer: '',
-                _appendLog: (t) => { run._logBuffer += String(t || ''); }
+                _appendLog: (t) => { run._logBuffer += String(t || ''); },
+                onRawLog: sinon.spy()
             };
 
             await client._drainActiveRunLog({}, run);
 
             expect(run._logBuffer).toEqual('abc');
+            expect(run.onRawLog.called).toBe(true);
             expect(run.logOffset).toEqual(3);
             expect(client._readLogSlice.called).toBe(true);
         });
@@ -494,28 +523,50 @@ describe('McpClient', () => {
                 // Stop after first chunk
                 run._tailCancelled = true;
             });
+            run.onRawLog = sinon.spy((data) => {
+                if (data) run._tailCancelled = true;
+            });
 
             await client._tailLogLoop({}, run);
 
             expect(run.onLog.calledOnce).toBe(true);
+            expect(run.onRawLog.calledOnce).toBe(true);
             expect(run._logBuffer).toEqual('hi\n');
             expect(run.logOffset).toEqual(3);
         });
 
         it('runSelection should drain read_log when log_path is only present in tool response', async () => {
             client._delay = sinon.stub().resolves();
+            client._awaitTaskDone = sinon.stub().resolves();
 
             // Let the real _enqueue run (so normalization happens).
             // Ensure the MCP client exists.
             client._ensureClient = sinon.stub().resolves({});
 
-            // Stub _callTool for both run_command and read_log.
+            // Stub _callTool for background kickoff, result, and read_log.
             client._callTool = sinon.stub().callsFake(async (_client, name, args) => {
-                if (name === 'run_command') {
+                if (name === 'run_command_background') {
                     return {
                         structuredContent: {
                             result: JSON.stringify({
                                 command: args.code,
+                                rc: 0,
+                                stdout: '',
+                                stderr: null,
+                                log_path: '/tmp/mcp_stata_test.log',
+                                task_id: 'task-abc',
+                                success: true,
+                                error: null
+                            })
+                        },
+                        content: [{ type: 'text', text: '' }]
+                    };
+                }
+                if (name === 'get_task_result') {
+                    return {
+                        structuredContent: {
+                            result: JSON.stringify({
+                                command: args.code || 'display "HI"',
                                 rc: 0,
                                 stdout: '',
                                 stderr: null,
@@ -556,6 +607,54 @@ describe('McpClient', () => {
             expect(result.rc).toEqual(0);
             expect(result.logPath).toEqual('/tmp/mcp_stata_test.log');
             expect(result.stdout).toEqual('abc\n');
+        });
+    });
+
+    describe('background task helpers', () => {
+        it('_awaitTaskDone resolves after task_done notification', async () => {
+            const runState = {};
+            const cancellationToken = { onCancellationRequested: sinon.stub().returns({ dispose: sinon.stub() }) };
+
+            const promise = client._awaitTaskDone(runState, 'task-1', cancellationToken);
+            runState._taskDoneResolve({ event: 'task_done', task_id: 'task-1' });
+
+            const result = await promise;
+
+            expect(result).toBeTruthy();
+            expect(result.task_id).toEqual('task-1');
+        });
+
+        it('_awaitBackgroundResult wires task id and log path', async () => {
+            const runState = { logPath: null };
+            client._ensureLogTail = sinon.stub().callsFake(async (_client, run, logPath) => {
+                run.logPath = logPath;
+            });
+            client._awaitTaskDone = sinon.stub().resolves({ event: 'task_done', task_id: 'task-xyz' });
+            client._callTool = sinon.stub().callsFake(async (_client, name) => {
+                if (name === 'get_task_result') {
+                    return { ok: true };
+                }
+                return {};
+            });
+
+            const kickoff = {
+                log_path: '/tmp/background.log',
+                structuredContent: {
+                    log_path: '/tmp/background.log',
+                    task_id: 'task-xyz'
+                },
+                content: [{ type: 'text', text: '' }]
+            };
+
+            const result = await client._awaitBackgroundResult({}, runState, kickoff, { token: { onCancellationRequested: sinon.stub() } });
+
+            expect(runState.logPath).toEqual('/tmp/background.log');
+            expect(runState.taskId).toEqual('task-xyz');
+            expect(result).toEqual({
+                event: 'task_done',
+                task_id: 'task-xyz',
+                log_path: '/tmp/background.log'
+            });
         });
     });
 
@@ -658,8 +757,6 @@ describe('McpClient', () => {
             client._exportGraphPreferred = sinon.stub().resolves({ content: [{ type: 'text', text: '/tmp/g1.pdf' }] });
             client._callTool.withArgs(sinon.match.any, 'export_graph', sinon.match.has('format', 'png'))
                 .resolves({ content: [{ type: 'text', text: '/tmp/g1.png' }] });
-            const expectedDataUri = `data:image/png;base64,${Buffer.from('fake_image_data').toString('base64')}`;
-            client._fileToDataUri = sinon.stub().returns(expectedDataUri);
 
 
             const result = await client.listGraphs({ baseDir: '/tmp' });

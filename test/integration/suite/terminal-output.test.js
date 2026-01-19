@@ -65,6 +65,84 @@ describe('Terminal Output E2E', () => {
         expect(combined).not.toContain('opened on:');
     });
 
+    test('Should include log path metadata for background runs', async () => {
+        if (!enabled) {
+            return;
+        }
+
+        const extension = vscode.extensions.getExtension('tmonk.stata-workbench');
+        if (!extension.isActive) {
+            await extension.activate();
+        }
+        const api = extension.exports;
+
+        const outgoing = [];
+        api.TerminalPanel._testOutgoingCapture = (msg) => {
+            outgoing.push(msg);
+        };
+
+        const doc = await vscode.workspace.openTextDocument({
+            language: 'stata',
+            content: 'display "log-path-e2e"'
+        });
+        const editor = await vscode.window.showTextDocument(doc);
+        editor.selection = new vscode.Selection(0, 0, doc.lineCount - 1, doc.lineAt(doc.lineCount - 1).text.length);
+
+        await vscode.commands.executeCommand('stata-workbench.runSelection');
+
+        let runFinished = null;
+        for (let i = 0; i < 120; i++) {
+            runFinished = outgoing.find(m => m?.type === 'runFinished' && m.success === true);
+            if (runFinished) break;
+            await new Promise(r => setTimeout(r, 500));
+        }
+
+        expect(runFinished).toBeTruthy();
+        expect(runFinished.logPath).toBeTruthy();
+        expect(runFinished.logSize).toBeGreaterThan(0);
+    });
+
+    test('Should surface graph artifacts for graph-producing runs', async () => {
+        if (!enabled) {
+            return;
+        }
+
+        const extension = vscode.extensions.getExtension('tmonk.stata-workbench');
+        if (!extension.isActive) {
+            await extension.activate();
+        }
+        const api = extension.exports;
+
+        const outgoing = [];
+        api.TerminalPanel._testOutgoingCapture = (msg) => {
+            outgoing.push(msg);
+        };
+
+        const doc = await vscode.workspace.openTextDocument({
+            language: 'stata',
+            content: 'sysuse auto, clear\ntwoway scatter mpg weight'
+        });
+        const editor = await vscode.window.showTextDocument(doc);
+        editor.selection = new vscode.Selection(0, 0, doc.lineCount - 1, doc.lineAt(doc.lineCount - 1).text.length);
+
+        await vscode.commands.executeCommand('stata-workbench.runSelection');
+
+        let runFinished = null;
+        let sawArtifact = false;
+        for (let i = 0; i < 140; i++) {
+            runFinished = outgoing.find(m => m?.type === 'runFinished' && m.success === true);
+            if (outgoing.some(m => m?.type === 'runArtifact')) {
+                sawArtifact = true;
+            }
+            if (runFinished && (sawArtifact || (runFinished.artifacts && runFinished.artifacts.length))) break;
+            await new Promise(r => setTimeout(r, 500));
+        }
+
+        const finalArtifacts = Array.isArray(runFinished?.artifacts) ? runFinished.artifacts : [];
+        expect(runFinished).toBeTruthy();
+        expect(sawArtifact || finalArtifacts.length > 0).toBe(true);
+    });
+
     test('Should show Log tab on failure and hide on success', async () => {
         if (!enabled) {
             return;
