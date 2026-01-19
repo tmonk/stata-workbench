@@ -1,3 +1,19 @@
+# [0.13.0](https://github.com/tmonk/stata-workbench/compare/v0.12.1...v0.13.0) (2026-01-19)
+
+
+### Features
+
+* add showAllLogsInOutput configuration to stream raw mcp-stata logs to Output channel ([799de61](https://github.com/tmonk/stata-workbench/commit/799de61f1df4a6daceb2f442f20702d1538869d5))
+* Enhance SMCL processing and HTML conversion ([b2e97a9](https://github.com/tmonk/stata-workbench/commit/b2e97a95010778aff252c23d1b2d58b8af00a127))
+* Enhance task completion notifications and logging in terminal panel ([810d21e](https://github.com/tmonk/stata-workbench/commit/810d21e74e700af2fac2a560f6eab81fbdf43716))
+* ensure log tailing completes before retrieving task results ([dba8205](https://github.com/tmonk/stata-workbench/commit/dba820545311dc6b61f050cc9f69dfc131137197))
+* implement real-time graph streaming with deferred artifact collection ([993bfce](https://github.com/tmonk/stata-workbench/commit/993bfce16c7f5dc420281444c9242b1a2d06d663))
+* migrate to background task execution model with async result retrieval ([72fb568](https://github.com/tmonk/stata-workbench/commit/72fb568c99abfea4fe87bc5633e22546cd74ed19))
+* optimize log streaming by reducing polling intervals and enforcing exclusive log file mode ([cd4a27f](https://github.com/tmonk/stata-workbench/commit/cd4a27f6a1432cb1f48c5eb5a04b83f2ff677a81))
+* Refactor log filtering patterns for improved whitespace tolerance and consistency ([e4a4131](https://github.com/tmonk/stata-workbench/commit/e4a4131c334e36ed5b009b4fb05b7f927129d3e1))
+* remove base64 graph export option and related code for improved efficiency ([c24f75b](https://github.com/tmonk/stata-workbench/commit/c24f75b89831bfea0676e58eed58f5c2138bfebd))
+* update test command to suppress experimental warnings and enhance graph data validation ([84af1ee](https://github.com/tmonk/stata-workbench/commit/84af1ee62d17b9d276596c228e5799036b42f6df))
+
 ## [0.12.1](https://github.com/tmonk/stata-workbench/compare/v0.12.0...v0.12.1) (2026-01-06)
 
 
