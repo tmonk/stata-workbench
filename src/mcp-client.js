@@ -56,6 +56,7 @@ class StataMcpClient {
         // Allow larger captured logs so long .do files and errors are preserved.
         this._maxLogBufferChars = 500_000_000; // 500 MB
         this._clientVersion = pkg?.version || 'dev';
+        this._onTaskDone = null;
     }
 
     _attachStderrListener(stream, source) {
@@ -85,13 +86,17 @@ class StataMcpClient {
         }
     }
 
+    setTaskDoneHandler(handler) {
+        this._onTaskDone = typeof handler === 'function' ? handler : null;
+    }
+
     onStatusChanged(listener) {
         this._statusEmitter.on('status', listener);
         return { dispose: () => this._statusEmitter.off('status', listener) };
     }
 
     async runSelection(selection, options = {}) {
-        const { normalizeResult, includeGraphs, onLog, onRawLog, onProgress, onGraphReady, cancellationToken: externalCancellationToken, ...rest } = options || {};
+        const { normalizeResult, includeGraphs, onLog, onRawLog, onProgress, onGraphReady, onTaskDone, runId, cancellationToken: externalCancellationToken, ...rest } = options || {};
         const config = vscode.workspace.getConfiguration('stataMcp');
         const maxOutputLines = Number.isFinite(config.get('maxOutputLines', 0)) && config.get('maxOutputLines', 0) > 0
             ? config.get('maxOutputLines', 0)
@@ -115,7 +120,11 @@ class StataMcpClient {
                 ? this._generateProgressToken()
                 : null;
 
-            const runState = { onLog, onRawLog, onProgress, onGraphReady, progressToken, baseDir: cwd };
+            const nowMs = Date.now();
+            const resolvedOnTaskDone = (typeof onTaskDone === 'function')
+                ? onTaskDone
+                : (typeof this._onTaskDone === 'function' ? this._onTaskDone : null);
+            const runState = { onLog, onRawLog, onProgress, onGraphReady, onTaskDone: resolvedOnTaskDone, progressToken, baseDir: cwd, _startMs: nowMs, _createdAt: nowMs, _runId: runId || null };
             const result = await this._withActiveRun(runState, async () => {
                 const kickoff = await this._callTool(client, 'run_command_background', args, { progressToken, signal: cts.abortController.signal });
                 return this._awaitBackgroundResult(client, runState, kickoff, cts);
@@ -146,7 +155,7 @@ class StataMcpClient {
     }
 
     async runFile(filePath, options = {}) {
-        const { normalizeResult, includeGraphs, onLog, onRawLog, onProgress, onGraphReady, cancellationToken: externalCancellationToken, ...rest } = options || {};
+        const { normalizeResult, includeGraphs, onLog, onRawLog, onProgress, onGraphReady, onTaskDone, runId, cancellationToken: externalCancellationToken, ...rest } = options || {};
         // Resolve working directory (configurable, defaults to the .do file folder).
         // Allow caller to override CWD (important for running temp files while preserving original CWD).
         const cwd = (rest && typeof rest.cwd === 'string') ? rest.cwd : this._resolveRunFileCwd(filePath);
@@ -174,7 +183,11 @@ class StataMcpClient {
                 ? this._generateProgressToken()
                 : null;
 
-            const runState = { onLog, onRawLog, onProgress, onGraphReady, progressToken, baseDir: cwd };
+            const nowMs = Date.now();
+            const resolvedOnTaskDone = (typeof onTaskDone === 'function')
+                ? onTaskDone
+                : (typeof this._onTaskDone === 'function' ? this._onTaskDone : null);
+            const runState = { onLog, onRawLog, onProgress, onGraphReady, onTaskDone: resolvedOnTaskDone, progressToken, baseDir: cwd, _startMs: nowMs, _createdAt: nowMs, _runId: runId || null };
             const result = await this._withActiveRun(runState, async () => {
                 const kickoff = await this._callTool(client, 'run_do_file_background', args, { progressToken, signal: cts.abortController.signal });
                 return this._awaitBackgroundResult(client, runState, kickoff, cts);
@@ -552,6 +565,24 @@ class StataMcpClient {
                         if (taskId) {
                             run._taskDonePayload = parsed;
                             run._taskDoneTaskId = String(taskId);
+                            const hasOnTaskDone = typeof run.onTaskDone === 'function';
+                            const taskPayload = {
+                                taskId: String(taskId),
+                                runId: run?._runId || null,
+                                logPath: parsed?.log_path || parsed?.logPath || null,
+                                status: parsed?.status || null
+                            };
+                            if (hasOnTaskDone) {
+                                try {
+                                    run.onTaskDone(taskPayload);
+                                } catch (_err) {
+                                }
+                            } else if (typeof this._onTaskDone === 'function') {
+                                try {
+                                    this._onTaskDone(taskPayload);
+                                } catch (_err) {
+                                }
+                            }
                             run._tailCancelled = true;
                             run._fastDrain = true;
                             run._skipDrain = true;
@@ -861,6 +892,8 @@ class StataMcpClient {
             }
             const data = String(slice.data ?? '');
             if (data) {
+                run._lastLogAt = Date.now();
+                run._idleLogged = false;
                 // LINE BUFFERING: Apply same logic to tailing
                 run._lineBuffer = (run._lineBuffer || '') + data;
                 const lines = run._lineBuffer.split(/\r?\n/);
@@ -899,6 +932,10 @@ class StataMcpClient {
                     await this._delay(25);
                 }
             } else {
+                const lastAt = run._lastLogAt || 0;
+                if (!run._idleLogged && lastAt && Date.now() - lastAt > 500) {
+                    run._idleLogged = true;
+                }
                 // No data at all, wait longer
                 await this._delay(50);
             }

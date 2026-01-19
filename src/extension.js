@@ -75,6 +75,13 @@ function activate(context) {
     if (typeof mcpClient.setLogger === 'function') {
         mcpClient.setLogger((msg) => outputChannel.appendLine(msg));
     }
+    if (typeof mcpClient.setTaskDoneHandler === 'function') {
+        mcpClient.setTaskDoneHandler((payload) => {
+            if (payload?.runId) {
+                TerminalPanel.notifyTaskDone(payload.runId);
+            }
+        });
+    }
     DataBrowserPanel.setLogger((msg) => outputChannel.appendLine(msg));
 
     statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
@@ -700,6 +707,8 @@ async function runFile() {
     try {
         await withStataProgress(`Running ${path.basename(filePath)}`, async (token) => {
             const commandText = `do "${path.basename(filePath)}"`;
+            let taskDoneSeen = false;
+            const runStart = Date.now();
             const runId = TerminalPanel.startStreamingEntry(commandText, filePath, terminalRunCommand, variableListProvider, cancelRequest, downloadGraphAsPdf);
             try {
                 const result = await mcpClient.runFile(effectiveFilePath, {
@@ -707,12 +716,41 @@ async function runFile() {
                     normalizeResult: true,
                     includeGraphs: true,
                     cwd: originalDir,
+                    runId,
                     onRawLog: rawLogHandler,
                     onLog: (chunk) => {
+                        if (taskDoneSeen) {
+                        }
                         if (runId) TerminalPanel.appendStreamingLog(runId, chunk);
                     },
                     onGraphReady: (artifact) => {
                         if (runId) TerminalPanel.appendRunArtifact(runId, artifact);
+                    },
+                    onTaskDone: (payload) => {
+                        taskDoneSeen = true;
+                        let logSize = null;
+                        const logPath = payload?.logPath || null;
+                        let taskDoneStdout = null;
+                        let rawLen = null;
+                        let readErr = null;
+                        let convertErr = null;
+                        if (logPath) {
+                            try {
+                                const stats = fs.statSync(logPath);
+                                logSize = stats.size;
+                                if (logSize > 0 && logSize <= 50_000) {
+                                    const raw = fs.readFileSync(logPath, 'utf8');
+                                    rawLen = raw.length;
+                                    taskDoneStdout = raw;
+                                }
+                            } catch (err) {
+                                readErr = err?.message || String(err);
+                            }
+                        }
+                        if (runId) TerminalPanel.notifyTaskDone(runId, logPath, logSize);
+                        if (runId && taskDoneStdout) {
+                            TerminalPanel.updateTaskDoneOutput(runId, taskDoneStdout);
+                        }
                     },
                     onProgress: (progress, total, message) => {
                         if (runId) TerminalPanel.updateStreamingProgress(runId, progress, total, message);
@@ -1186,7 +1224,8 @@ function renderGraphHtml(graphDetails, webview, extensionUri) {
 async function withStataProgress(title, task, sample) {
     const cancellable = true;
     const hints = sample && sample.length > 180 ? `${sample.slice(0, 180)}…` : sample;
-    return vscode.window.withProgress(
+    const startedAt = Date.now();
+    const result = await vscode.window.withProgress(
         {
             location: vscode.ProgressLocation.Notification,
             title,
@@ -1201,9 +1240,11 @@ async function withStataProgress(title, task, sample) {
                 vscode.window.showErrorMessage(`${title} failed: ${detail}${hints ? ` (snippet: ${hints})` : ''}`);
                 showOutput(error?.stack || detail);
                 throw error;
+            } finally {
             }
         }
     );
+    return result;
 }
 
 function isStataFailure(result) {
