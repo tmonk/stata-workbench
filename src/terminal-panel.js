@@ -312,12 +312,25 @@ class TerminalPanel {
     try {
       const cwd = TerminalPanel._activeFilePath ? path.dirname(TerminalPanel._activeFilePath) : null;
       const hooks = {
+        runId,
         onLog: (text) => {
           if (!text) return;
         TerminalPanel._postMessage({ type: 'runLogAppend', runId, text: formatStreamChunk(text), streamFormat: 'plain' });
         },
         onProgress: (progress, total, message) => {
           TerminalPanel._postMessage({ type: 'runProgress', runId, progress, total, message });
+        },
+        onTaskDone: (payload) => {
+          let stdout = null;
+          if (payload?.logPath) {
+            try {
+              const stats = fs.statSync(payload.logPath);
+              if (stats.size > 0 && stats.size <= 50000) {
+                stdout = fs.readFileSync(payload.logPath, 'utf8');
+              }
+            } catch (_err) { }
+          }
+          TerminalPanel.notifyTaskDone(runId, payload?.logPath, payload?.logSize, stdout, payload?.rc);
         },
         cwd
       };
@@ -531,14 +544,16 @@ class TerminalPanel {
     TerminalPanel._postMessage({ type: 'busy', value: false });
   }
 
-  static notifyTaskDone(runId, logPath, logSize) {
+  static notifyTaskDone(runId, logPath, logSize, stdout, rc) {
     if (!TerminalPanel.currentPanel || !runId) return;
-    TerminalPanel._postMessage({ type: 'taskDone', runId, logPath: logPath || null, logSize: logSize ?? null });
-  }
-
-  static updateTaskDoneOutput(runId, stdoutHtml) {
-    if (!TerminalPanel.currentPanel || !runId || !stdoutHtml) return;
-    TerminalPanel._postMessage({ type: 'taskDoneOutput', runId, stdout: stdoutHtml });
+    TerminalPanel._postMessage({ 
+      type: 'taskDone', 
+      runId, 
+      logPath: logPath || null, 
+      logSize: logSize ?? null, 
+      stdout: stdout || null,
+      rc: rc ?? null
+    });
   }
 
   static appendRunArtifact(runId, artifact) {
@@ -894,28 +909,6 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
     });
 
     const taskDoneRuns = new Set();
-    // Listen for new messages
-    window.addEventListener('message', event => {
-        const message = event.data;
-        if (message.type === 'taskDone') {
-            if (message.runId) {
-                taskDoneRuns.add(message.runId);
-            }
-            return;
-        }
-        if (message.type === 'runFinished') {
-            // Highlight is triggered on taskDone; skip here to avoid delaying until artifacts.
-            return;
-        }
-        if (message.type === 'append') {
-            scheduleHighlight();
-            return;
-        }
-        if (message.type === 'runLogAppend') {
-            // Do not highlight while streaming; wait for runFinished.
-            return;
-        }
-    });
     
     const chatStream = document.getElementById('chat-stream');
     const originalConsole = {
@@ -1022,33 +1015,27 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
 
     function safeSliceTail(html, limit) {
         if (!html || html.length <= limit) return html || '';
-        let start = html.length -limit;
-        // Search for the first newline after the potential cut point.
-        // This ensures we start on a fresh line, avoiding broken tags.
+        let start = html.length - limit;
+        
         const firstNewline = html.indexOf(String.fromCharCode(10), start);
-        const firstTagStart = html.indexOf('<', start);
+        const firstHtmlTag = html.indexOf('<', start);
+        const firstSmclTag = html.indexOf('{', start);
         
         let cutPoint = -1;
-        let offset = 1; // default to skipping the delimiter (like newline)
+        let offset = 0;
 
-        if (firstNewline !== -1 && firstTagStart !== -1) {
-            // Both found, take earliest
-            if (firstNewline < firstTagStart) {
-                cutPoint = firstNewline;
-                offset = 1; // skip \n
-            } else {
-                cutPoint = firstTagStart;
-                offset = 0; // keep <
-            }
-        } else if (firstNewline !== -1) {
-            cutPoint = firstNewline;
-            offset = 1;
-        } else if (firstTagStart !== -1) {
-            cutPoint = firstTagStart;
-            offset = 0;
+        const candidates = [];
+        if (firstNewline !== -1) candidates.push({ pos: firstNewline, offset: 1 });
+        if (firstHtmlTag !== -1) candidates.push({ pos: firstHtmlTag, offset: 0 });
+        if (firstSmclTag !== -1) candidates.push({ pos: firstSmclTag, offset: 0 });
+
+        if (candidates.length > 0) {
+            candidates.sort((a, b) => a.pos - b.pos);
+            cutPoint = candidates[0].pos;
+            offset = candidates[0].offset;
         }
 
-        if (cutPoint !== -1 && cutPoint < html.length -1) {
+        if (cutPoint !== -1 && cutPoint < html.length - 1) {
             return html.substring(cutPoint + offset);
         }
         return html.slice(-limit);
@@ -1349,11 +1336,7 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
         const div = document.createElement('div');
         div.className = 'message-group';
         div.dataset.optimistic = 'true';
-        div.innerHTML = \`
-            <div class="user-bubble">
-                \${window.stataUI.escapeHtml(code)}
-            </div>
-        \`;
+        div.innerHTML = '<div class="user-bubble">' + window.stataUI.escapeHtml(code) + '</div>';
         chatStream.appendChild(div);
         if (autoScrollPinned) scrollToBottom();
     }
@@ -1785,8 +1768,62 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
       }
       if (msg.type === 'append') {
         appendEntry(msg.entry);
+        scheduleHighlight();
+        return;
       }
-      if (msg.type === 'busy') setBusy(msg.value);
+      if (msg.type === 'busy') {
+          setBusy(msg.value);
+          return;
+      }
+
+      if (msg.type === 'taskDone') {
+        const runId = msg.runId;
+        const run = runs[runId];
+        if (runId) taskDoneRuns.add(runId);
+        if (!run) return;
+
+        // Clear local progress bars
+        if (run.progressWrap) {
+            run.progressWrap.style.display = 'none';
+            if (run.progressText) run.progressText.textContent = '';
+            if (run.progressMeta) run.progressMeta.textContent = '';
+        }
+
+        // Update RC and Status Indicator if present
+        if (msg.rc !== null && msg.rc !== undefined) {
+             const success = (msg.rc === 0);
+             if (run.statusDot) {
+                 run.statusDot.style.color = success ? 'var(--accent-success)' : 'var(--accent-error)';
+             }
+             if (run.rcEl) {
+                 run.rcEl.textContent = 'RC ' + String(msg.rc);
+             }
+             updateStatusIndicator(success, msg.rc);
+        }
+
+        // Fill HTML immediately if provided
+        if (msg.stdout && run.stdoutEl) {
+            const finalStdout = window.stataUI.smclToHtml(String(msg.stdout || ''));
+            const currentStdout = run.stdoutEl.innerHTML;
+            // No-replacement optimization: if what we have looks like a match for what just came in, avoid flicker.
+            if (currentStdout && finalStdout && Math.abs(currentStdout.length - finalStdout.length) < 20) {
+                 // close enough to avoid flicker
+            } else {
+                 run.stdoutEl.innerHTML = finalStdout;
+            }
+            run._taskDoneApplied = true;
+        }
+
+        // Clear busy state immediately on task_done so graphs don't block UI.
+        setBusy(false);
+
+        // Ensure highlight happens
+        if (!run._highlighted && !run.viewer) {
+            run._highlighted = true;
+            scheduleHighlight();
+        }
+        return;
+      }
 
       if (msg.type === 'datasetSummary') {
         if (dataSummary && obsCount && varCount) {
@@ -1862,35 +1899,35 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
         const runId = msg.runId;
         const run = runs[runId];
         if (!run) return;
-        if (run._taskDoneApplied) {
-            console.log('[RunLogAppend] after task_done runId=' + runId + ' len=' + String(msg.text || '').length);
-        }
-        const shouldStick = autoScrollPinned;
+
         const chunk = String(msg.text ?? '');
         if (!chunk) return;
-        if (runMetrics[runId]) {
-            runMetrics[runId].logChunks += 1;
-            runMetrics[runId].logChars += chunk.length;
-            if (runMetrics[runId].logChunks === 1 || runMetrics[runId].logChunks % 50 === 0) {
-            }
+
+        // Cumulative buffer for live-streaming of SMCL. 
+        // We re-render the whole buffer for the Result pane to handle tags joining across chunks.
+        if (run.rawStdout === undefined) run.rawStdout = '';
+        run.rawStdout += chunk;
+
+        // Keep raw buffer bounded to avoid performance degradation on extremely long live output.
+        // 25KB is plenty for a live 'tail', and the full log is always accurate in the Log tab/file.
+        const MAX_RAW_BUF = 25_000;
+        if (run.rawStdout.length > MAX_RAW_BUF) {
+            run.rawStdout = safeSliceTail(run.rawStdout, MAX_RAW_BUF);
         }
-        if (run.logEl) {
-            run.logEl.insertAdjacentHTML('beforeend', chunk);
-        }
-        if (!run.stdoutEl) return;
-        const streamStart = Date.now();
-        const MAX_STREAM_CHARS = 20_000; // keep a bounded tail while streaming
-        run.stdoutEl.insertAdjacentHTML('beforeend', chunk);
-        const streamElapsed = Date.now() - streamStart;
-        if (runMetrics[runId] && (runMetrics[runId].logChunks === 1 || runMetrics[runId].logChunks % 25 === 0)) {
+
+        const shouldStick = autoScrollPinned;
+        
+        if (run.stdoutEl) {
+            run.stdoutEl.innerHTML = window.stataUI.smclToHtml(run.rawStdout);
         }
         
-        // Do not highlight while streaming; highlight once at runFinished.
-        const currentLen = run.stdoutEl.innerHTML.length;
-        if (currentLen > MAX_STREAM_CHARS) {
-            run.stdoutEl.innerHTML = safeSliceTail(run.stdoutEl.innerHTML, MAX_STREAM_CHARS);
+        if (run.logEl) {
+            run.logEl.innerHTML = window.stataUI.smclToHtml(run.rawStdout);
         }
+        
+        scheduleHighlight();
         if (shouldStick) scheduleScrollToBottom();
+        return;
       }
 
       if (msg.type === 'runProgress') {
@@ -1955,7 +1992,8 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
                 run.viewer = new LogViewer(run.stdoutEl, msg.logPath, msg.logSize, runId);
             } else {
                 const finalStdout = window.stataUI.smclToHtml(String(msg.stdout || ''));
-                const skipReplace = run._taskDoneApplied === true;
+                const currentStdout = run.stdoutEl ? run.stdoutEl.innerHTML : '';
+                const skipReplace = run._taskDoneApplied === true || (currentStdout && Math.abs(currentStdout.length - finalStdout.length) < 20);
                 if (skipReplace) {
                     if (autoScrollPinned) scrollToBottomSmooth();
                     return;
@@ -2081,28 +2119,6 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
             return;
         }
         applyRunFinished(msg);
-      }
-
-      if (msg.type === 'taskDoneOutput') {
-        const runId = msg.runId;
-        const run = runs[runId];
-        if (!run || !run.stdoutEl) return;
-        run.stdoutEl.innerHTML = window.stataUI.smclToHtml(String(msg.stdout || ''));
-        run._taskDoneApplied = true;
-
-        // Clear local progress bars
-        if (run.progressWrap) {
-            run.progressWrap.style.display = 'none';
-            if (run.progressText) run.progressText.textContent = '';
-            if (run.progressMeta) run.progressMeta.textContent = '';
-        }
-
-        // Clear busy state immediately on task_done so graphs don't block UI.
-        setBusy(false);
-        if (!run._highlighted && !run.viewer) {
-            run._highlighted = true;
-            scheduleHighlight();
-        }
       }
 
       if (msg.type === 'runFailed') {
@@ -2742,8 +2758,7 @@ function stripSmclTags(text) {
 }
 
 function formatStreamChunk(text) {
-  const normalized = stripSmclTags(text).replace(/\r\n/g, '\n');
-  return escapeHtml(normalized).replace(/\n/g, '<br>');
+  return String(text ?? '').replace(/\r\n/g, '\n');
 }
 
 

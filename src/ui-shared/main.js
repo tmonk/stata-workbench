@@ -73,9 +73,9 @@ window.stataUI = {
         // Remove global SMCL wrappers
         let html = processedText.replace(/\{smcl\}|\{\/smcl\}/gi, '');
 
-        // 1. Basic entity cleaning
+        // 1. Basic entity cleaning - we ONLY escape specific SMCL constants here.
+        // Generic content escaping moved to the token loop for correctness.
         html = html
-            .replace(/&/g, '&amp;')
             .replace(/\{c -\}/g, '-')
             .replace(/\{c \|\}/g, '|')
             .replace(/\{c \+\}/g, '+')
@@ -93,7 +93,7 @@ window.stataUI = {
 
         html = html.replace(/\{c -\(\}/g, '__BRACE_OPEN__').replace(/\{c \)-\}/g, '__BRACE_CLOSE__');
 
-        const tokenRegex = /(\{[^}]+\})|(\n)|([^{}\n]+)/g;
+        const tokenRegex = /(\{[^}]+\})|(\n)|([^{}\n]+)|(.)/g;
         let match;
         let result = '';
         let currentLineLen = 0;
@@ -101,10 +101,9 @@ window.stataUI = {
         const openTags = [];
 
         while ((match = tokenRegex.exec(html)) !== null) {
-            const fullMatch = match[0];
             const tag = match[1];
             const newline = match[2];
-            const textContent = match[3];
+            const textContent = match[3] || match[4];
 
             if (newline) {
                 result += '\n';
@@ -113,9 +112,12 @@ window.stataUI = {
             }
 
             if (textContent) {
-                result += textContent;
-                let visibleLen = textContent.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').length;
-                currentLineLen += visibleLen;
+                // Escape HTML entities in raw text content
+                result += textContent
+                    .replace(/&/g, '&amp;')
+                    .replace(/</g, '&lt;')
+                    .replace(/>/g, '&gt;');
+                currentLineLen += textContent.length;
                 continue;
             }
 

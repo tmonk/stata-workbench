@@ -529,8 +529,10 @@ class StataMcpClient {
                 client.setNotificationHandler(LoggingMessageNotificationSchema, (notification) => {
                     const text = String(notification?.params?.data ?? '');
                     if (!text) return;
+                    const timestamp = new Date().toLocaleTimeString();
                     const parsed = this._tryParseJson(text);
                     const event = parsed?.event;
+                    this._log(`[${timestamp}] Notification received: ${event || 'logMessage'}`);
                     const taskId = parsed?.task_id || parsed?.taskId;
                     let run = this._activeRun;
                     if (!run && taskId) {
@@ -570,7 +572,8 @@ class StataMcpClient {
                                 taskId: String(taskId),
                                 runId: run?._runId || null,
                                 logPath: parsed?.log_path || parsed?.logPath || null,
-                                status: parsed?.status || null
+                                status: parsed?.status || null,
+                                rc: typeof parsed?.rc === 'number' ? parsed.rc : null
                             };
                             if (hasOnTaskDone) {
                                 try {
@@ -641,6 +644,8 @@ class StataMcpClient {
 
             if (ProgressNotificationSchema) {
                 client.setNotificationHandler(ProgressNotificationSchema, (notification) => {
+                    const timestamp = new Date().toLocaleTimeString();
+                    this._log(`[${timestamp}] Notification received: progress`);
                     const run = this._activeRun;
                     if (!run || typeof run.onProgress !== 'function' || run.progressToken == null) return;
                     const token = notification?.params?.progressToken;

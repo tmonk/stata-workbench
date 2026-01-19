@@ -747,10 +747,7 @@ async function runFile() {
                                 readErr = err?.message || String(err);
                             }
                         }
-                        if (runId) TerminalPanel.notifyTaskDone(runId, logPath, logSize);
-                        if (runId && taskDoneStdout) {
-                            TerminalPanel.updateTaskDoneOutput(runId, taskDoneStdout);
-                        }
+                        if (runId) TerminalPanel.notifyTaskDone(runId, logPath, logSize, taskDoneStdout, payload?.rc);
                     },
                     onProgress: (progress, total, message) => {
                         if (runId) TerminalPanel.updateStreamingProgress(runId, progress, total, message);
@@ -809,10 +806,14 @@ const terminalRunCommand = async (code, hooks) => {
             normalizeResult: true,
             includeGraphs: true,
             cwd: hooks?.cwd,
+            runId: hooks?.runId,
             onRawLog: rawLogHandler,
             onLog: hooks?.onLog,
             onGraphReady: (artifact) => {
                 if (hooks?.runId) TerminalPanel.appendRunArtifact(hooks.runId, artifact);
+            },
+            onTaskDone: (payload) => {
+                if (hooks?.onTaskDone) hooks.onTaskDone(payload);
             },
             onProgress: hooks?.onProgress
         });
