@@ -11,7 +11,7 @@ const distDir = path.join(rootDir, 'dist');
 const entryFile = path.join(rootDir, 'src', 'extension.js');
 const outFile = path.join(distDir, 'extension.js');
 
-const release = process.env.SENTRY_RELEASE || `v${pkg.version}`;
+const release = process.env.SENTRY_RELEASE || `${pkg.name}@${pkg.version}`;
 const sentryAuthToken = process.env.SENTRY_AUTH_TOKEN?.trim();
 const sentryUploadDefault = (process.env.CI === 'true' || Boolean(sentryAuthToken)) ? 'true' : 'false';
 const sentryUploadEnv = process.env.SENTRY_UPLOAD ?? sentryUploadDefault;
