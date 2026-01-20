@@ -1,3 +1,10 @@
+## [0.15.4](https://github.com/tmonk/stata-workbench/compare/v0.15.3...v0.15.4) (2026-01-20)
+
+
+### Bug Fixes
+
+* add packaging step for Universal VSIX in release workflow ([ab4f9e6](https://github.com/tmonk/stata-workbench/commit/ab4f9e652447afd504b37e20f112e03c576cfa96))
+
 ## [0.15.3](https://github.com/tmonk/stata-workbench/compare/v0.15.2...v0.15.3) (2026-01-20)
 
 
