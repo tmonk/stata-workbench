@@ -20,9 +20,10 @@ const outFile = path.join(distDir, 'extension.js');
 
 const release = process.env.SENTRY_RELEASE || `${pkg.name}@${pkg.version}`;
 const sentryAuthToken = process.env.SENTRY_AUTH_TOKEN?.trim();
-const sentryUploadDefault = (process.env.CI === 'true' || Boolean(sentryAuthToken)) ? 'true' : 'false';
-const sentryUploadEnv = process.env.SENTRY_UPLOAD ?? sentryUploadDefault;
-const sentryUpload = sentryUploadEnv.toLowerCase() === 'true';
+// Only upload if we are in CI AND implicitly want to, OR if a token is actually provided.
+// If SENTRY_UPLOAD is explicitly "false", we respect that.
+const sentryUploadEnv = process.env.SENTRY_UPLOAD;
+const sentryUpload = sentryUploadEnv ? sentryUploadEnv.toLowerCase() === 'true' : (process.env.CI === 'true' && !!sentryAuthToken);
 const enableSentry = production && sentryUpload;
 
 /**
