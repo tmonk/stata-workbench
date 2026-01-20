@@ -1,3 +1,11 @@
+## [0.14.5](https://github.com/tmonk/stata-workbench/compare/v0.14.4...v0.14.5) (2026-01-20)
+
+
+### Bug Fixes
+
+* add SENTRY_AUTH_TOKEN to release job environment ([63b8273](https://github.com/tmonk/stata-workbench/commit/63b8273b12c2960ceb14a9f99e473d2831d040ed))
+* ensure sentry build works ([12a9748](https://github.com/tmonk/stata-workbench/commit/12a97480019f7af87994e17b92ff4c0ef3e73d68))
+
 ## [0.14.4](https://github.com/tmonk/stata-workbench/compare/v0.14.3...v0.14.4) (2026-01-20)
 
 
