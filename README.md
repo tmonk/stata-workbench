@@ -105,7 +105,7 @@ Offline/VSIX fallback:
 Stata Workbench **automatically writes** your MCP configuration when you first run it. The extension detects your editor and creates the appropriate config file.
 - User-level `mcp.json` with Stata MCP server entry
 - Uses `uvx --refresh --from mcp-stata@latest mcp-stata --reinstall-package mcp-stata` for auto-updates
-- Works for: Claude Code, Cursor, Cline, Windsurf, Antigravity
+- Works for: Claude Code, Cursor, Windsurf, Antigravity
 
 **Config file locations:**
 
