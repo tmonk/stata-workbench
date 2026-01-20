@@ -1,3 +1,10 @@
+## [0.14.4](https://github.com/tmonk/stata-workbench/compare/v0.14.3...v0.14.4) (2026-01-20)
+
+
+### Bug Fixes
+
+* build time issues with sentry ([8ef16c6](https://github.com/tmonk/stata-workbench/commit/8ef16c625169f8c12abed62a90fa161faea1b313))
+
 ## [0.14.3](https://github.com/tmonk/stata-workbench/compare/v0.14.2...v0.14.3) (2026-01-20)
 
 
