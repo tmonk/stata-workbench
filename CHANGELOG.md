@@ -1,3 +1,10 @@
+## [0.15.2](https://github.com/tmonk/stata-workbench/compare/v0.15.1...v0.15.2) (2026-01-20)
+
+
+### Bug Fixes
+
+* integrate Sentry for error tracking and session replay in the application ([a30deb5](https://github.com/tmonk/stata-workbench/commit/a30deb5e67c3c4c79f3c5cb025f6d7a909e5924f))
+
 ## [0.15.1](https://github.com/tmonk/stata-workbench/compare/v0.15.0...v0.15.1) (2026-01-20)
 
 
