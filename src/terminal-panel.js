@@ -1,4 +1,5 @@
 const { openArtifact, revealArtifact, copyToClipboard, resolveArtifactUri } = require('./artifact-utils');
+const Sentry = require("@sentry/node");
 const path = require('path');
 const os = require('os');
 const vscode = require('vscode');
@@ -227,6 +228,9 @@ class TerminalPanel {
           }
         }
         if (message.type === 'log') {
+          if (message.level === 'error') {
+            Sentry.captureException(new Error(`Webview Error: ${message.message}`));
+          }
           console.log(`[Client Log] ${message.level || 'info'}: ${message.message}`);
         }
         if (message.type === 'fetchLog') {
@@ -328,7 +332,8 @@ class TerminalPanel {
               if (stats.size > 0 && stats.size <= 50000) {
                 stdout = fs.readFileSync(payload.logPath, 'utf8');
               }
-            } catch (_err) { }
+            } catch (_err) {
+            }
           }
           TerminalPanel.notifyTaskDone(runId, payload?.logPath, payload?.logSize, stdout, payload?.rc);
         },
@@ -594,6 +599,7 @@ class TerminalPanel {
         });
       }
     } catch (err) {
+      Sentry.captureException(err);
       console.error('Fetch log failed', err);
     }
   }
@@ -662,6 +668,7 @@ class TerminalPanel {
         await TerminalPanel._clearHandler();
         // Success -UI already cleared, no need to show anything
       } catch (error) {
+        Sentry.captureException(error);
         console.error('[TerminalPanel] clearAll failed:', error);
         TerminalPanel._postMessage({ type: 'error', message: 'Failed to clear: ' + error.message });
       } finally {
@@ -2180,6 +2187,7 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
         vscode.postMessage({ type: 'ready' });
       requestVariables();
     } catch (err) {
+        Sentry.captureException(err);
         console.error('Failed to render initial entries', err);
         vscode.postMessage({ type: 'log', level: 'error', message: err.message });
     }

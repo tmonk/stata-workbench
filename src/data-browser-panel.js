@@ -1,6 +1,7 @@
 const path = require('path');
 const vscode = require('vscode');
 const http = require('http');
+const Sentry = require("@sentry/node");
 const { client: mcpClient } = require('./mcp-client');
 
 class DataBrowserPanel {
@@ -74,6 +75,7 @@ class DataBrowserPanel {
                         DataBrowserPanel._log(`[DataBrowser Webview] ${message.message}`);
                         break;
                     case 'error':
+                        Sentry.captureException(new Error(`Data Browser Webview Error: ${message.message}`));
                         DataBrowserPanel._log(`[DataBrowser Webview Error] ${message.message}`);
                         break;
                     case 'apiCall':
@@ -209,6 +211,7 @@ class DataBrowserPanel {
                                 try {
                                     resolve(JSON.parse(buffer.toString()));
                                 } catch (e) {
+                                    Sentry.captureException(e);
                                     reject(new Error(`Failed to parse JSON: ${e.message}`));
                                 }
                             }
@@ -218,7 +221,10 @@ class DataBrowserPanel {
                     });
                 });
 
-                req.on('error', (e) => reject(e));
+                req.on('error', (e) => {
+                    Sentry.captureException(e);
+                    reject(e);
+                });
 
                 if (body) {
                     req.write(body);

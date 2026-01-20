@@ -1,4 +1,5 @@
 const vscode = require('vscode');
+const Sentry = require("@sentry/node");
 const path = require('path');
 const fs = require('fs');
 
@@ -23,6 +24,7 @@ function openArtifact(raw, baseDir) {
             viewColumn: vscode.ViewColumn.Active
         });
     } catch (err) {
+        Sentry.captureException(err);
         vscode.window.showErrorMessage(`Could not open artifact: ${err.message}`);
     }
 }
@@ -43,6 +45,7 @@ async function revealArtifact(raw, baseDir) {
         }
         await vscode.commands.executeCommand('revealFileInOS', uri);
     } catch (err) {
+        Sentry.captureException(err);
         vscode.window.showErrorMessage(`Could not reveal artifact: ${err.message}`);
     }
 }
@@ -51,6 +54,7 @@ async function copyToClipboard(text) {
     try {
         await vscode.env.clipboard.writeText(String(text ?? ''));
     } catch (err) {
+        Sentry.captureException(err);
         vscode.window.showErrorMessage(`Could not copy to clipboard: ${err.message}`);
     }
 }

@@ -1,5 +1,6 @@
 const esbuild = require('esbuild');
 const path = require('path');
+const { sentryEsbuildPlugin } = require("@sentry/esbuild-plugin");
 
 const production = process.argv.includes('--production');
 const watch = process.argv.includes('--watch');
@@ -14,13 +15,23 @@ async function main() {
     bundle: true,
     format: 'cjs',
     minify: production,
-    sourcemap: !production,
+    sourcemap: true,
     sourcesContent: false,
     platform: 'node',
     outfile: outFile,
     external: ['vscode'],
+    loader: {
+      '.node': 'file',
+    },
     logLevel: 'warning',
-    plugins: [esbuildProblemMatcherPlugin]
+    plugins: [
+      esbuildProblemMatcherPlugin,
+      sentryEsbuildPlugin({
+        authToken: process.env.SENTRY_AUTH_TOKEN,
+        org: "london-school-of-economics",
+        project: "node",
+      }),
+    ]
   });
 
   // Build Webview Scripts
@@ -31,12 +42,19 @@ async function main() {
     bundle: true,
     format: 'iife',
     minify: production,
-    sourcemap: !production,
+    sourcemap: true,
     sourcesContent: false,
     platform: 'browser',
     outfile: webviewOut,
     logLevel: 'warning',
-    plugins: [esbuildProblemMatcherPlugin]
+    plugins: [
+      esbuildProblemMatcherPlugin,
+      sentryEsbuildPlugin({
+        authToken: process.env.SENTRY_AUTH_TOKEN,
+        org: "london-school-of-economics",
+        project: "node",
+      }),
+    ]
   });
 
   if (watch) {

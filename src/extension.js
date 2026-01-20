@@ -1,3 +1,5 @@
+require("./instrument.js");
+const Sentry = require("@sentry/node");
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
@@ -358,6 +360,7 @@ function hasExistingMcpConfig(context) {
         const json = JSON.parse(raw);
         return !!(json?.servers?.[MCP_SERVER_ID] || json?.mcpServers?.[MCP_SERVER_ID]);
     } catch (_err) {
+        Sentry.captureException(_err);
         return false;
     }
 }

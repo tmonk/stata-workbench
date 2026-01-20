@@ -1,4 +1,5 @@
 const { EventEmitter } = require('events');
+const Sentry = require("@sentry/node");
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
@@ -34,6 +35,7 @@ try {
     }
 } catch (error) {
     // Capture the error so we can surface the root cause during activation.
+    Sentry.captureException(error);
     sdkLoadError = error;
 }
 
@@ -87,6 +89,7 @@ class StataMcpClient {
             try {
                 logger('[mcp-stata] setLogger called - logger is now active');
             } catch (e) {
+                Sentry.captureException(e);
                 console.error('[mcp-stata] Logger test failed:', e);
             }
         }
@@ -294,13 +297,7 @@ class StataMcpClient {
 
     async listGraphs(options = {}) {
         return this._enqueue('list_graphs', options, async (client) => {
-            let raw;
-            try {
-                raw = await this._callTool(client, 'list_graphs', {});
-            } catch (err) {
-                this._log(`[mcp-stata] list_graphs failed: ${err}`);
-                throw err;
-            }
+            const raw = await this._callTool(client, 'list_graphs', {});
             const artifacts = await this._resolveArtifactsFromList(raw, options?.baseDir, client);
             return { graphs: artifacts };
         });
@@ -319,14 +316,10 @@ class StataMcpClient {
             // If the server returned a non-PDF artifact (e.g., SVG) and we need PDF, try again forcing PDF.
             const hasPdfPath = artifact?.path && /\.pdf$/i.test(artifact.path);
             if (preferredFormat === 'pdf' && !hasPdfPath) {
-                try {
-                    const fallback = await this._callTool(client, 'export_graph', { ...baseArgs, format: 'pdf' });
-                    const fallbackArtifact = this._graphResponseToArtifact(fallback, name, options.baseDir);
-                    if (fallbackArtifact && (fallbackArtifact.path && /\.pdf$/i.test(fallbackArtifact.path))) {
-                        artifact = fallbackArtifact;
-                    }
-                } catch (err) {
-                    this._log(`[mcp-stata fetchGraph pdf fallback] ${err?.message || err}`);
+                const fallback = await this._callTool(client, 'export_graph', { ...baseArgs, format: 'pdf' });
+                const fallbackArtifact = this._graphResponseToArtifact(fallback, name, options.baseDir);
+                if (fallbackArtifact && (fallbackArtifact.path && /\.pdf$/i.test(fallbackArtifact.path))) {
+                    artifact = fallbackArtifact;
                 }
             }
 
@@ -439,6 +432,7 @@ class StataMcpClient {
                 this._log(`[mcp-stata] PyPI versions (latest 5): ${top5.join(', ')}`);
                 this._log(`[mcp-stata] Resolved latest version: ${this._pypiVersion}`);
             } catch (err) {
+                Sentry.captureException(err);
                 this._log(`[mcp-stata] PyPI version fetch failed, using fallback: ${err.message}`);
             }
         }
@@ -468,6 +462,7 @@ class StataMcpClient {
                             reject(new Error('Version not found in PyPI JSON'));
                         }
                     } catch (e) {
+                        Sentry.captureException(e);
                         reject(e);
                     }
                 });
@@ -594,6 +589,7 @@ class StataMcpClient {
         const client = new Client({ name: 'stata-vscode', version: this._clientVersion });
         if (typeof client.on === 'function') {
             client.on('error', (err) => {
+                this._captureMcpError(err);
                 const message = err?.message || String(err);
                 this._recentStderr.push(message);
                 if (this._recentStderr.length > 10) this._recentStderr.shift();
@@ -634,6 +630,7 @@ class StataMcpClient {
                                     try {
                                         run.onGraphReady(artifact);
                                     } catch (_err) {
+                                        Sentry.captureException(_err);
                                     }
                                 }
                             }
@@ -657,11 +654,13 @@ class StataMcpClient {
                                 try {
                                     run.onTaskDone(taskPayload);
                                 } catch (_err) {
+                                    Sentry.captureException(_err);
                                 }
                             } else if (typeof this._onTaskDone === 'function') {
                                 try {
                                     this._onTaskDone(taskPayload);
                                 } catch (_err) {
+                                    Sentry.captureException(_err);
                                 }
                             }
                             run._tailCancelled = true;
@@ -704,6 +703,7 @@ class StataMcpClient {
                             try {
                                 run.onRawLog(completedText);
                             } catch (_err) {
+                                Sentry.captureException(_err);
                             }
                         }
                         const filtered = this._filterLogChunk(completedText);
@@ -713,6 +713,7 @@ class StataMcpClient {
                             try {
                                 run.onLog(filtered);
                             } catch (_err) {
+                                Sentry.captureException(_err);
                             }
                         }
                     }
@@ -737,6 +738,7 @@ class StataMcpClient {
         try {
             await client.connect(transport);
         } catch (err) {
+            this._captureMcpError(err);
             this._resetClientState();
             const context = this._formatRecentStderr();
             const message = err?.message || String(err);
@@ -781,6 +783,7 @@ class StataMcpClient {
                 this._log(`[mcp-stata] Missing required tools: ${missing.join(', ')}`);
             }
         } catch (err) {
+            this._captureMcpError(err);
             this._availableTools = new Set();
             this._log(`[mcp-stata] listTools failed: ${err?.message || err}`);
         }
@@ -831,6 +834,7 @@ class StataMcpClient {
                 this._statusEmitter.emit('status', 'connected');
                 throw new Error('Request cancelled');
             }
+            this._captureMcpError(error);
             this._statusEmitter.emit('status', 'error');
             const detail = error?.message || String(error);
             let hint = '';
@@ -1305,6 +1309,7 @@ class StataMcpClient {
                 if (this._isCancellationError(error)) {
                     this._statusEmitter.emit('status', this._pending > 0 ? 'queued' : 'connected');
                 } else {
+                    Sentry.captureException(error);
                     this._statusEmitter.emit('status', 'error');
                     this._log(`[mcp-stata error] ${error?.message || error}`);
                 }
@@ -1947,6 +1952,7 @@ class StataMcpClient {
                     Object.assign(env, entry.env);
                 }
             } catch (err) {
+                this._captureMcpError(err);
                 this._log(`[mcp-stata] Failed to read MCP env from ${configPath}: ${err?.message || err}`);
             }
         }
@@ -1979,13 +1985,93 @@ class StataMcpClient {
         return { command: null, args: null, env: {}, configPath: null };
     }
 
+    /**
+     * Captures an error to Sentry with mcp.json context attached.
+     * @param {Error|any} error
+     */
+    _captureMcpError(error) {
+        if (!error) return;
+        Sentry.withScope(scope => {
+            const configs = this._getMcpConfigsContext();
+            for (const [path, content] of Object.entries(configs)) {
+                // Sentry tag names are limited in length and characters
+                const tagKey = `mcp_config_${path.replace(/[^a-zA-Z0-9]/g, '_').slice(-20)}`;
+                scope.setContext(tagKey, { path, content });
+            }
+            Sentry.captureException(error);
+        });
+    }
+
+    /**
+     * Collects all candidate mcp.json files and their contents for error context.
+     * @returns {Record<string, string>}
+     */
+    _getMcpConfigsContext() {
+        const contexts = {};
+        for (const configPath of this._candidateMcpConfigPaths()) {
+            if (!configPath) continue;
+            try {
+                if (fs.existsSync(configPath)) {
+                    contexts[configPath] = fs.readFileSync(configPath, 'utf8');
+                } else {
+                    contexts[configPath] = '<file not found>';
+                }
+            } catch (err) {
+                contexts[configPath] = `<error reading file: ${err.message}>`;
+            }
+        }
+        return contexts;
+    }
+
+    /**
+     * Collects all potential mcp.json paths from workspace, Claude, and various IDEs.
+     * @returns {string[]}
+     */
     _candidateMcpConfigPaths() {
         const paths = new Set();
         const workspaceRoot = this._resolveWorkspaceRoot();
+        const home = os.homedir();
+        const platform = process.platform;
+
+        // 1. Workspace
         if (workspaceRoot) {
             paths.add(path.join(workspaceRoot, '.vscode', 'mcp.json'));
         }
 
+        // 2. Claude Desktop (Very common source of MCP servers)
+        if (home) {
+            if (platform === 'darwin') {
+                paths.add(path.join(home, 'Library', 'Application Support', 'Claude', 'claude_desktop_config.json'));
+            } else if (platform === 'win32') {
+                const appData = process.env.APPDATA || (home ? path.join(home, 'AppData', 'Roaming') : null);
+                if (appData) paths.add(path.join(appData, 'Claude', 'claude_desktop_config.json'));
+            } else {
+                paths.add(path.join(home, '.config', 'Claude', 'claude_desktop_config.json'));
+            }
+        }
+
+        // 3. Known AI IDEs (Cursor, Windsurf, etc.)
+        if (home) {
+            paths.add(path.join(home, '.cursor', 'mcp.json'));
+            paths.add(path.join(home, '.codeium', 'windsurf', 'mcp_config.json'));
+            paths.add(path.join(home, '.codeium', 'windsurf-next', 'mcp_config.json'));
+            paths.add(path.join(home, '.antigravity', 'mcp.json'));
+        }
+
+        // 4. VS Code (Stable and Insiders) - User Application Support
+        const codePath = (codeDir) => {
+            if (!home) return null;
+            if (platform === 'darwin') return path.join(home, 'Library', 'Application Support', codeDir, 'User', 'mcp.json');
+            if (platform === 'win32') {
+                const roaming = process.env.APPDATA || (home ? path.join(home, 'AppData', 'Roaming') : null);
+                return roaming ? path.join(roaming, codeDir, 'User', 'mcp.json') : null;
+            }
+            return path.join(home, '.config', codeDir, 'User', 'mcp.json');
+        };
+        paths.add(codePath('Code'));
+        paths.add(codePath('Code - Insiders'));
+
+        // 5. Host-determined path (Legacy/Dynamic)
         const hostConfig = this._resolveHostMcpPath();
         if (hostConfig) {
             paths.add(hostConfig);

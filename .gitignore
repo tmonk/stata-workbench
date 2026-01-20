@@ -13,3 +13,6 @@ img/screenshot-data.psd
 test-results*.txt
 test_output.log
 original_extension.test.js.tmp
+
+# Sentry Config File
+.env.sentry-build-plugin
