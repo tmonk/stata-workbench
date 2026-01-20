@@ -34,7 +34,7 @@ async function main() {
       esbuildProblemMatcherPlugin,
       sentryEsbuildPlugin({
         authToken: process.env.SENTRY_AUTH_TOKEN,
-        org: "london-school-of-economics",
+        org: "tdmonk",
         project: "node",
         release: {
           name: release,
@@ -63,7 +63,7 @@ async function main() {
       esbuildProblemMatcherPlugin,
       sentryEsbuildPlugin({
         authToken: process.env.SENTRY_AUTH_TOKEN,
-        org: "london-school-of-economics",
+        org: "tdmonk",
         project: "node",
         release: {
           name: release,
