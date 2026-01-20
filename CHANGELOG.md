@@ -1,3 +1,10 @@
+## [0.13.5](https://github.com/tmonk/stata-workbench/compare/v0.13.4...v0.13.5) (2026-01-20)
+
+
+### Bug Fixes
+
+* implement auto-refresh for missing required tools in McpClient ([06d2d8b](https://github.com/tmonk/stata-workbench/commit/06d2d8bf9d80437f05124d6132a43011e1196c4f))
+
 ## [0.13.4](https://github.com/tmonk/stata-workbench/compare/v0.13.3...v0.13.4) (2026-01-20)
 
 
