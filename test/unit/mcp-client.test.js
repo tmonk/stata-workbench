@@ -35,6 +35,23 @@ const { StataMcpClient: McpClient } = proxyquire.noCallThru().noPreserveCache().
     }
 });
 
+const setConfig = (overrides = {}) => {
+    const merged = {
+        requestTimeoutMs: 1000,
+        runFileWorkingDirectory: '',
+        autoRevealOutput: true,
+        ...overrides
+    };
+    const config = {
+        get: jest.fn().mockImplementation((key, def) => {
+            if (Object.prototype.hasOwnProperty.call(merged, key)) return merged[key];
+            return def;
+        })
+    };
+    vscodeMock.workspace.getConfiguration.mockReturnValue(config);
+    return config;
+};
+
 describe('mcp-client normalizeResponse', () => {
     it('keeps longest stdout including logText tail', () => {
         const client = new McpClient();
@@ -71,14 +88,7 @@ describe('McpClient', () => {
 
         vscodeMock.workspace.workspaceFolders = [{ uri: { fsPath: '/mock/workspace' } }];
 
-        const config = vscodeMock.workspace.getConfiguration();
-        config.get.mockReset();
-        config.get.mockImplementation((key, def) => {
-            if (key === 'requestTimeoutMs') return 1000;
-            if (key === 'runFileWorkingDirectory') return '';
-            if (key === 'autoRevealOutput') return true;
-            return def;
-        });
+        setConfig();
 
         // Mock internal methods to avoid actual process spawning
         client._ensureClient = sinon.stub().resolves(new ClientMock());
@@ -323,12 +333,7 @@ describe('McpClient', () => {
             const originalFolders = vscodeMock.workspace.workspaceFolders;
             vscodeMock.workspace.workspaceFolders = [];
 
-            const config = vscodeMock.workspace.getConfiguration();
-            config.get.mockImplementation((key, def) => {
-                if (key === 'runFileWorkingDirectory') return 'relative/run';
-                if (key === 'requestTimeoutMs') return 1000;
-                return def;
-            });
+            setConfig({ runFileWorkingDirectory: 'relative/run' });
 
             const callToolStub = client._callTool;
             callToolStub.resetBehavior();
@@ -658,39 +663,24 @@ describe('McpClient', () => {
         });
 
         it('should expand workspace and fileDir tokens', () => {
-            const config = vscodeMock.workspace.getConfiguration();
-            config.get.mockImplementation((key, def) => {
-                if (key === 'runFileWorkingDirectory') return '${workspaceFolder}/sub/${fileDir}';
-                if (key === 'requestTimeoutMs') return 1000;
-                return def;
-            });
+            setConfig({ runFileWorkingDirectory: '${workspaceFolder}/sub/${fileDir}' });
 
             const cwd = client._resolveRunFileCwd('/tmp/project/script.do');
             expect(cwd).toEqual(path.normalize('/mock/workspace/sub//tmp/project'));
         });
 
         it('should honor absolute paths', () => {
-            const config = vscodeMock.workspace.getConfiguration();
-            config.get.mockImplementation((key, def) => {
-                if (key === 'runFileWorkingDirectory') return '/abs/path';
-                if (key === 'requestTimeoutMs') return 1000;
-                return def;
-            });
+            setConfig({ runFileWorkingDirectory: '/abs/path' });
 
             const cwd = client._resolveRunFileCwd('/tmp/project/script.do');
             expect(cwd).toEqual(path.normalize('/abs/path'));
         });
 
         it('should expand tilde to home directory', () => {
-            const config = vscodeMock.workspace.getConfiguration();
             const originalHome = process.env.HOME;
             process.env.HOME = '/home/tester';
 
-            config.get.mockImplementation((key, def) => {
-                if (key === 'runFileWorkingDirectory') return '~/stata/runs';
-                if (key === 'requestTimeoutMs') return 1000;
-                return def;
-            });
+            setConfig({ runFileWorkingDirectory: '~/stata/runs' });
 
             const cwd = client._resolveRunFileCwd('/tmp/project/script.do');
             expect(cwd).toEqual(path.normalize('/home/tester/stata/runs'));
@@ -699,39 +689,24 @@ describe('McpClient', () => {
         });
 
         it('should fall back to file directory when tokens are unknown', () => {
-            const config = vscodeMock.workspace.getConfiguration();
-            config.get.mockImplementation((key, def) => {
-                if (key === 'runFileWorkingDirectory') return '${unknownToken}';
-                if (key === 'requestTimeoutMs') return 1000;
-                return def;
-            });
+            setConfig({ runFileWorkingDirectory: '${unknownToken}' });
 
             const cwd = client._resolveRunFileCwd('/tmp/project/script.do');
             expect(cwd).toEqual(path.normalize('/tmp/project'));
         });
 
         it('should resolve relative paths against workspace root when available', () => {
-            const config = vscodeMock.workspace.getConfiguration();
-            config.get.mockImplementation((key, def) => {
-                if (key === 'runFileWorkingDirectory') return 'relative/run';
-                if (key === 'requestTimeoutMs') return 1000;
-                return def;
-            });
+            setConfig({ runFileWorkingDirectory: 'relative/run' });
 
             const cwd = client._resolveRunFileCwd('/tmp/project/script.do');
             expect(cwd).toEqual(path.normalize('/mock/workspace/relative/run'));
         });
 
         it('should resolve relative paths against process cwd when workspace is missing', () => {
-            const config = vscodeMock.workspace.getConfiguration();
             const originalFolders = vscodeMock.workspace.workspaceFolders;
             vscodeMock.workspace.workspaceFolders = [];
 
-            config.get.mockImplementation((key, def) => {
-                if (key === 'runFileWorkingDirectory') return 'relative/run';
-                if (key === 'requestTimeoutMs') return 1000;
-                return def;
-            });
+            setConfig({ runFileWorkingDirectory: 'relative/run' });
 
             const cwd = client._resolveRunFileCwd('/tmp/project/script.do');
             expect(cwd).toEqual(path.normalize(path.resolve('relative/run')));
