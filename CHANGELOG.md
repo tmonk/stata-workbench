@@ -1,3 +1,10 @@
+## [0.14.3](https://github.com/tmonk/stata-workbench/compare/v0.14.2...v0.14.3) (2026-01-20)
+
+
+### Bug Fixes
+
+* update organisation ([a9d1ba6](https://github.com/tmonk/stata-workbench/commit/a9d1ba652fff685fc86674d13ff7b4bd5967f261))
+
 ## [0.14.2](https://github.com/tmonk/stata-workbench/compare/v0.14.1...v0.14.2) (2026-01-20)
 
 
