@@ -1,3 +1,10 @@
+## [0.13.4](https://github.com/tmonk/stata-workbench/compare/v0.13.3...v0.13.4) (2026-01-20)
+
+
+### Bug Fixes
+
+* ensure full log is loaded after run ([455ebe4](https://github.com/tmonk/stata-workbench/commit/455ebe4227278cf09880f516b2372792d63b638b))
+
 ## [0.13.3](https://github.com/tmonk/stata-workbench/compare/v0.13.2...v0.13.3) (2026-01-20)
 
 
