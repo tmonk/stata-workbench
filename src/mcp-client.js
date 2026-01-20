@@ -57,6 +57,10 @@ class StataMcpClient {
         this._maxLogBufferChars = 500_000_000; // 500 MB
         this._clientVersion = pkg?.version || 'dev';
         this._onTaskDone = null;
+        this._availableTools = new Set();
+        this._missingRequiredTools = [];
+        this._forceLatestServer = false;
+        this._forceLatestAttempted = false;
     }
 
     _attachStderrListener(stream, source) {
@@ -453,7 +457,7 @@ class StataMcpClient {
         })();
 
         const uvCommand = process.env.MCP_STATA_UVX_CMD || 'uvx';
-        const serverConfig = this._loadServerConfig();
+        const serverConfig = this._loadServerConfig({ ignoreCommandArgs: this._forceLatestServer });
 
         // Use command/args from config if available, otherwise fall back to uvx with --refresh
         const finalCommand = serverConfig.command || uvCommand;
@@ -462,7 +466,11 @@ class StataMcpClient {
 
         // Log that we're creating the transport
         this._log(`[mcp-stata] Creating StdioClientTransport`);
-        this._log(`[mcp-stata] Config source: ${serverConfig.configPath || 'defaults (uvx --refresh --refresh-package)'}`);
+        const configSource = serverConfig.configPath || 'defaults (uvx --refresh --refresh-package)';
+        this._log(`[mcp-stata] Config source: ${configSource}`);
+        if (this._forceLatestServer && serverConfig.configPath) {
+            this._log('[mcp-stata] Forcing latest server: ignoring command/args from MCP config, preserving env only.');
+        }
         this._log(`[mcp-stata] Command: ${finalCommand}`);
         this._log(`[mcp-stata] Args: ${JSON.stringify(finalArgs)}`);
 
@@ -697,6 +705,11 @@ class StataMcpClient {
             if (names.length) {
                 this._log(`[mcp-stata] available tools: ${names.join(', ')}`);
             }
+            const missing = this._getMissingRequiredTools(this._availableTools);
+            this._missingRequiredTools = missing;
+            if (missing.length) {
+                this._log(`[mcp-stata] Missing required tools: ${missing.join(', ')}`);
+            }
         } catch (err) {
             this._availableTools = new Set();
             this._log(`[mcp-stata] listTools failed: ${err?.message || err}`);
@@ -706,7 +719,16 @@ class StataMcpClient {
     async _callTool(client, name, args, callOptions = {}) {
         const toolArgs = args ?? {};
         try {
-            if (client.type === 'cursor-bridge' && this._cursorCommand) {
+            let activeClient = client;
+            if (this._availableTools?.size && !this._availableTools.has(name)) {
+                await this._ensureLatestServerForMissingTool(name);
+                activeClient = await this._ensureClient();
+                if (this._availableTools?.size && !this._availableTools.has(name)) {
+                    throw new Error(this._formatMissingToolError(name));
+                }
+            }
+
+            if (activeClient.type === 'cursor-bridge' && this._cursorCommand) {
                 return vscode.commands.executeCommand(this._cursorCommand, {
                     server: 'stata',
                     tool: name,
@@ -725,15 +747,15 @@ class StataMcpClient {
                 }
             };
 
-            if (typeof client.request === 'function' && CallToolResultSchema) {
-                return client.request(
+            if (typeof activeClient.request === 'function' && CallToolResultSchema) {
+                return activeClient.request(
                     params,
                     CallToolResultSchema,
                     requestOptions
                 );
             }
 
-            return client.callTool({ name, arguments: toolArgs }, undefined, requestOptions);
+            return activeClient.callTool({ name, arguments: toolArgs }, undefined, requestOptions);
         } catch (error) {
             if (this._isCancellationError(error)) {
                 this._statusEmitter.emit('status', 'connected');
@@ -750,6 +772,47 @@ class StataMcpClient {
             }
             throw new Error(`MCP tool ${name} failed: ${detail}${hint}`);
         }
+    }
+
+    _requiredToolNames() {
+        return new Set([
+            'run_command_background',
+            'run_do_file_background',
+            'read_log',
+            'get_ui_channel'
+        ]);
+    }
+
+    _getMissingRequiredTools(toolSet) {
+        const required = this._requiredToolNames();
+        const missing = [];
+        for (const name of required) {
+            if (!toolSet?.has?.(name)) missing.push(name);
+        }
+        return missing;
+    }
+
+    async _ensureLatestServerForMissingTool(name) {
+        if (!this._requiredToolNames().has(name)) return;
+        if (this._forceLatestAttempted) return;
+
+        this._forceLatestAttempted = true;
+        this._forceLatestServer = true;
+        this._log(`[mcp-stata] Required tool "${name}" missing. Forcing refresh of ${MCP_PACKAGE_SPEC} and restarting MCP client.`);
+        try {
+            if (this._transport && typeof this._transport.close === 'function') {
+                await this._transport.close();
+            }
+        } catch (_err) {
+        }
+        this._resetClientState();
+    }
+
+    _formatMissingToolError(name) {
+        const available = this._availableTools?.size ? Array.from(this._availableTools).join(', ') : 'none';
+        const required = Array.from(this._requiredToolNames()).join(', ');
+        const specHint = MCP_PACKAGE_SPEC ? ` (package spec: ${MCP_PACKAGE_SPEC})` : '';
+        return `MCP tool ${name} is not available in the connected server. Required tools: ${required}. Available tools: ${available}.${specHint}`;
     }
 
     async _withActiveRun(run, fn) {
@@ -1820,7 +1883,7 @@ class StataMcpClient {
         return env;
     }
 
-    _loadServerConfig() {
+    _loadServerConfig({ ignoreCommandArgs = false } = {}) {
         // Load full server configuration (command, args, env) from MCP config files
         for (const configPath of this._candidateMcpConfigPaths()) {
             if (!configPath) continue;
@@ -1830,11 +1893,12 @@ class StataMcpClient {
                 const parsed = this._safeParseJson(raw);
                 const entry = parsed?.servers?.[MCP_SERVER_ID] || parsed?.mcpServers?.[MCP_SERVER_ID];
                 if (entry) {
+                    const env = (typeof entry.env === 'object' && entry.env !== null) ? entry.env : {};
                     this._log(`[mcp-stata] Found server config in ${configPath}`);
                     return {
-                        command: entry.command || null,
-                        args: Array.isArray(entry.args) ? entry.args : null,
-                        env: (typeof entry.env === 'object' && entry.env !== null) ? entry.env : {},
+                        command: ignoreCommandArgs ? null : (entry.command || null),
+                        args: ignoreCommandArgs ? null : (Array.isArray(entry.args) ? entry.args : null),
+                        env,
                         configPath
                     };
                 }
