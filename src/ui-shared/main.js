@@ -98,8 +98,28 @@ window.stataUI = {
         let match;
         let result = '';
         let currentLineLen = 0;
-        const MODE_TAGS = ['com', 'res', 'err', 'txt', 'input', 'result', 'text', 'error'];
+        let wasNewline = false;
+        const MODE_TAGS = ['com', 'res', 'err', 'txt', 'input', 'result', 'text', 'error', 'bf', 'it', 'sf', 'ul', 'hi', 'hilite', 'bold', 'italic', 'inp', 'result', 'err', 'txt'];
         const openTags = [];
+        const PARAGRAPH_SHORTCUTS = {
+            pstd: [4, 4, 2],
+            psee: [4, 13, 2],
+            phang: [4, 8, 2],
+            pmore: [8, 8, 2],
+            pin: [8, 8, 2],
+            phang2: [8, 12, 2],
+            pmore2: [12, 12, 2],
+            pin2: [12, 12, 2],
+            phang3: [12, 16, 2],
+            pmore3: [16, 16, 2],
+            pin3: [16, 16, 2]
+        };
+
+        // Track table settings
+        let tableSettings = {
+            p2col: [0, 0, 0, 0], // indent1, col2, indent2, marginR
+            synopt: 20
+        };
 
         while ((match = tokenRegex.exec(html)) !== null) {
             const tag = match[1];
@@ -107,12 +127,26 @@ window.stataUI = {
             const textContent = match[3] || match[4];
 
             if (newline) {
+                if (wasNewline) {
+                    while (openTags.length > 0) {
+                        const top = openTags.pop();
+                        if (top === 'DIV' || top === 'DIV_ROW') {
+                            result += '</div>';
+                        } else {
+                            result += '</span>';
+                        }
+                    }
+                }
                 result += '\n';
                 currentLineLen = 0;
+                wasNewline = true;
                 continue;
             }
 
             if (textContent) {
+                if (textContent.trim().length > 0) {
+                    wasNewline = false;
+                }
                 // Escape HTML entities in raw text content
                 result += textContent
                     .replace(/&/g, '&amp;')
@@ -123,6 +157,7 @@ window.stataUI = {
             }
 
             if (tag) {
+                wasNewline = false;
                 const inner = tag.substring(1, tag.length - 1);
                 let tagName = inner;
                 let tagContent = null;
@@ -163,19 +198,124 @@ window.stataUI = {
                 }
 
                 if (command.startsWith('hline')) {
-                    let len = 12;
                     if (parts[1] && !isNaN(parseInt(parts[1]))) {
-                        len = parseInt(parts[1], 10);
+                        let len = parseInt(parts[1], 10);
+                        result += '-'.repeat(len);
+                        currentLineLen += len;
+                    } else {
+                        result += '-'.repeat(60); 
+                        currentLineLen += 60;
                     }
-                    const dashes = '-'.repeat(len);
-                    result += dashes;
-                    currentLineLen += len;
                     continue;
                 }
 
                 if (command === '.-') {
                     result += '-';
                     currentLineLen += 1;
+                    continue;
+                }
+
+                if (PARAGRAPH_SHORTCUTS[command] || command === 'p') {
+                    const settings = PARAGRAPH_SHORTCUTS[command] || parts.slice(1).map(n => parseInt(n, 10)).filter(n => !isNaN(n));
+                    const i1 = settings[0] || 0;
+                    const i2 = settings[1] || 0;
+                    const i3 = settings[2] || 0;
+                    
+                    if (result.length > 0 && !result.endsWith('\n')) result += '\n';
+                    result += `<div style="padding-left:${i2}ch; text-indent:${i1 - i2}ch; padding-right:${i3}ch; margin-bottom:4px;">`;
+                    openTags.push('DIV');
+                    currentLineLen = 0;
+                    continue;
+                }
+
+                if (command === 'p_end') {
+                    while (openTags.length > 0) {
+                        const top = openTags.pop();
+                        if (top === 'DIV' || top === 'DIV_ROW') {
+                            result += '</div>';
+                            break;
+                        }
+                        result += '</span>';
+                    }
+                    if (!result.endsWith('\n')) result += '\n';
+                    currentLineLen = 0;
+                    continue;
+                }
+
+                if (command === 'p2colset') {
+                    const nums = parts.slice(1).map(n => parseInt(n, 10)).filter(n => !isNaN(n));
+                    if (nums.length >= 4) tableSettings.p2col = nums;
+                    continue;
+                }
+
+                if (command === 'p2col' || command === 'synopt' || command === 'p2coldent') {
+                    let settings = tableSettings.p2col;
+                    const nums = parts.slice(1).map(n => parseInt(n, 10)).filter(n => !isNaN(n));
+                    if (nums.length >= 4) settings = nums;
+
+                    const i1 = settings[0] || 0;
+                    const c2 = settings[1] || 15;
+                    const i2 = settings[2] || c2 + 2;
+                    const mr = settings[3] || 2;
+
+                    if (openTags.includes('DIV_ROW')) {
+                        while (openTags.length > 0) {
+                            const top = openTags.pop();
+                            if (top === 'DIV_ROW') { result += '</div>'; break; }
+                            result += '</span>';
+                        }
+                    }
+
+                    result += `<div style="display:flex; flex-direction:row; padding-left:${i1}ch; padding-right:${mr}ch; margin-bottom:2px;">`;
+                    result += `<div style="flex: 0 0 ${c2 - i1}ch; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; margin-right:2ch;">`;
+                    if (tagContent) {
+                        result += window.stataUI.smclToHtml(tagContent);
+                    }
+                    result += `</div>`;
+                    result += `<div style="flex:1; padding-left:${Math.max(0, i2 - c2)}ch;">`;
+                    openTags.push('DIV_ROW'); 
+                    currentLineLen = 0;
+                    continue;
+                }
+
+                if (command === 'p2colreset') {
+                    tableSettings.p2col = [0, 0, 0, 0];
+                    continue;
+                }
+
+                if (command === 'marker') {
+                    const arg = tagName.substring(command.length).trim();
+                    result += `<a name="${window.stataUI.escapeHtml(arg)}"></a>`;
+                    continue;
+                }
+
+                if (command === 'dup') {
+                    const count = parseInt(parts[1], 10);
+                    if (!isNaN(count) && tagContent !== null) {
+                        const content = window.stataUI.smclToHtml(tagContent);
+                        result += content.repeat(Math.max(0, count));
+                        let visibleText = content.replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>');
+                        currentLineLen += visibleText.length * count;
+                    }
+                    continue;
+                }
+
+                if (command === 'c' || command === 'char') {
+                    const arg = parts[1];
+                    if (arg) {
+                        try {
+                            let char;
+                            if (arg.startsWith('0x')) {
+                                char = String.fromCharCode(parseInt(arg.substring(2), 16));
+                            } else if (!isNaN(parseInt(arg, 10))) {
+                                char = String.fromCharCode(parseInt(arg, 10));
+                            }
+                            if (char) {
+                                result += window.stataUI.escapeHtml(char);
+                                currentLineLen += 1;
+                            }
+                        } catch (e) {}
+                    }
                     continue;
                 }
 
@@ -230,16 +370,35 @@ window.stataUI = {
                     }
 
                     if (MODE_TAGS.includes(command)) {
-                        const className = `smcl-${command}`;
-                        let extraClass = '';
-                        if (command === 'com') extraClass = ' syntax-highlight';
-                        result += `<span class="${className}${extraClass}">`;
+                        result += window.stataUI._startTag(command);
                         openTags.push(command);
                     }
                     continue;
                 }
 
-                if (command === 'browse' || command === 'view') {
+                if (command === 'bind') {
+                    if (tagContent !== null) {
+                        result += `<span style="display:inline-block;white-space:nowrap;">` + window.stataUI.smclToHtml(tagContent) + `</span>`;
+                        let visibleInner = tagContent.replace(/\{[^}]+\}/g, '');
+                        currentLineLen += visibleInner.length;
+                    }
+                    continue;
+                }
+
+                if (command === 'browse' || command === 'view' || command === 'help' || command === 'stata' || command === 'helpb' || command === 'helpi' || command === 'net' || command === 'ado' || command === 'update') {
+                    const arg = tagName.substring(command.length).trim();
+                    const content = tagContent !== null ? window.stataUI.smclToHtml(tagContent) : arg;
+                    let extraClass = (command === 'helpb' || command === 'helpi') ? (command === 'helpb' ? ' smcl-bf' : ' smcl-it') : '';
+                    result += `<span class="smcl-link${extraClass}" data-type="${command}" data-arg="${arg}">${content}</span>`;
+                    let visibleText = content.replace(/<[^>]*>/g, '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>');
+                    currentLineLen += visibleText.length;
+                    continue;
+                }
+
+                if (tagContent !== null) {
+                    result += window.stataUI.smclToHtml(tagContent);
+                    let visibleText = tagContent.replace(/\{[^}]+\}/g, '');
+                    currentLineLen += visibleText.length;
                     continue;
                 }
             }
@@ -273,17 +432,19 @@ window.stataUI = {
     _getTagMeta: function (tagName) {
         const tag = tagName.toLowerCase().split(/\s+/)[0];
         switch (tag) {
-            case 'res': return { class: 'smcl-res' };
-            case 'txt': return { class: 'smcl-txt' };
-            case 'err': return { class: 'smcl-err' };
-            case 'com': return { class: 'smcl-com' };
-            case 'bf': return { class: 'smcl-bf' };
-            case 'it': return { class: 'smcl-it' };
+            case 'res': case 'result': return { class: 'smcl-res' };
+            case 'txt': case 'text': return { class: 'smcl-txt' };
+            case 'err': case 'error': return { class: 'smcl-err' };
+            case 'com': case 'input': case 'inp': return { class: 'smcl-com' };
+            case 'bf': case 'bold': return { class: 'smcl-bf' };
+            case 'it': case 'italic': return { class: 'smcl-it' };
             case 'sf': return { class: 'smcl-sf' };
             case 'ul': return { class: 'smcl-ul' };
+            case 'hi': case 'hilite': return { class: 'smcl-hi' };
             case 'stata': return { class: 'smcl-link', data: 'data-type="stata"' };
-            case 'help': return { class: 'smcl-link', data: 'data-type="help"' };
+            case 'help': case 'helpb': case 'helpi': return { class: 'smcl-link', data: 'data-type="help"' };
             case 'browse': return { class: 'smcl-link', data: 'data-type="browse"' };
+            case 'view': return { class: 'smcl-link', data: 'data-type="view"' };
             default: return { class: '' };
         }
     },

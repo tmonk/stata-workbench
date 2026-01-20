@@ -107,4 +107,81 @@ describe('SMCL Layout Principles', () => {
         assert(!html.includes('\r'));
         assert(html.includes('line1\nline2'));
     });
+
+    describe('Advanced Rendering', () => {
+
+        it('should handle paragraph settings {p # # #}', () => {
+            const input = '{p 4 8 2}Indented paragraph text.{p_end}';
+            const html = smclToHtml(input);
+            assert(html.includes('padding-left:8ch'), 'Should have subsequent indent of 8ch');
+            assert(html.includes('text-indent:-4ch'), 'Should have first-line indent relative to padding (4-8=-4ch)');
+            assert(html.includes('padding-right:2ch'), 'Should have right margin of 2ch');
+        });
+
+        it('should handle paragraph shortcuts like {pstd}', () => {
+            const input = '{pstd}Standard text.{p_end}';
+            const html = smclToHtml(input);
+            // pstd is {p 4 4 2}
+            assert(html.includes('padding-left:4ch'), 'Should have padding-left 4ch');
+            assert(html.includes('text-indent:0ch'), 'Should have text-indent 0ch (4-4)');
+        });
+
+        it('should handle {p2colset} and {p2col}', () => {
+            const input = '{p2colset 4 20 22 2}{p2col :Left}Right side text{p_end}';
+            const html = smclToHtml(input);
+            
+            // Check for flex layout
+            assert(html.includes('display:flex'), 'Should use flex layout for table row');
+            assert(html.includes('Left'), 'Should contain left column text');
+            assert(html.includes('Right side text'), 'Should contain right column text');
+            
+            // Check dimensions from p2colset
+            assert(html.includes('flex: 0 0 16ch'), 'Left column width should be 20-4=16ch');
+            assert(html.includes('padding-left:2ch'), 'Right column padding-left should be 22-20=2ch');
+        });
+
+        it('should handle {synopt} which is a synonym for p2col', () => {
+            const input = '{p2colset 4 20 22 2}{synopt :Option}Description{p_end}';
+            const html = smclToHtml(input);
+            assert(html.includes('Option'), 'Should render Option');
+            assert(html.includes('Description'), 'Should render Description');
+        });
+
+        it('should handle {hi} and {hilite}', () => {
+            const input = 'Normal {hi:Highlighted} Normal';
+            const html = smclToHtml(input);
+            assert(html.includes('smcl-hi'), 'Should have smcl-hi class');
+            assert(html.includes('Highlighted'), 'Should contain the text');
+        });
+
+        it('should render helpb and helpi correctly', () => {
+            const input = '{helpb regress} and {helpi summarize}';
+            const html = smclToHtml(input);
+            assert(html.includes('smcl-bf'), 'helpb should have bold class');
+            assert(html.includes('smcl-it'), 'helpi should have italic class');
+            assert(html.includes('regress'), 'Should contain link text');
+        });
+
+        it('should end paragraph on blank line', () => {
+            const input = '{pstd}Line 1\n\nLine 2';
+            const html = smclToHtml(input);
+            // It should contain </div> before Line 2
+            const parts = html.split('</div>');
+            assert(parts.length > 1, 'Should have closed a div');
+            assert(parts[0].includes('Line 1'), 'First part should have Line 1');
+            assert(html.includes('Line 2'), 'Should have Line 2');
+        });
+
+        it('should handle {dup}', () => {
+            const input = '{dup 3:abc}';
+            const html = smclToHtml(input);
+            assert.strictEqual(html, 'abcabcabc');
+        });
+
+        it('should handle {c} with codes', () => {
+            const input = '{c 0x6a}{c 107}';
+            const html = smclToHtml(input);
+            assert.strictEqual(html, 'jk');
+        });
+    });
 });
