@@ -1,3 +1,10 @@
+## [0.15.5](https://github.com/tmonk/stata-workbench/compare/v0.15.4...v0.15.5) (2026-01-20)
+
+
+### Bug Fixes
+
+* update release workflow to publish to Open VSX and refine SENTRY_UPLOAD handling ([c1ccf24](https://github.com/tmonk/stata-workbench/commit/c1ccf24d64631c1849c2e2527a625bc3f4ac335d))
+
 ## [0.15.4](https://github.com/tmonk/stata-workbench/compare/v0.15.3...v0.15.4) (2026-01-20)
 
 
