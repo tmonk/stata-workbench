@@ -59,6 +59,7 @@ Sentry.init({
     release: process.env.SENTRY_RELEASE || `${pkg.name}@${pkg.version}`,
     environment: process.env.NODE_ENV || "production",
     integrations: isBun ? [] : (nodeProfilingIntegration ? [nodeProfilingIntegration()] : []),
+    tracePropagationTargets: ["localhost", /^\//, /^\/api\//],
 
     // Release Health / Session Tracking
     autoSessionTracking: true,

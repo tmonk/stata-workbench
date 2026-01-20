@@ -1,5 +1,24 @@
 // Shared UI Logic for Stata Extension
 
+const Sentry = typeof require !== 'undefined' ? require("@sentry/electron/renderer") : null;
+
+if (Sentry && Sentry.init) {
+    Sentry.init({
+        dsn: "https://97f5f46047e65ebbf758c0e9e4ffe6c5@o4510744386732032.ingest.de.sentry.io/4510744389550160",
+        release: process.env.SENTRY_RELEASE,
+        integrations: [
+            Sentry.replayIntegration({
+                maskAllText: true,
+                blockAllMedia: true,
+            }),
+        ],
+        // Session Replay
+        replaysSessionSampleRate: 0.1,
+        replaysOnErrorSampleRate: 1.0,
+        tracePropagationTargets: ["localhost", /^\//, /^\/api\//],
+    });
+}
+
 window.stataUI = {
     escapeHtml: function (text) {
         return (text || '')

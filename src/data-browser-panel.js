@@ -242,12 +242,13 @@ class DataBrowserPanel {
         const designUri = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'src', 'ui-shared', 'design.css'));
         const nonce = getNonce();
 
-        // CSP: Allow scripts from our extension, styles from extension, and connect to localhost (for API)
+        // CSP: Allow scripts from our extension, styles from extension, and connect to localhost (for API) + Sentry
         const csp = `
             default-src 'none';
             style-src ${webview.cspSource} 'unsafe-inline' https://unpkg.com;
-            script-src ${webview.cspSource} 'nonce-${nonce}';
-            connect-src http://127.0.0.1:* ws://127.0.0.1:*;
+            script-src ${webview.cspSource} 'nonce-${nonce}' blob:;
+            worker-src 'self' blob:;
+            connect-src http://127.0.0.1:* ws://127.0.0.1:* https://o4510744386732032.ingest.de.sentry.io;
             img-src ${webview.cspSource} data:;
             font-src ${webview.cspSource} https://unpkg.com;
         `;

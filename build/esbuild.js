@@ -106,45 +106,56 @@ async function main() {
   });
 
   // Build Webview Scripts
-  const webviewEntry = path.join(rootDir, 'src', 'ui-shared', 'data-browser.js');
-  const webviewOut = path.join(rootDir, 'dist', 'ui-shared', 'data-browser.js');
-  const webviewCtx = await esbuild.context({
-    entryPoints: [webviewEntry],
-    bundle: true,
-    format: 'iife',
-    minify: production,
-    sourcemap: true,
-    sourcesContent: false,
-    platform: 'browser',
-    outfile: webviewOut,
-    define: {
-      'process.env.SENTRY_RELEASE': JSON.stringify(release),
+  const webviewScripts = [
+    {
+      entry: path.join(rootDir, 'src', 'ui-shared', 'data-browser.js'),
+      out: path.join(rootDir, 'dist', 'ui-shared', 'data-browser.js')
     },
-    logLevel: 'warning',
-    plugins: [
-      esbuildProblemMatcherPlugin,
-      enableSentry && sentryEsbuildPlugin({
-        authToken: sentryAuthToken,
-        org: "tdmonk",
-        project: "4510744389550160",
-        telemetry: false,
-        release: {
-          name: release,
-          create: false,
-          finalize: false,
-        },
-      }),
-    ].filter(Boolean)
-  });
+    {
+      entry: path.join(rootDir, 'src', 'ui-shared', 'main.js'),
+      out: path.join(rootDir, 'dist', 'ui-shared', 'main.js')
+    }
+  ];
+
+  const webviewCtxs = await Promise.all(webviewScripts.map(async script => {
+    return await esbuild.context({
+      entryPoints: [script.entry],
+      bundle: true,
+      format: 'iife',
+      minify: production,
+      sourcemap: true,
+      sourcesContent: false,
+      platform: 'browser',
+      outfile: script.out,
+      define: {
+        'process.env.SENTRY_RELEASE': JSON.stringify(release),
+      },
+      logLevel: 'warning',
+      plugins: [
+        esbuildProblemMatcherPlugin,
+        enableSentry && sentryEsbuildPlugin({
+          authToken: sentryAuthToken,
+          org: "tdmonk",
+          project: "4510744389550160",
+          telemetry: false,
+          release: {
+            name: release,
+            create: false,
+            finalize: false,
+          },
+        }),
+      ].filter(Boolean)
+    });
+  }));
 
   if (watch) {
     await extensionCtx.watch();
-    await webviewCtx.watch();
+    await Promise.all(webviewCtxs.map(ctx => ctx.watch()));
   } else {
     await extensionCtx.rebuild();
-    await webviewCtx.rebuild();
+    await Promise.all(webviewCtxs.map(ctx => ctx.rebuild()));
     await extensionCtx.dispose();
-    await webviewCtx.dispose();
+    await Promise.all(webviewCtxs.map(ctx => ctx.dispose()));
   }
 }
 

@@ -27,6 +27,11 @@ mock.module('@sentry/profiling-node', () => ({
   nodeProfilingIntegration: jest.fn()
 }));
 
+mock.module('@sentry/electron/renderer', () => ({
+  init: jest.fn(),
+  replayIntegration: jest.fn(() => ({ name: 'Replay' }))
+}));
+
 if (!jest.doMock) {
   jest.doMock = (specifier, factory) => mock.module(specifier, factory);
 }

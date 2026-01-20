@@ -1061,7 +1061,10 @@ function openGraphPanel(graphDetails) {
             {
                 enableScripts: true,
                 retainContextWhenHidden: true,
-                localResourceRoots: [vscode.Uri.joinPath(globalExtensionUri, 'src', 'ui-shared')]
+                localResourceRoots: [
+                    vscode.Uri.joinPath(globalExtensionUri, 'src', 'ui-shared'),
+                    vscode.Uri.joinPath(globalExtensionUri, 'dist', 'ui-shared')
+                ]
             }
         );
         graphPanel.onDidDispose(() => { graphPanel = null; });
@@ -1069,6 +1072,14 @@ function openGraphPanel(graphDetails) {
         // Handle messages from the webview
         graphPanel.webview.onDidReceiveMessage(async (message) => {
             try {
+                if (message.type === 'log') {
+                    if (message.level === 'error' || message.severity === 'error') {
+                        Sentry.captureException(new Error(`Graph Webview Error: ${message.message}`));
+                    }
+                    outputChannel.appendLine(`[Graph Webview] ${message.message}`);
+                    return;
+                }
+
                 outputChannel.appendLine(`[Graph Panel] Received message: ${JSON.stringify(message)}`);
 
                 if (!message || typeof message !== 'object') {
@@ -1092,13 +1103,23 @@ function openGraphPanel(graphDetails) {
         });
     }
 
-    const html = renderGraphHtml(graphDetails, graphPanel.webview, globalExtensionUri);
+    const nonce = getNonce();
+    const html = renderGraphHtml(graphDetails, graphPanel.webview, globalExtensionUri, nonce);
     graphPanel.webview.html = html;
 }
 
-function renderGraphHtml(graphDetails, webview, extensionUri) {
+function getNonce() {
+    let text = '';
+    const possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+    for (let i = 0; i < 32; i++) {
+        text += possible.charAt(Math.floor(Math.random() * possible.length));
+    }
+    return text;
+}
+
+function renderGraphHtml(graphDetails, webview, extensionUri, nonce) {
     const designUri = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'src', 'ui-shared', 'design.css'));
-    const mainJsUri = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'src', 'ui-shared', 'main.js'));
+    const mainJsUri = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'dist', 'ui-shared', 'main.js'));
     const items = Array.isArray(graphDetails) ? graphDetails : [];
 
     const tiles = items.map(g => {
@@ -1127,13 +1148,25 @@ function renderGraphHtml(graphDetails, webview, extensionUri) {
 
     const gridHtml = tiles || '<div class="text-muted">No graphs available</div>';
 
+    // CSP: Allow scripts, styles, and connect to localhost (for API) + Sentry
+    const csp = `
+      default-src 'none'; 
+      img-src ${webview.cspSource} https: data: file:; 
+      script-src 'nonce-${nonce}' ${webview.cspSource} blob:; 
+      worker-src 'self' blob:;
+      style-src 'unsafe-inline' ${webview.cspSource} https://unpkg.com; 
+      font-src ${webview.cspSource} https://unpkg.com; 
+      connect-src ${webview.cspSource} http://127.0.0.1:* https://o4510744386732032.ingest.de.sentry.io;
+    `.replace(/\s+/g, ' ').trim();
+
     return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="${csp}">
   <link rel="stylesheet" href="${designUri}">
   <title>Stata Graphs</title>
-  <style>
+  <style nonce="${nonce}">
     body { padding: var(--space-md); }
     .hidden { display: none !important; }
   </style>
@@ -1165,8 +1198,8 @@ function renderGraphHtml(graphDetails, webview, extensionUri) {
     </div>
   </div>
 
-  <script src="${mainJsUri}"></script>
-  <script>
+  <script nonce="${nonce}" src="${mainJsUri}"></script>
+  <script nonce="${nonce}">
      const vscode = acquireVsCodeApi();
      
      // Modal elements

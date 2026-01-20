@@ -13,7 +13,7 @@
   "bugs": {
     "url": "https://github.com/tmonk/stata-workbench/issues"
   },
-  "version": "0.15.0",
+  "version": "0.15.1",
   "engines": {
     "vscode": "^1.75.0",
     "node": ">=22.14.0"
@@ -116,7 +116,7 @@
       "properties": {
         "stataMcp.requestTimeoutMs": {
           "type": "number",
-          "default": 100000,
+          "default": 1e5,
           "description": "Timeout (ms) for MCP requests before showing an error."
         },
         "stataMcp.autoRevealOutput": {
@@ -248,6 +248,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.24.3",
+    "@sentry/electron": "^7.6.0",
     "@sentry/esbuild-plugin": "^4.7.0",
     "@sentry/node": "^10.35.0",
     "@sentry/profiling-node": "^10.35.0",

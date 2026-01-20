@@ -153,6 +153,7 @@ class TerminalPanel {
           retainContextWhenHidden: true,
           localResourceRoots: [
             vscode.Uri.joinPath(TerminalPanel.extensionUri, 'src', 'ui-shared'),
+            vscode.Uri.joinPath(TerminalPanel.extensionUri, 'dist', 'ui-shared'),
             vscode.Uri.file(os.tmpdir())
           ]
         }
@@ -695,7 +696,7 @@ module.exports = { TerminalPanel, toEntry, normalizeArtifacts, parseSMCL, determ
 function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = []) {
   const designUri = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'src', 'ui-shared', 'design.css'));
   const highlightCssUri = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'src', 'ui-shared', 'highlight.css'));
-  const mainJsUri = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'src', 'ui-shared', 'main.js'));
+  const mainJsUri = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'dist', 'ui-shared', 'main.js'));
   const highlightJsUri = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'src', 'ui-shared', 'highlight.min.js'));
   const markJsUri = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'src', 'ui-shared', 'mark.min.js'));
 
@@ -703,11 +704,22 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
   const escapedTitle = escapeHtml(fileName);
   const initialJson = JSON.stringify(initialEntries).replace(/</g, '\\u003c');
 
+  // CSP: Allow scripts, styles, and connect to localhost (for API) + Sentry
+  const csp = `
+    default-src 'none'; 
+    img-src ${webview.cspSource} https: data:; 
+    script-src 'nonce-${nonce}' ${webview.cspSource} blob:; 
+    worker-src 'self' blob:;
+    style-src 'unsafe-inline' ${webview.cspSource} https://unpkg.com; 
+    font-src ${webview.cspSource} https://unpkg.com; 
+    connect-src ${webview.cspSource} http://127.0.0.1:* https://o4510744386732032.ingest.de.sentry.io;
+  `.replace(/\s+/g, ' ').trim();
+
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${webview.cspSource} https: data:; script-src 'nonce-${nonce}' ${webview.cspSource}; style-src 'unsafe-inline' ${webview.cspSource} https://unpkg.com; font-src ${webview.cspSource} https://unpkg.com; connect-src ${webview.cspSource} http://127.0.0.1:7245;">
+  <meta http-equiv="Content-Security-Policy" content="${csp}">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <link rel="stylesheet" href="${designUri}">
   <link rel="stylesheet" href="${highlightCssUri}">
