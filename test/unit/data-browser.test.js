@@ -14,8 +14,9 @@ describe('Data Browser Frontend (data-browser.js)', () => {
 
     beforeAll(() => {
         scriptContent = fs.readFileSync(path.join(__dirname, '../../src/ui-shared/data-browser.js'), 'utf8');
-        // Strip ESM import for JSDOM eval
+        // Strip ESM import and export for JSDOM eval
         scriptContent = scriptContent.replace(/import {.*} from 'apache-arrow';/g, '');
+        scriptContent = scriptContent.replace(/export default .*;?/g, '');
     });
 
     beforeEach(() => {

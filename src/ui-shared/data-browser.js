@@ -737,3 +737,5 @@ if (typeof window !== 'undefined' && window.__DATA_BROWSER_TEST__) {
     window.__dataBrowserState = state;
     window.__loadPage = loadPage;
 }
+
+export default undefined;
