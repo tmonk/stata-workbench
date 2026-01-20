@@ -1,6 +1,12 @@
 // Import with `import * as Sentry from "@sentry/node"` if you are using ESM
 const Sentry = require("@sentry/node");
 const pkg = require("../package.json");
+const path = require("path");
+
+// Set the binary directory for native modules to the current directory (dist/)
+// This allows the Sentry profiler to find its platform-specific .node files
+// when running from a bundled VS Code extension.
+process.env.SENTRY_PROFILER_BINARY_DIR = __dirname;
 
 const isBun = !!process.versions.bun;
 let nodeProfilingIntegration;

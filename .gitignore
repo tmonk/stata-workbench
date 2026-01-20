@@ -16,3 +16,4 @@ original_extension.test.js.tmp
 
 # Sentry Config File
 .env.sentry-build-plugin
+.envrc

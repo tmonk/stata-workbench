@@ -10,78 +10,11 @@ const entryFile = path.join(rootDir, 'src', 'extension.js');
 const outFile = path.join(rootDir, 'dist', 'extension.js');
 
 const release = process.env.SENTRY_RELEASE || `v${pkg.version}`;
-
-async function main() {
-  // Build Extension Host
-  const extensionCtx = await esbuild.context({
-    entryPoints: [entryFile],
-    bundle: true,
-    format: 'cjs',
-    minify: production,
-    sourcemap: true,
-    sourcesContent: false,
-    platform: 'node',
-    outfile: outFile,
-    external: ['vscode'],
-    define: {
-      'process.env.SENTRY_RELEASE': JSON.stringify(release),
-    },
-    loader: {
-      '.node': 'file',
-    },
-    logLevel: 'warning',
-    plugins: [
-      esbuildProblemMatcherPlugin,
-      sentryEsbuildPlugin({
-        authToken: process.env.SENTRY_AUTH_TOKEN,
-        org: "tdmonk",
-        project: "node",
-        release: {
-          name: release,
-        },
-      }),
-    ]
-  });
-
-  // Build Webview Scripts
-  const webviewEntry = path.join(rootDir, 'src', 'ui-shared', 'data-browser.js');
-  const webviewOut = path.join(rootDir, 'dist', 'ui-shared', 'data-browser.js');
-  const webviewCtx = await esbuild.context({
-    entryPoints: [webviewEntry],
-    bundle: true,
-    format: 'iife',
-    minify: production,
-    sourcemap: true,
-    sourcesContent: false,
-    platform: 'browser',
-    outfile: webviewOut,
-    define: {
-      'process.env.SENTRY_RELEASE': JSON.stringify(release),
-    },
-    logLevel: 'warning',
-    plugins: [
-      esbuildProblemMatcherPlugin,
-      sentryEsbuildPlugin({
-        authToken: process.env.SENTRY_AUTH_TOKEN,
-        org: "tdmonk",
-        project: "node",
-        release: {
-          name: release,
-        },
-      }),
-    ]
-  });
-
-  if (watch) {
-    await extensionCtx.watch();
-    await webviewCtx.watch();
-  } else {
-    await extensionCtx.rebuild();
-    await webviewCtx.rebuild();
-    await extensionCtx.dispose();
-    await webviewCtx.dispose();
-  }
-}
+const sentryAuthToken = process.env.SENTRY_AUTH_TOKEN?.trim();
+const sentryUploadDefault = (process.env.CI === 'true' || Boolean(sentryAuthToken)) ? 'true' : 'false';
+const sentryUploadEnv = process.env.SENTRY_UPLOAD ?? sentryUploadDefault;
+const sentryUpload = sentryUploadEnv.toLowerCase() === 'true';
+const enableSentry = production && sentryUpload;
 
 /**
  * @type {import('esbuild').Plugin}
@@ -103,6 +36,88 @@ const esbuildProblemMatcherPlugin = {
     });
   }
 };
+
+async function main() {
+  if (production && sentryUpload && !sentryAuthToken) {
+    throw new Error('[sentry-esbuild-plugin] SENTRY_UPLOAD is true but SENTRY_AUTH_TOKEN is missing.');
+  }
+  // Build Extension Host
+  const extensionCtx = await esbuild.context({
+    entryPoints: [entryFile],
+    bundle: true,
+    format: 'cjs',
+    minify: production,
+    sourcemap: true,
+    sourcesContent: false,
+    platform: 'node',
+    outfile: outFile,
+    external: ['vscode'],
+    assetNames: '[name]',
+    define: {
+      'process.env.SENTRY_RELEASE': JSON.stringify(release),
+    },
+    loader: {
+      '.node': 'file',
+    },
+    logLevel: 'warning',
+    plugins: [
+      esbuildProblemMatcherPlugin,
+      enableSentry && sentryEsbuildPlugin({
+        authToken: sentryAuthToken,
+        org: "tdmonk",
+        project: "4510744389550160",
+        telemetry: false,
+        release: {
+          name: release,
+          create: false,
+          finalize: false,
+        },
+      }),
+    ].filter(Boolean)
+  });
+
+  // Build Webview Scripts
+  const webviewEntry = path.join(rootDir, 'src', 'ui-shared', 'data-browser.js');
+  const webviewOut = path.join(rootDir, 'dist', 'ui-shared', 'data-browser.js');
+  const webviewCtx = await esbuild.context({
+    entryPoints: [webviewEntry],
+    bundle: true,
+    format: 'iife',
+    minify: production,
+    sourcemap: true,
+    sourcesContent: false,
+    platform: 'browser',
+    outfile: webviewOut,
+    define: {
+      'process.env.SENTRY_RELEASE': JSON.stringify(release),
+    },
+    logLevel: 'warning',
+    plugins: [
+      esbuildProblemMatcherPlugin,
+      enableSentry && sentryEsbuildPlugin({
+        authToken: sentryAuthToken,
+        org: "tdmonk",
+        project: "4510744389550160",
+        telemetry: false,
+        release: {
+          name: release,
+          create: false,
+          finalize: false,
+        },
+      }),
+    ].filter(Boolean)
+  });
+
+  if (watch) {
+    await extensionCtx.watch();
+    await webviewCtx.watch();
+  } else {
+    await extensionCtx.rebuild();
+    await webviewCtx.rebuild();
+    await extensionCtx.dispose();
+    await webviewCtx.dispose();
+  }
+}
 
 main().catch(e => {
   console.error(e);
