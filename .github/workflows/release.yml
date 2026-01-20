@@ -65,13 +65,19 @@ jobs:
       - name: Publish to Open VSX
         if: steps.semantic.outputs.new_release_published == 'true'
         run: |
-          # Find the packaged VSIX (might be in dist/ or root)
-          VSIX_PATH=$(ls dist/*.vsix *.vsix 2>/dev/null | head -n 1)
-          if [ -f "$VSIX_PATH" ]; then
+          echo "Looking for VSIX files..."
+          ls -R *.vsix dist/*.vsix 2>/dev/null || echo "No .vsix files found in root or dist/"
+          
+          # Find the packaged VSIX
+          VSIX_PATH=$(find . -maxdepth 2 -name "*.vsix" | head -n 1)
+          
+          if [ -n "$VSIX_PATH" ] && [ -f "$VSIX_PATH" ]; then
             echo "Publishing $VSIX_PATH to Open VSX..."
             bunx ovsx publish "$VSIX_PATH" -p ${{ secrets.OVSX_TOKEN }}
           else
             echo "Error: No VSIX file found to publish to Open VSX"
+            echo "Current directory contents:"
+            ls -F
             exit 1
           fi
         env:

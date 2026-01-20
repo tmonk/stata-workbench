@@ -19,7 +19,10 @@
             }
         ],
         [
-            "semantic-release-vsce"
+            "semantic-release-vsce",
+            {
+                "packageVsix": true
+            }
         ],
         [
             "@semantic-release/github",
