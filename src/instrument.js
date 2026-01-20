@@ -81,9 +81,38 @@ Sentry.init({
 
     // Filter out Stata user errors (not system failures)
     beforeSend(event, hint) {
+        // Identify the core error message
         const error = hint.originalException;
-        if (error) {
-            const msg = (error.message || String(error)).toLowerCase();
+        const msg = (error?.message || event.message || (event.exception?.values?.[0]?.value) || "").toLowerCase();
+
+        // 1. If it's an exception, ensure it originates from our extension
+        if (event.exception && event.exception.values) {
+            const isOurExtension = event.exception.values.some(ex => {
+                // Check stack frames for our extension identifiers
+                const hasOurFrame = ex.stacktrace?.frames?.some(frame => 
+                    frame.filename && (
+                        frame.filename.includes('stata-workbench') || 
+                        frame.filename.includes('mcp-stata') ||
+                        frame.filename.includes('tmonk')
+                    )
+                );
+                if (hasOurFrame) return true;
+
+                // If frames are missing or ambiguous (e.g. loader errors), 
+                // check if the message identifies our extension.
+                const val = (ex.value || "").toLowerCase();
+                return val.includes('stata-workbench') || val.includes('tmonk');
+            });
+            
+            // Always allow our own initialization failures (like profiling-node failures)
+            const isOurInitFailure = event.tags && event.tags.type === "initialization_failure";
+
+            if (!isOurExtension && !isOurInitFailure) {
+                return null;
+            }
+        }
+
+        if (msg) {
             // Ignore errors with Stata return codes (e.g. r(198);) 
             // These are usually results of user commands, not extension bugs.
             if (/r\(\d+\);/.test(msg) || /\[rc\s+\d+\]/.test(msg)) {
@@ -99,13 +128,29 @@ Sentry.init({
             }
             // Ignore internal Cursor/VS Code workbench errors and channel closures
             if (
-                msg.includes('_chat.') ||
-                msg.includes('channel has been closed') ||
-                msg.includes('command not found')
+                msg.includes('_chat.') || 
+                msg.includes('channel has been closed') || 
+                /command '.*' not found/.test(msg) ||
+                msg.includes('extension host terminated')
             ) {
                 return null;
             }
+            // Ignore common background tools that aren't ours
+            if (msg.includes('git') || msg.includes('ripgrep') || msg.includes('rg ')) {
+                // If it's a child_process error for git/rg, we don't own it.
+                return null;
+            }
         }
+
+        // Additional check for subprocess events (from Sentry breadcrumbs or extra context)
+        const extra = event.extra;
+        if (extra && extra.spawnfile) {
+            const spawnfile = String(extra.spawnfile).toLowerCase();
+            if (spawnfile.includes('git') || spawnfile.includes('rg') || spawnfile.includes('ripgrep')) {
+                return null;
+            }
+        }
+
         return event;
     },
 });
