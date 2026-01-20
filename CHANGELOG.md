@@ -1,3 +1,10 @@
+## [0.14.8](https://github.com/tmonk/stata-workbench/compare/v0.14.7...v0.14.8) (2026-01-20)
+
+
+### Bug Fixes
+
+* ignore internal Cursor/VS Code workbench errors in Sentry event processing ([94cdcd6](https://github.com/tmonk/stata-workbench/commit/94cdcd64c249c46219cf012f7316e29f12c1ef52))
+
 ## [0.14.7](https://github.com/tmonk/stata-workbench/compare/v0.14.6...v0.14.7) (2026-01-20)
 
 
