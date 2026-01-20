@@ -4,10 +4,11 @@ const fs = require('fs');
 const os = require('os');
 const vscode = require('vscode');
 const pkg = require('../package.json');
+const https = require('https');
 const { filterMcpLogs } = require('./log-utils');
 const MCP_PACKAGE_NAME = 'mcp-stata';
+const MCP_PACKAGE_SPEC = 'mcp-stata'; // Default spec for logging/errors
 const MCP_SERVER_ID = 'mcp_stata';
-const MCP_PACKAGE_SPEC = process.env.MCP_STATA_PACKAGE_SPEC || `${MCP_PACKAGE_NAME}@latest`;
 
 // The MCP SDK exposes a stdio client transport we can use for VS Code.
 // For Cursor, we first try a built-in bridge command if available, then fall back to stdio.
@@ -61,6 +62,7 @@ class StataMcpClient {
         this._missingRequiredTools = [];
         this._forceLatestServer = false;
         this._forceLatestAttempted = false;
+        this._pypiVersion = null;
     }
 
     _attachStderrListener(stream, source) {
@@ -424,9 +426,73 @@ class StataMcpClient {
 
     async _ensureClient() {
         if (this._clientPromise) return this._clientPromise;
+
+        // Try to fetch latest version from PyPI before connecting, if not already fetched.
+        // We do this here so it only happens once per client lifecycle.
+        if (!this._pypiVersion && !process.env.MCP_STATA_PACKAGE_SPEC) {
+            try {
+                const { latest, all } = await this._fetchLatestVersion();
+                this._pypiVersion = latest;
+
+                // Log top 5 versions found on PyPI
+                const top5 = this._sortVersions(all).slice(0, 5);
+                this._log(`[mcp-stata] PyPI versions (latest 5): ${top5.join(', ')}`);
+                this._log(`[mcp-stata] Resolved latest version: ${this._pypiVersion}`);
+            } catch (err) {
+                this._log(`[mcp-stata] PyPI version fetch failed, using fallback: ${err.message}`);
+            }
+        }
+
         this._clientPromise = this._createClient();
         return this._clientPromise;
     }
+
+    async _fetchLatestVersion(timeoutMs = 2000) {
+        return new Promise((resolve, reject) => {
+            const url = 'https://pypi.org/pypi/mcp-stata/json';
+            const req = https.get(url, (res) => {
+                if (res.statusCode !== 200) {
+                    reject(new Error(`PyPI returned ${res.statusCode}`));
+                    return;
+                }
+                let data = '';
+                res.on('data', chunk => data += chunk);
+                res.on('end', () => {
+                    try {
+                        const json = JSON.parse(data);
+                        const version = json?.info?.version;
+                        const all = Object.keys(json?.releases || {});
+                        if (version) {
+                            resolve({ latest: version, all });
+                        } else {
+                            reject(new Error('Version not found in PyPI JSON'));
+                        }
+                    } catch (e) {
+                        reject(e);
+                    }
+                });
+            });
+            req.on('error', reject);
+            req.setTimeout(timeoutMs, () => {
+                req.destroy();
+                reject(new Error('PyPI request timed out'));
+            });
+        });
+    }
+
+    _sortVersions(versions) {
+        return [...versions].sort((a, b) => {
+            const pa = a.split('.').map(v => parseInt(v, 10));
+            const pb = b.split('.').map(v => parseInt(v, 10));
+            for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+                const va = pa[i] || 0;
+                const vb = pb[i] || 0;
+                if (va !== vb) return vb - va;
+            }
+            return b.localeCompare(a); // Fallback for pre-releases or identical numbers
+        });
+    }
+
 
     async _createClient() {
         this._statusEmitter.emit('status', 'connecting');
@@ -459,9 +525,13 @@ class StataMcpClient {
         const uvCommand = process.env.MCP_STATA_UVX_CMD || 'uvx';
         const serverConfig = this._loadServerConfig({ ignoreCommandArgs: this._forceLatestServer });
 
-        // Use command/args from config if available, otherwise fall back to uvx with --refresh
+        // Use command/args from config if available, otherwise fall back to uvx with our determined version
+        const fallbackSpec = `${MCP_PACKAGE_NAME}>=1.18.7`;
+        const resolvedSpec = this._pypiVersion ? `${MCP_PACKAGE_NAME}==${this._pypiVersion}` : fallbackSpec;
+        const currentSpec = process.env.MCP_STATA_PACKAGE_SPEC || (this._forceLatestServer ? `${MCP_PACKAGE_NAME}@latest` : resolvedSpec);
+
         const finalCommand = serverConfig.command || uvCommand;
-        const finalArgs = serverConfig.args || ['--refresh', '--refresh-package', MCP_PACKAGE_NAME, '--from', `${MCP_PACKAGE_NAME}@latest`, MCP_PACKAGE_NAME];
+        const finalArgs = serverConfig.args || ['--refresh', '--refresh-package', MCP_PACKAGE_NAME, '--from', currentSpec, MCP_PACKAGE_NAME];
         const configuredEnv = serverConfig.env || {};
 
         // Log that we're creating the transport
@@ -520,7 +590,7 @@ class StataMcpClient {
             this._log(`[mcp-stata] WARNING: transport.stderr not available for capture`);
         }
 
-        this._log(`Starting mcp-stata via ${uvCommand} --refresh --refresh-package ${MCP_PACKAGE_NAME} --from ${MCP_PACKAGE_SPEC} ${MCP_PACKAGE_NAME} (ext v${this._clientVersion})`);
+        this._log(`Starting mcp-stata via ${uvCommand} --refresh --refresh-package ${MCP_PACKAGE_NAME} --from ${currentSpec} ${MCP_PACKAGE_NAME} (ext v${this._clientVersion})`);
         const client = new Client({ name: 'stata-vscode', version: this._clientVersion });
         if (typeof client.on === 'function') {
             client.on('error', (err) => {
@@ -798,7 +868,7 @@ class StataMcpClient {
 
         this._forceLatestAttempted = true;
         this._forceLatestServer = true;
-        this._log(`[mcp-stata] Required tool "${name}" missing. Forcing refresh of ${MCP_PACKAGE_SPEC} and restarting MCP client.`);
+        this._log(`[mcp-stata] Required tool "${name}" missing. Forcing refresh of ${MCP_PACKAGE_NAME} and restarting MCP client.`);
         try {
             if (this._transport && typeof this._transport.close === 'function') {
                 await this._transport.close();
@@ -1020,7 +1090,7 @@ class StataMcpClient {
             const resp = await this._callTool(client, 'read_log', { path, offset, max_bytes: maxBytes });
             const parsed = this._parseToolJson(resp);
             if (parsed && typeof parsed === 'object' && (parsed.data !== undefined || parsed.next_offset !== undefined)) {
-                 return parsed;
+                return parsed;
             }
             this._log(`[mcp-stata] read_log returned unexpected format or failed to parse. resp type: ${typeof resp}`);
             return null;
