@@ -1,3 +1,11 @@
+## [0.13.3](https://github.com/tmonk/stata-workbench/compare/v0.13.2...v0.13.3) (2026-01-20)
+
+
+### Bug Fixes
+
+* add Jest configuration and ensure integration tests pass ([ecef93b](https://github.com/tmonk/stata-workbench/commit/ecef93b825b4534358c044d7ad6f7e2425a63f01))
+* update MCP package management commands to use --refresh-package instead of --reinstall-package ([3675b8a](https://github.com/tmonk/stata-workbench/commit/3675b8aa0af8788d4f3a86ed445ea7acfdfb84a2))
+
 ## [0.13.2](https://github.com/tmonk/stata-workbench/compare/v0.13.1...v0.13.2) (2026-01-20)
 
 
