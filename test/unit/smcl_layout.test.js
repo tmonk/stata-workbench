@@ -183,5 +183,51 @@ describe('SMCL Layout Principles', () => {
             const html = smclToHtml(input);
             assert.strictEqual(html, 'jk');
         });
+
+        it('should render complex describe table rows correctly', () => {
+            const input = '{p 0 48}{res}{bind:make           }{txt}{bind: str18   }{bind:%-18s     }{space 1}{bind:         }{bind:  }{res}{res}Make and model{p_end}';
+            const html = smclToHtml(input);
+            
+            // Should preserve the negative indent for hanging logic
+            assert(html.includes('text-indent:-48ch'), 'Should have negative indent for first line');
+            // Should wrap bind in span with white-space: pre-wrap/pre
+            assert(html.includes('white-space:pre'), 'Binds should preserve internal spacing');
+            assert(html.includes('make           '), 'Should preserve trailing spaces in variable name');
+            assert(html.includes('Make and model'), 'Should contain variable label');
+            assert(html.endsWith('</div>\n'), 'Should end with a closed div and newline');
+        });
+
+        it('should handle a mix of headers, lines, and table rows sensibly', () => {
+            const input = 
+                'Variable      Storage   Display    Value\n' +
+                '    name         type    format    label      Variable label\n' +
+                '{hline}\n' +
+                '{p 0 48}{res}{bind:make           }{txt}{bind: str18   }{bind:%-18s     }{space 1}{bind:         }{bind:  }{res}{res}Make and model{p_end}';
+            
+            const html = smclToHtml(input);
+            const lines = html.split('\n');
+            
+            // Check header preservation (should be at top, usually in raw or com)
+            assert(html.includes('Variable      Storage'), 'Headers should be preserved');
+            
+            // Check horizontal line
+            assert(html.includes('---'), 'hline should render');
+            
+            // Check the row is still correctly formed even after previous content
+            assert(html.includes('padding-left:48ch'), 'Table row should still have correct padding');
+            assert(html.includes('Make and model'), 'Table row should still have correct content');
+        });
+
+        it('should handle nested colors inside p2col without breaking layout', () => {
+            const input = '{synoptset 4 20 22 2}{p2col :{res:Option}}Multi-mode {txt:description} with {hi:highlight}{p_end}';
+            const html = smclToHtml(input);
+            
+            assert(html.includes('smcl-res'), 'Should have color for Option');
+            assert(html.includes('Option'), 'Should render Option');
+            assert(html.includes('smcl-hi'), 'Should have highlight');
+            assert(html.includes('description'), 'Should render description');
+            // Ensure the columns didn't collapse
+            assert(html.includes('flex: 0 0 16ch'), 'Column 1 width preserved');
+        });
     });
 });

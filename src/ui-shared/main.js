@@ -94,7 +94,7 @@ window.stataUI = {
 
         html = html.replace(/\{c -\(\}/g, '__BRACE_OPEN__').replace(/\{c \)-\}/g, '__BRACE_CLOSE__');
 
-        const tokenRegex = /(\{[^}]+\})|(\n)|([^{}\n]+)|(.)/g;
+        const tokenRegex = /(\{(?:[^{}]|\{[^{}]*\})*\})|(\n)|([^{}\n]+)|(.)/g;
         let match;
         let result = '';
         let currentLineLen = 0;
@@ -222,7 +222,9 @@ window.stataUI = {
                     const i3 = settings[2] || 0;
                     
                     if (result.length > 0 && !result.endsWith('\n')) result += '\n';
-                    result += `<div style="padding-left:${i2}ch; text-indent:${i1 - i2}ch; padding-right:${i3}ch; margin-bottom:4px;">`;
+                    // We must use white-space: pre-wrap to preserve multiple spaces and ensure ch unit alignment.
+                    // Also use min-width to ensure the div doesn't collapse excessively.
+                    result += `<div style="padding-left:${i2}ch; text-indent:${i1 - i2}ch; padding-right:${i3}ch; margin-bottom:4px; white-space:pre-wrap; min-width: max-content;">`;
                     openTags.push('DIV');
                     currentLineLen = 0;
                     continue;
@@ -233,6 +235,7 @@ window.stataUI = {
                         const top = openTags.pop();
                         if (top === 'DIV' || top === 'DIV_ROW') {
                             result += '</div>';
+                            if (top === 'DIV_ROW') result += '</div>';
                             break;
                         }
                         result += '</span>';
@@ -242,7 +245,7 @@ window.stataUI = {
                     continue;
                 }
 
-                if (command === 'p2colset') {
+                if (command === 'p2colset' || command === 'synoptset') {
                     const nums = parts.slice(1).map(n => parseInt(n, 10)).filter(n => !isNaN(n));
                     if (nums.length >= 4) tableSettings.p2col = nums;
                     continue;
@@ -261,18 +264,23 @@ window.stataUI = {
                     if (openTags.includes('DIV_ROW')) {
                         while (openTags.length > 0) {
                             const top = openTags.pop();
-                            if (top === 'DIV_ROW') { result += '</div>'; break; }
+                            if (top === 'DIV_ROW') { result += '</div></div>'; break; }
                             result += '</span>';
                         }
                     }
 
-                    result += `<div style="display:flex; flex-direction:row; padding-left:${i1}ch; padding-right:${mr}ch; margin-bottom:2px;">`;
+                    result += `<div style="display:flex; flex-direction:row; padding-left:${i1}ch; padding-right:${mr}ch; margin-bottom:2px; white-space:pre;">`;
                     result += `<div style="flex: 0 0 ${c2 - i1}ch; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; margin-right:2ch;">`;
                     if (tagContent) {
-                        result += window.stataUI.smclToHtml(tagContent);
+                        let contentToRender = tagContent;
+                        // Strip leading colon if present in p2col/synopt/p2coldent
+                        if (contentToRender.startsWith(':')) {
+                            contentToRender = contentToRender.substring(1);
+                        }
+                        result += window.stataUI.smclToHtml(contentToRender);
                     }
                     result += `</div>`;
-                    result += `<div style="flex:1; padding-left:${Math.max(0, i2 - c2)}ch;">`;
+                    result += `<div style="flex:1; padding-left:${Math.max(0, i2 - c2)}ch; white-space:pre-wrap;">`;
                     openTags.push('DIV_ROW'); 
                     currentLineLen = 0;
                     continue;
@@ -359,11 +367,16 @@ window.stataUI = {
 
                     if (openTags.length > 0) {
                         const current = openTags[openTags.length - 1];
-                        if (MODE_TAGS.includes(command)) {
+                        // Only auto-close if the current top tag is also a mode tag
+                        if (MODE_TAGS.includes(command) && MODE_TAGS.includes(current)) {
                             result += `</span>`;
                             openTags.pop();
                         } else if (command === '/' + current) {
-                            result += `</span>`;
+                            if (current === 'DIV' || current === 'DIV_ROW') {
+                                result += '</div>';
+                            } else {
+                                result += '</span>';
+                            }
                             openTags.pop();
                             continue;
                         }
@@ -378,7 +391,8 @@ window.stataUI = {
 
                 if (command === 'bind') {
                     if (tagContent !== null) {
-                        result += `<span style="display:inline-block;white-space:nowrap;">` + window.stataUI.smclToHtml(tagContent) + `</span>`;
+                        // Use white-space: pre to guarantee that multiple spaces inside bind are NOT collapsed.
+                        result += `<span style="white-space:pre;">` + window.stataUI.smclToHtml(tagContent) + `</span>`;
                         let visibleInner = tagContent.replace(/\{[^}]+\}/g, '');
                         currentLineLen += visibleInner.length;
                     }
@@ -405,8 +419,13 @@ window.stataUI = {
         }
 
         while (openTags.length > 0) {
-            result += '</span>';
-            openTags.pop();
+            const top = openTags.pop();
+            if (top === 'DIV' || top === 'DIV_ROW') {
+                result += '</div>';
+                if (top === 'DIV_ROW') result += '</div>';
+            } else {
+                result += '</span>';
+            }
         }
 
         result = result.replace(/__BRACE_OPEN__/g, '{').replace(/__BRACE_CLOSE__/g, '}');
