@@ -1,3 +1,10 @@
+## [0.15.3](https://github.com/tmonk/stata-workbench/compare/v0.15.2...v0.15.3) (2026-01-20)
+
+
+### Bug Fixes
+
+* allow for targeted releases and bundle uv in the vsix ([71c399a](https://github.com/tmonk/stata-workbench/commit/71c399af58c926f74bae06596bfac49a4d7efec7))
+
 ## [0.15.2](https://github.com/tmonk/stata-workbench/compare/v0.15.1...v0.15.2) (2026-01-20)
 
 
