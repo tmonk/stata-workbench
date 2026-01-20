@@ -1,12 +1,15 @@
 const esbuild = require('esbuild');
 const path = require('path');
 const { sentryEsbuildPlugin } = require("@sentry/esbuild-plugin");
+const pkg = require('../package.json');
 
 const production = process.argv.includes('--production');
 const watch = process.argv.includes('--watch');
 const rootDir = path.resolve(__dirname, '..');
 const entryFile = path.join(rootDir, 'src', 'extension.js');
 const outFile = path.join(rootDir, 'dist', 'extension.js');
+
+const release = process.env.SENTRY_RELEASE || `v${pkg.version}`;
 
 async function main() {
   // Build Extension Host
@@ -20,6 +23,9 @@ async function main() {
     platform: 'node',
     outfile: outFile,
     external: ['vscode'],
+    define: {
+      'process.env.SENTRY_RELEASE': JSON.stringify(release),
+    },
     loader: {
       '.node': 'file',
     },
@@ -30,6 +36,9 @@ async function main() {
         authToken: process.env.SENTRY_AUTH_TOKEN,
         org: "london-school-of-economics",
         project: "node",
+        release: {
+          name: release,
+        },
       }),
     ]
   });
@@ -46,6 +55,9 @@ async function main() {
     sourcesContent: false,
     platform: 'browser',
     outfile: webviewOut,
+    define: {
+      'process.env.SENTRY_RELEASE': JSON.stringify(release),
+    },
     logLevel: 'warning',
     plugins: [
       esbuildProblemMatcherPlugin,
@@ -53,6 +65,9 @@ async function main() {
         authToken: process.env.SENTRY_AUTH_TOKEN,
         org: "london-school-of-economics",
         project: "node",
+        release: {
+          name: release,
+        },
       }),
     ]
   });

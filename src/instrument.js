@@ -9,7 +9,7 @@ const { nodeProfilingIntegration } = isBun
 
 Sentry.init({
     dsn: "https://97f5f46047e65ebbf758c0e9e4ffe6c5@o4510744386732032.ingest.de.sentry.io/4510744389550160",
-    release: `stata-workbench@${pkg.version}`,
+    release: process.env.SENTRY_RELEASE || `v${pkg.version}`,
     environment: process.env.NODE_ENV || "production",
     integrations: isBun ? [] : [
         nodeProfilingIntegration(),
