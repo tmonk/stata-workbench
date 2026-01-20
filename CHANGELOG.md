@@ -1,3 +1,10 @@
+## [0.14.6](https://github.com/tmonk/stata-workbench/compare/v0.14.5...v0.14.6) (2026-01-20)
+
+
+### Bug Fixes
+
+* export default undefined in data-browser.js ([8cdece5](https://github.com/tmonk/stata-workbench/commit/8cdece5ff58e53a453eb8d9363a77184edf35f4c))
+
 ## [0.14.5](https://github.com/tmonk/stata-workbench/compare/v0.14.4...v0.14.5) (2026-01-20)
 
 
