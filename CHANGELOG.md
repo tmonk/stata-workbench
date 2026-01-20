@@ -1,3 +1,10 @@
+## [0.14.2](https://github.com/tmonk/stata-workbench/compare/v0.14.1...v0.14.2) (2026-01-20)
+
+
+### Bug Fixes
+
+* update Sentry release handling to use environment variable ([c9127b0](https://github.com/tmonk/stata-workbench/commit/c9127b0981a675a38aa0d885064b28696657fc98))
+
 ## [0.14.1](https://github.com/tmonk/stata-workbench/compare/v0.14.0...v0.14.1) (2026-01-20)
 
 
