@@ -60,7 +60,7 @@ function resolveTransportConfig() {
   const pkgSpec = process.env.MCP_STATA_PACKAGE_SPEC || 'mcp-stata@latest';
   return {
     command: uvx,
-    args: ['--refresh', '--from', pkgSpec, 'mcp-stata', '--reinstall-package', 'mcp-stata']
+    args: ['--refresh', '--refresh-package', 'mcp-stata', '--from', pkgSpec, 'mcp-stata']
   };
 }
 

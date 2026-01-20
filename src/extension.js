@@ -188,7 +188,7 @@ function getMcpPackageVersion() {
 
     // 2) Fallback to invoking the CLI with --version (some builds may emit this).
     try {
-        const result = spawnSync(cmd, ['--refresh', '--from', MCP_PACKAGE_SPEC, MCP_PACKAGE_NAME, '--reinstall-package', MCP_PACKAGE_NAME, '--version'], {
+        const result = spawnSync(cmd, ['--refresh', '--refresh-package', MCP_PACKAGE_NAME, '--from', MCP_PACKAGE_SPEC, MCP_PACKAGE_NAME, '--version'], {
             encoding: 'utf8',
             timeout: 5000
         });
@@ -208,7 +208,7 @@ function getMcpPackageVersion() {
 
 function refreshMcpPackage() {
     const cmd = uvCommand || 'uvx';
-    const args = ['--refresh', '--from', MCP_PACKAGE_SPEC, MCP_PACKAGE_NAME, '--reinstall-package', MCP_PACKAGE_NAME, '--version'];
+    const args = ['--refresh', '--refresh-package', MCP_PACKAGE_NAME, '--from', MCP_PACKAGE_SPEC, MCP_PACKAGE_NAME, '--version'];
     try {
         const result = spawnSync(cmd, args, { encoding: 'utf8', timeout: 10000 });
         const stdout = result?.stdout?.toString?.().trim() || '';
@@ -220,7 +220,7 @@ function refreshMcpPackage() {
                 mcpPackageVersion = text;
             }
             if (outputChannel) {
-                outputChannel.appendLine(`Ensured latest mcp-stata via uvx --refresh --reinstall-package mcp-stata (${text || 'version not reported'})`);
+                outputChannel.appendLine(`Ensured latest mcp-stata via uvx --refresh --refresh-package mcp-stata (${text || 'version not reported'})`);
             }
             return mcpPackageVersion;
         }
@@ -228,7 +228,7 @@ function refreshMcpPackage() {
         if (outputChannel) {
             outputChannel.appendLine(`Failed to refresh mcp-stata (exit ${result.status}): ${text}`);
             outputChannel.appendLine('If you are behind a proxy or corporate network, set HTTPS_PROXY/HTTP_PROXY and retry.');
-            outputChannel.appendLine('You can also run: uvx --refresh --from mcp-stata@latest mcp-stata --reinstall-package mcp-stata --version');
+            outputChannel.appendLine('You can also run: uvx --refresh --refresh-package mcp-stata --from mcp-stata@latest mcp-stata --version');
             revealOutput();
         }
     } catch (err) {
@@ -427,7 +427,7 @@ function writeMcpConfig(target) {
         const shouldWriteVscode = !!writeVscode;
 
         const resolvedCommand = uvCommand || 'uvx';
-        const expectedArgs = ['--refresh', '--from', MCP_PACKAGE_SPEC, MCP_PACKAGE_NAME, '--reinstall-package', MCP_PACKAGE_NAME];
+        const expectedArgs = ['--refresh', '--refresh-package', MCP_PACKAGE_NAME, '--from', MCP_PACKAGE_SPEC, MCP_PACKAGE_NAME];
 
         const existingCursor = json.mcpServers?.[MCP_SERVER_ID];
         const existingVscode = json.servers?.[MCP_SERVER_ID];

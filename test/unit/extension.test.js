@@ -174,9 +174,9 @@ describe('extension unit tests', () => {
             const [cmd, args] = spawnSync.mock.calls[0];
             expect(cmd).toEqual('uvx');
             expect(args).toContain('--refresh');
+            expect(args).toContain('--refresh-package');
             expect(args).toContain('--from');
             expect(args).toContain('mcp-stata@latest');
-            expect(args).toContain('--reinstall-package');
         });
 
         it('returns null when uvx fails', () => {
@@ -230,7 +230,7 @@ describe('extension unit tests', () => {
             expect(fs.writeFileSync).toHaveBeenCalled();
             const updated = JSON.parse(fs.writeFileSync.mock.calls[0][1]);
             const serverEntry = updated.servers.mcp_stata;
-            expect(serverEntry.args).toEqual(['--refresh', '--from', 'mcp-stata@latest', 'mcp-stata', '--reinstall-package', 'mcp-stata']);
+            expect(serverEntry.args).toEqual(['--refresh', '--refresh-package', 'mcp-stata', '--from', 'mcp-stata@latest', 'mcp-stata']);
             expect(serverEntry.env).toEqual({ STATA_LICENSE: 'abc', STATA_HOME: '/opt/stata' });
             expect(serverEntry.note).toEqual('keep-me');
             expect(updated.servers.other_server).toEqual({
@@ -290,7 +290,7 @@ describe('extension unit tests', () => {
             expect(fs.writeFileSync).toHaveBeenCalled();
             const updated = JSON.parse(fs.writeFileSync.mock.calls[0][1]);
             const cursorEntry = updated.mcpServers.mcp_stata;
-            expect(cursorEntry.args).toEqual(['--refresh', '--from', 'mcp-stata@latest', 'mcp-stata', '--reinstall-package', 'mcp-stata']);
+            expect(cursorEntry.args).toEqual(['--refresh', '--refresh-package', 'mcp-stata', '--from', 'mcp-stata@latest', 'mcp-stata']);
             expect(cursorEntry.env).toEqual({ STATA_HOME: '/opt/stata', STATA_LICENSE: 'abc' });
             expect(cursorEntry.retry).toEqual(3);
             expect(updated.mcpServers.other_cursor).toEqual({
@@ -331,13 +331,13 @@ describe('extension unit tests', () => {
             const updated = JSON.parse(fs.writeFileSync.mock.calls[0][1]);
             const serverEntry = updated.servers.mcp_stata;
             
-            // Should now have the full expanded argument list including --reinstall-package
+            // Should now have the full expanded argument list including --refresh-package
             expect(serverEntry.args).toEqual([
                 '--refresh', 
+                '--refresh-package', 
+                'mcp-stata', 
                 '--from', 
                 'mcp-stata@latest', 
-                'mcp-stata', 
-                '--reinstall-package', 
                 'mcp-stata'
             ]);
             

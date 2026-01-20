@@ -15,7 +15,7 @@ async function main() {
         // Use a temp folder to avoid mutating this repo's .vscode/settings.json.
         workspacePath = fs.mkdtempSync(path.join(os.tmpdir(), 'stata-wb-ws-'));
 
-        // Optional: run via "uvx --refresh --from mcp-stata@latest mcp-stata --reinstall-package mcp-stata" 
+        // Optional: run via "uvx --refresh --refresh-package mcp-stata --from mcp-stata@latest mcp-stata" 
         // against a local mcp-stata repo instead of PyPI.
         // This is intended for integration tests in this mono-workspace.
         if (!process.env.MCP_STATA_PACKAGE_SPEC) {
