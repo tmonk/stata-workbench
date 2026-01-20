@@ -1,3 +1,10 @@
+## [0.15.6](https://github.com/tmonk/stata-workbench/compare/v0.15.5...v0.15.6) (2026-01-20)
+
+
+### Bug Fixes
+
+* enhance release workflow to dynamically find and publish VSIX files ([e1df3c2](https://github.com/tmonk/stata-workbench/commit/e1df3c27813265e03eac105f8461acd1fb9766ca))
+
 ## [0.15.5](https://github.com/tmonk/stata-workbench/compare/v0.15.4...v0.15.5) (2026-01-20)
 
 
