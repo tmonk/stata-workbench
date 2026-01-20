@@ -44,6 +44,13 @@ async function main() {
     throw new Error('[sentry-esbuild-plugin] SENTRY_UPLOAD is true but SENTRY_AUTH_TOKEN is missing.');
   }
 
+  if (production && !sentryUpload) {
+    // If we're doing a local build, ensure we don't accidentally pick up tokens from files
+    if (fs.existsSync(path.join(rootDir, '.env.sentry-build-plugin'))) {
+      console.warn('[build] Warning: .env.sentry-build-plugin exists but SENTRY_UPLOAD is false. The file will be ignored for this build.');
+    }
+  }
+
   // Ensure dist exists
   if (!fs.existsSync(distDir)) {
     fs.mkdirSync(distDir, { recursive: true });
