@@ -1,3 +1,10 @@
+## [0.15.1](https://github.com/tmonk/stata-workbench/compare/v0.15.0...v0.15.1) (2026-01-20)
+
+
+### Bug Fixes
+
+* update Sentry release format to include package name and version ([c236f33](https://github.com/tmonk/stata-workbench/commit/c236f33a81ae4becf3e22f6cdffbb6599f403698))
+
 # [0.15.0](https://github.com/tmonk/stata-workbench/compare/v0.14.8...v0.15.0) (2026-01-20)
 
 
