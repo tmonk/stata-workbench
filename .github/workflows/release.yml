@@ -65,9 +65,15 @@ jobs:
       - name: Publish to Open VSX
         if: steps.semantic.outputs.new_release_published == 'true'
         run: |
-          # Use the universal VSIX produced by semantic-release (found in dist/)
-          VSIX_PATH=dist/stata-workbench-${{ steps.semantic.outputs.new_release_version }}.vsix
-          bunx ovsx publish $VSIX_PATH -p ${{ secrets.OVSX_TOKEN }} || true
+          # Find the packaged VSIX (might be in dist/ or root)
+          VSIX_PATH=$(ls dist/*.vsix *.vsix 2>/dev/null | head -n 1)
+          if [ -f "$VSIX_PATH" ]; then
+            echo "Publishing $VSIX_PATH to Open VSX..."
+            bunx ovsx publish "$VSIX_PATH" -p ${{ secrets.OVSX_TOKEN }}
+          else
+            echo "Error: No VSIX file found to publish to Open VSX"
+            exit 1
+          fi
         env:
           OVSX_TOKEN: ${{ secrets.OVSX_TOKEN }}
 

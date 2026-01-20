@@ -145,18 +145,6 @@ async function main() {
       logLevel: 'warning',
       plugins: [
         esbuildProblemMatcherPlugin,
-        enableSentry && sentryEsbuildPlugin({
-          authToken: sentryAuthToken,
-          org: "tdmonk",
-          project: "4510744389550160",
-          telemetry: false,
-          sourcemaps: {
-            assets: ['./dist/**'],
-          },
-          release: {
-            name: release,
-          },
-        }),
       ].filter(Boolean)
     });
   }));
@@ -165,8 +153,10 @@ async function main() {
     await extensionCtx.watch();
     await Promise.all(webviewCtxs.map(ctx => ctx.watch()));
   } else {
-    await extensionCtx.rebuild();
+    // Run webview builds first so their artifacts exist in dist/ 
+    // before the extension build triggers the Sentry upload.
     await Promise.all(webviewCtxs.map(ctx => ctx.rebuild()));
+    await extensionCtx.rebuild();
 
     // Post-build cleanup: if a target is specified, remove non-matching Sentry binaries
     if (buildTarget) {

@@ -19,16 +19,16 @@
             }
         ],
         [
-            "semantic-release-vsce",
-            {
-                "packageVsix": "dist/stata-workbench-${nextRelease.version}.vsix",
-                "publish": false
-            }
+            "semantic-release-vsce"
         ],
         [
             "@semantic-release/github",
             {
                 "assets": [
+                    {
+                        "path": "*.vsix",
+                        "label": "VSIX Extension (Universal)"
+                    },
                     {
                         "path": "dist/*.vsix",
                         "label": "VSIX Extension"
