@@ -10,89 +10,89 @@ const { filterMcpLogs } = require('./log-utils');
  * @returns {{rc: number|null, formattedText: string}}
  */
 function parseSMCL(smclText) {
-    if (!smclText) return { rc: null, formattedText: '' };
-    const lines = smclText.split('\n');
-    let extractedRC = null;
-    let callStack = [];
-    let commandHistory = [];
-    let errorMessages = [];
-    let errorLineIndex = -1;
-    let hasError = false;
+  if (!smclText) return { rc: null, formattedText: '' };
+  const lines = smclText.split('\n');
+  let extractedRC = null;
+  let callStack = [];
+  let commandHistory = [];
+  let errorMessages = [];
+  let errorLineIndex = -1;
+  let hasError = false;
 
-    for (let i = 0; i < lines.length; i++) {
-        const line = lines[i];
-        const trimmedLine = line.trim();
-        if (!trimmedLine) continue;
-        if (!extractedRC) {
-            const searchMatch = line.match(/\{search r\((\d+)\)/i);
-            if (searchMatch) {
-                extractedRC = parseInt(searchMatch[1], 10);
-            } else {
-                const standaloneRC = trimmedLine.match(/^r\((\d+)\);$/);
-                if (standaloneRC) {
-                    extractedRC = parseInt(standaloneRC[1], 10);
-                }
-            }
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const trimmedLine = line.trim();
+    if (!trimmedLine) continue;
+    if (!extractedRC) {
+      const searchMatch = line.match(/\{search r\((\d+)\)/i);
+      if (searchMatch) {
+        extractedRC = parseInt(searchMatch[1], 10);
+      } else {
+        const standaloneRC = trimmedLine.match(/^r\((\d+)\);$/);
+        if (standaloneRC) {
+          extractedRC = parseInt(standaloneRC[1], 10);
         }
-        const errMatch = line.match(/^\{err\}(.+)$/);
-        if (errMatch) {
-            hasError = true;
-            const errorText = errMatch[1].trim().replace(/\{[^}]+\}/g, '');
-            if (errorText) {
-                errorMessages.push(errorText);
-                if (errorLineIndex === -1) errorLineIndex = i;
-            }
-        }
-        const beginMatch = line.match(/begin\s+(\S+)/);
-        if (beginMatch) {
-            const funcName = beginMatch[1];
-            if (errorLineIndex === -1 || i < errorLineIndex) callStack.push(funcName);
-        }
-        const endMatch = line.match(/end\s+(\S+)/);
-        if (endMatch && callStack.length > 0) {
-            if (errorLineIndex === -1 || i < errorLineIndex) {
-                const funcName = endMatch[1];
-                if (callStack[callStack.length - 1] === funcName) callStack.pop();
-            }
-        }
-        if (trimmedLine.startsWith('= ')) {
-            let cmd = trimmedLine.substring(2).trim();
-            cmd = cmd.replace(/^((cap(ture)?|qui(etly)?|noi(sily)?)\s+)+/gi, '').trim();
-            const isUtilityCmd = /^(loc(al)?|if|else|args|return|exit|scalar|matrix|global|tempvar|tempname|tempfile|macro|while|foreach|forvalues|continue|Cleanup|Drop|Clear)\b/i.test(cmd);
-            if (!isUtilityCmd && cmd.length > 0 && (errorLineIndex === -1 || i < errorLineIndex)) {
-                commandHistory.push(cmd);
-                if (commandHistory.length > 3) commandHistory.shift();
-            }
-        } else {
-            const comMatch = line.match(/^\{com\}(.+)$/);
-            if (comMatch) {
-                let cmd = comMatch[1].trim().replace(/\{[^}]+\}/g, '');
-                if (cmd.startsWith('. ')) cmd = cmd.substring(2).trim();
-                cmd = cmd.replace(/^((cap(ture)?|qui(etly)?|noi(sily)?)\s+)+/gi, '').trim();
-                const isUtilityCmd = /^(loc(al)?|if|else|args|\.|\*|while|foreach|forvalues|continue|Cleanup|Drop|Clear)\b/i.test(cmd);
-                if (!isUtilityCmd && cmd.length > 0 && (errorLineIndex === -1 || i < errorLineIndex)) {
-                    commandHistory.push(cmd);
-                    if (commandHistory.length > 3) commandHistory.shift();
-                }
-            }
-        }
+      }
     }
-    if (errorMessages.length === 0) return { rc: extractedRC, formattedText: '', hasError: hasError };
-    let filteredErrors = errorMessages.filter(e => e.length > 0);
-    if (filteredErrors.length > 1) {
-        const hasSpecificError = filteredErrors.some(e => !e.match(/^error \d+$/i));
-        if (hasSpecificError) filteredErrors = filteredErrors.filter(e => !e.match(/^error \d+$/i));
+    const errMatch = line.match(/^\{err\}(.+)$/);
+    if (errMatch) {
+      hasError = true;
+      const errorText = errMatch[1].trim().replace(/\{[^}]+\}/g, '');
+      if (errorText) {
+        errorMessages.push(errorText);
+        if (errorLineIndex === -1) errorLineIndex = i;
+      }
     }
-    const uniqueErrors = [...new Set(filteredErrors)];
-    let parts = [];
-    if (callStack.length > 0) parts.push(`In: ${callStack.join(' → ')}`);
-    if (commandHistory.length > 0) {
-        const cmd = commandHistory[commandHistory.length - 1];
-        const formattedCmd = cmd.replace(/,\s+/g, ',\n    ').replace(/\s+(if|in|using)\s+/gi, '\n    $1 ').trim();
-        parts.push(`\nCommand:\n  ${formattedCmd}`);
+    const beginMatch = line.match(/begin\s+(\S+)/);
+    if (beginMatch) {
+      const funcName = beginMatch[1];
+      if (errorLineIndex === -1 || i < errorLineIndex) callStack.push(funcName);
     }
-    if (uniqueErrors.length > 0) parts.push(`\nError: ${uniqueErrors.join('\n       ')}`);
-    return { rc: extractedRC, formattedText: parts.join('\n').trim(), hasError: hasError };
+    const endMatch = line.match(/end\s+(\S+)/);
+    if (endMatch && callStack.length > 0) {
+      if (errorLineIndex === -1 || i < errorLineIndex) {
+        const funcName = endMatch[1];
+        if (callStack[callStack.length - 1] === funcName) callStack.pop();
+      }
+    }
+    if (trimmedLine.startsWith('= ')) {
+      let cmd = trimmedLine.substring(2).trim();
+      cmd = cmd.replace(/^((cap(ture)?|qui(etly)?|noi(sily)?)\s+)+/gi, '').trim();
+      const isUtilityCmd = /^(loc(al)?|if|else|args|return|exit|scalar|matrix|global|tempvar|tempname|tempfile|macro|while|foreach|forvalues|continue|Cleanup|Drop|Clear)\b/i.test(cmd);
+      if (!isUtilityCmd && cmd.length > 0 && (errorLineIndex === -1 || i < errorLineIndex)) {
+        commandHistory.push(cmd);
+        if (commandHistory.length > 3) commandHistory.shift();
+      }
+    } else {
+      const comMatch = line.match(/^\{com\}(.+)$/);
+      if (comMatch) {
+        let cmd = comMatch[1].trim().replace(/\{[^}]+\}/g, '');
+        if (cmd.startsWith('. ')) cmd = cmd.substring(2).trim();
+        cmd = cmd.replace(/^((cap(ture)?|qui(etly)?|noi(sily)?)\s+)+/gi, '').trim();
+        const isUtilityCmd = /^(loc(al)?|if|else|args|\.|\*|while|foreach|forvalues|continue|Cleanup|Drop|Clear)\b/i.test(cmd);
+        if (!isUtilityCmd && cmd.length > 0 && (errorLineIndex === -1 || i < errorLineIndex)) {
+          commandHistory.push(cmd);
+          if (commandHistory.length > 3) commandHistory.shift();
+        }
+      }
+    }
+  }
+  if (errorMessages.length === 0) return { rc: extractedRC, formattedText: '', hasError: hasError };
+  let filteredErrors = errorMessages.filter(e => e.length > 0);
+  if (filteredErrors.length > 1) {
+    const hasSpecificError = filteredErrors.some(e => !e.match(/^error \d+$/i));
+    if (hasSpecificError) filteredErrors = filteredErrors.filter(e => !e.match(/^error \d+$/i));
+  }
+  const uniqueErrors = [...new Set(filteredErrors)];
+  let parts = [];
+  if (callStack.length > 0) parts.push(`In: ${callStack.join(' → ')}`);
+  if (commandHistory.length > 0) {
+    const cmd = commandHistory[commandHistory.length - 1];
+    const formattedCmd = cmd.replace(/,\s+/g, ',\n    ').replace(/\s+(if|in|using)\s+/gi, '\n    $1 ').trim();
+    parts.push(`\nCommand:\n  ${formattedCmd}`);
+  }
+  if (uniqueErrors.length > 0) parts.push(`\nError: ${uniqueErrors.join('\n       ')}`);
+  return { rc: extractedRC, formattedText: parts.join('\n').trim(), hasError: hasError };
 }
 
 class TerminalPanel {
@@ -315,7 +315,7 @@ class TerminalPanel {
         runId,
         onLog: (text) => {
           if (!text) return;
-        TerminalPanel._postMessage({ type: 'runLogAppend', runId, text: formatStreamChunk(text), streamFormat: 'plain' });
+          TerminalPanel._postMessage({ type: 'runLogAppend', runId, text: formatStreamChunk(text), streamFormat: 'plain' });
         },
         onProgress: (progress, total, message) => {
           TerminalPanel._postMessage({ type: 'runProgress', runId, progress, total, message });
@@ -385,7 +385,7 @@ class TerminalPanel {
         success,
         hasError: parsed.hasError,
         durationMs: result?.durationMs ?? null,
-        stdout: result?.stdout || result?.contentText || '',
+        stdout: success ? (result?.stdout || result?.contentText || '') : '',
         // fullStdout: always available for the 'Log' tab.
         fullStdout: (result?.stdout || result?.contentText || ''),
         stderr: success ? '' : finalStderr,
@@ -543,11 +543,11 @@ class TerminalPanel {
 
   static notifyTaskDone(runId, logPath, logSize, stdout, rc) {
     if (!TerminalPanel.currentPanel || !runId) return;
-    TerminalPanel._postMessage({ 
-      type: 'taskDone', 
-      runId, 
-      logPath: logPath || null, 
-      logSize: logSize ?? null, 
+    TerminalPanel._postMessage({
+      type: 'taskDone',
+      runId,
+      logPath: logPath || null,
+      logSize: logSize ?? null,
       stdout: stdout || null,
       rc: rc ?? null
     });
