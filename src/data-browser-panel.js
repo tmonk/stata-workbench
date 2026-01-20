@@ -12,6 +12,12 @@ class DataBrowserPanel {
         DataBrowserPanel._log = logger;
     }
 
+    static refresh() {
+        if (DataBrowserPanel.currentPanel) {
+            DataBrowserPanel.currentPanel._fetchCredentials();
+        }
+    }
+
     /**
      * @param {vscode.Uri} extensionUri
      */

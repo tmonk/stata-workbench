@@ -1,4 +1,5 @@
 const path = require('path');
+const fs = require('fs');
 const { runCLI } = require('jest');
 
 async function run() {
@@ -10,19 +11,11 @@ async function run() {
     global.realVscode = require('vscode');
     console.log('[INTEGRATION] MCP_STATA_INTEGRATION:', process.env.MCP_STATA_INTEGRATION);
 
-    // Use JEST_TEST_MATCH if provided, otherwise run most integration tests (excluding benchmarks by default unless requested)
-    const testMatch = process.env.JEST_TEST_MATCH
-        ? [process.env.JEST_TEST_MATCH]
-        : ['<rootDir>/test/integration/suite/*.test.js', '!**/benchmark.test.js'];
-
     try {
         const result = await runCLI(
             {
                 config: configPath,
-                testMatch,
                 runInBand: true, // Required for VS Code integration tests
-                testEnvironment: 'node',
-                setupFilesAfterEnv: [],
             },
             [projectRootPath]
         );

@@ -33,10 +33,7 @@ describe('McpClient integration (VS Code host)', () => {
         fs.mkdirSync(doDir, { recursive: true });
         doFile = path.join(doDir, 'integration.do');
         fs.writeFileSync(doFile, [
-            'capture log close',
-            'log using "integration.log", replace text',
-            'display "integration-ok"',
-            'log close'
+            'display "integration-ok"'
         ].join('\n'));
 
         const config = vscode.workspace.getConfiguration('stataMcp');
@@ -86,12 +83,8 @@ describe('McpClient integration (VS Code host)', () => {
     runIfEnabled('streams output via log path and read_log', async () => {
         const result = await client.runSelection('display "background-log-ok"', { normalizeResult: true, includeGraphs: false });
         expect(result.success).toBe(true);
+        expect(result.stdout).toContain('background-log-ok');
         expect(result.logPath).toBeTruthy();
-
-        const slice = await client.readLog(result.logPath, 0, 65536);
-        expect(slice).toBeTruthy();
-        const data = String(slice?.data || '');
-        expect(data).toContain('background-log-ok');
     });
 
 

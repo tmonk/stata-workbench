@@ -505,7 +505,7 @@ class TerminalPanel {
       }
     }
 
-    if (finalStderr && parsed.formattedText) {
+    if (parsed.formattedText) {
       finalStderr = parsed.formattedText;
     }
 

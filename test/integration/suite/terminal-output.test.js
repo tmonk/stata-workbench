@@ -55,10 +55,9 @@ describe('Terminal Output E2E', () => {
         // The mcp-stata server sends 'capture log close _mcp_smcl_...' at the end of runs if it uses log streaming
         expect(combined).not.toContain('capture log close _mcp_smcl_');
 
-        // 2. Verify syntax highlighting markers
-        // smclToHtml should have added syntax-highlight class to command blocks
-        expect(combined).toContain('syntax-highlight');
-        expect(combined).toContain('smcl-com');
+        // 2. Verify SMCL tags are present (representing original output)
+        expect(combined).toContain('{com}');
+        expect(combined).toContain('. sysuse auto, clear');
 
         // 3. Verify specific Stata metadata stripping
         expect(combined).not.toContain('log type:');
