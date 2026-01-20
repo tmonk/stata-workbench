@@ -1,3 +1,4 @@
+const { describe, it, beforeAll, beforeEach, expect, jest } = require('bun:test');
 const fs = require('fs');
 const path = require('path');
 const { JSDOM } = require('jsdom');

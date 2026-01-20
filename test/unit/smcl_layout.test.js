@@ -1,3 +1,4 @@
+const { describe, it } = require('bun:test');
 const assert = require('assert');
 const { JSDOM } = require('jsdom');
 

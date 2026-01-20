@@ -1,23 +1,43 @@
-const vscode = require('vscode');
-jest.mock('vscode', () => require('../mocks/vscode'), { virtual: true });
+const { describe, it, beforeAll, afterAll, expect } = require('bun:test');
 
-jest.mock('fs');
-
-jest.mock('../../src/artifact-utils', () => ({
-    openArtifact: () => { },
-    revealArtifact: () => { },
-    copyToClipboard: () => { },
-    resolveArtifactUri: () => { }
-}));
+const mockCjsModule = (modulePath, factory) => {
+    const resolved = require.resolve(modulePath);
+    const existing = require.cache[resolved];
+    require.cache[resolved] = {
+        id: resolved,
+        filename: resolved,
+        loaded: true,
+        exports: factory()
+    };
+    return () => {
+        if (existing) {
+            require.cache[resolved] = existing;
+        } else {
+            delete require.cache[resolved];
+        }
+    };
+};
 
 describe('Panels', () => {
     let terminalPanelModule;
 
     let toEntry, normalizeArtifacts, parseSMCL;
 
+    let restoreArtifactUtils;
+
     beforeAll(() => {
+        restoreArtifactUtils = mockCjsModule('../../src/artifact-utils', () => ({
+            openArtifact: () => { },
+            revealArtifact: () => { },
+            copyToClipboard: () => { },
+            resolveArtifactUri: () => { }
+        }));
         terminalPanelModule = require('../../src/terminal-panel');
         ({ toEntry, normalizeArtifacts, parseSMCL } = terminalPanelModule);
+    });
+
+    afterAll(() => {
+        if (restoreArtifactUtils) restoreArtifactUtils();
     });
 
     describe('TerminalPanel helpers', () => {

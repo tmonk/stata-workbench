@@ -1,4 +1,4 @@
-
+const { describe, it } = require('bun:test');
 const assert = require('assert');
 
 describe('Terminal Clearing Reproduction', () => {

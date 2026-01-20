@@ -1,11 +1,11 @@
 ## Development
-- Node.js version: `>=22.14.0`
-- Install dependencies: `npm install`
-- Bundle for development: `npm run compile`
-- Production build: `npm run bundle`
-- Watch mode: `npm run watch`
-- Unit Tests: `npm test`
-- Integration Tests: `npm run test:integration` (requires `mcp-stata` on PATH, (`$env:MCP_STATA_INTEGRATION="1"; npm run compile; node ./test/integration/runTest.js`)
+- Node.js version: `>=22.14.0` (or Bun v1.2+)
+- Install dependencies: `bun install`
+- Bundle for development: `bun run compile`
+- Production build: `bun run bundle`
+- Watch mode: `bun run watch`
+- Unit Tests: `bun run test`
+- Integration Tests: `bun run test:integration` (requires `mcp-stata` on PATH, (`$env:MCP_STATA_INTEGRATION="1"; bun run compile; node ./test/integration/runTest.js`)
 
 ## Commit Conventions
 We use [Conventional Commits](https://www.conventionalcommits.org/) to automate our release process. This is enforced via `commitlint` and `husky`.
@@ -23,5 +23,5 @@ This project uses `semantic-release` to automate versioning and publishing to th
 - `CHANGELOG.md` is updated automatically.
 
 ## Manual Packaging (Local Debugging)
-- Build VSIX: `npm run package:dist` (outputs to `dist/`).
-- Verify build: `npm run bundle` (production build).
+- Build VSIX: `bun run package:dist` (outputs to `dist/`).
+- Verify build: `bun run bundle` (production build).

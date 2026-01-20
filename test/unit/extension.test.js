@@ -1,29 +1,59 @@
-const { describe, it, beforeEach, afterEach, expect } = require('@jest/globals');
+const { describe, it, beforeEach, afterEach, expect, jest } = require('bun:test');
 const path = require('path');
-jest.mock('vscode', () => require('../mocks/vscode'), { virtual: true });
+
+const resetModules = () => {
+    for (const key of Object.keys(require.cache)) {
+        delete require.cache[key];
+    }
+};
+
+const mockCjsModule = (modulePath, factory) => {
+    const resolved = require.resolve(modulePath);
+    const existing = require.cache[resolved];
+    require.cache[resolved] = {
+        id: resolved,
+        filename: resolved,
+        loaded: true,
+        exports: factory()
+    };
+    return () => {
+        if (existing) {
+            require.cache[resolved] = existing;
+        } else {
+            delete require.cache[resolved];
+        }
+    };
+};
 
 describe('extension unit tests', () => {
     let extension;
     let vscode;
     let fs;
     let spawnSync;
+    let fsOriginals;
+    let cpOriginalSpawnSync;
+    let restoreModuleMocks = [];
 
     const setupMocks = () => {
-        jest.resetModules();
+        resetModules();
 
-        // Mock dependencies using doMock so they are fresh for each re-require of extension
-        const fsMock = {
-            existsSync: jest.fn(),
-            readFileSync: jest.fn(),
-            writeFileSync: jest.fn(),
-            mkdirSync: jest.fn()
+        // Stub builtin modules in-place
+        fs = require('fs');
+        fsOriginals = {
+            existsSync: fs.existsSync,
+            readFileSync: fs.readFileSync,
+            writeFileSync: fs.writeFileSync,
+            mkdirSync: fs.mkdirSync
         };
-        jest.doMock('fs', () => fsMock);
+        fs.existsSync = jest.fn();
+        fs.readFileSync = jest.fn();
+        fs.writeFileSync = jest.fn();
+        fs.mkdirSync = jest.fn();
 
-        const cpMock = {
-            spawnSync: jest.fn().mockReturnValue({ status: 0, stdout: '', stderr: '' })
-        };
-        jest.doMock('child_process', () => cpMock);
+        const cp = require('child_process');
+        cpOriginalSpawnSync = cp.spawnSync;
+        cp.spawnSync = jest.fn().mockReturnValue({ status: 0, stdout: '', stderr: '' });
+        spawnSync = cp.spawnSync;
 
         // Mock internal modules to avoid side effects
         const mcpClientMock = {
@@ -33,11 +63,12 @@ describe('extension unit tests', () => {
             runSelection: jest.fn().mockResolvedValue({}),
             getUiChannel: jest.fn().mockResolvedValue(null)
         };
-        jest.doMock('../../src/mcp-client', () => ({
+        restoreModuleMocks = [];
+        restoreModuleMocks.push(mockCjsModule('../../src/mcp-client', () => ({
             StataMcpClient: jest.fn().mockImplementation(() => mcpClientMock),
             client: mcpClientMock
-        }));
-        jest.doMock('../../src/terminal-panel', () => ({
+        })));
+        restoreModuleMocks.push(mockCjsModule('../../src/terminal-panel', () => ({
             TerminalPanel: {
                 setExtensionUri: jest.fn(),
                 addEntry: jest.fn(),
@@ -49,23 +80,36 @@ describe('extension unit tests', () => {
                 finishStreamingEntry: jest.fn(),
                 failStreamingEntry: jest.fn()
             }
-        }));
-        jest.doMock('../../src/data-browser-panel', () => ({
+        })));
+        restoreModuleMocks.push(mockCjsModule('../../src/data-browser-panel', () => ({
             DataBrowserPanel: { createOrShow: jest.fn(), setLogger: jest.fn(), refresh: jest.fn() }
-        }));
-        jest.doMock('../../src/artifact-utils', () => ({
+        })));
+        restoreModuleMocks.push(mockCjsModule('../../src/artifact-utils', () => ({
             openArtifact: jest.fn()
-        }));
-
-        fs = require('fs');
-        const cp = require('child_process');
-        spawnSync = cp.spawnSync;
+        })));
         vscode = require('vscode');
         extension = require('../../src/extension');
     };
 
     beforeEach(() => {
         setupMocks();
+    });
+
+    afterEach(() => {
+        restoreModuleMocks.forEach((restore) => restore());
+        restoreModuleMocks = [];
+        if (fs && fsOriginals) {
+            fs.existsSync = fsOriginals.existsSync;
+            fs.readFileSync = fsOriginals.readFileSync;
+            fs.writeFileSync = fsOriginals.writeFileSync;
+            fs.mkdirSync = fsOriginals.mkdirSync;
+        }
+        if (cpOriginalSpawnSync) {
+            const cp = require('child_process');
+            cp.spawnSync = cpOriginalSpawnSync;
+        }
+        jest.clearAllMocks();
+        resetModules();
     });
 
     describe('output log streaming', () => {
@@ -363,8 +407,7 @@ describe('extension unit tests', () => {
             };
 
             // Override the mocked vscode for this test only
-            const vscodeMock = require('../../test/mocks/vscode');
-            vscodeMock.workspace.getConfiguration.mockReturnValue(configuration);
+            vscode.workspace.getConfiguration.mockReturnValue(configuration);
 
             const globalState = { get: jest.fn().mockReturnValue(false), update: jest.fn().mockResolvedValue() };
             const context = {

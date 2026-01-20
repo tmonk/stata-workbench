@@ -1,15 +1,17 @@
+const { describe, it, beforeEach, afterEach, expect, mock, jest } = require('bun:test');
 
-const { describe, it, beforeEach, expect } = require('@jest/globals');
-
-// Use the centralized mock like other tests
-jest.mock('vscode', () => require('../mocks/vscode'), { virtual: true });
+const resetModules = () => {
+    for (const key of Object.keys(require.cache)) {
+        delete require.cache[key];
+    }
+};
 
 describe('Webview Script Integrity', () => {
     let TerminalPanel;
     let htmlContent = '';
 
     beforeEach(() => {
-        jest.resetModules();
+        resetModules();
         const vscode = require('vscode');
 
         htmlContent = '';
@@ -48,6 +50,12 @@ describe('Webview Script Integrity', () => {
 
         // CRITICAL: Ensure static state is cleared
         TerminalPanel.currentPanel = null;
+    });
+
+    afterEach(() => {
+        mock.restore();
+        jest.clearAllMocks();
+        resetModules();
     });
 
     it('should produce valid script content without literal newlines in strings', () => {

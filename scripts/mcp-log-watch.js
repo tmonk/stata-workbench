@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+#!/usr/bin/env bun
 
 const fs = require('fs');
 const path = require('path');
@@ -16,7 +16,7 @@ try {
     ({ LoggingMessageNotificationSchema } = require('@modelcontextprotocol/sdk/types.js'));
   }
 } catch (err) {
-  console.error('Failed to load MCP SDK. Did you run npm install?');
+  console.error('Failed to load MCP SDK. Did you run bun install?');
   console.error(err);
   process.exit(1);
 }

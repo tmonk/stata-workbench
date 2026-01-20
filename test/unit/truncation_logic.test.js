@@ -1,3 +1,4 @@
+const { describe, it, expect } = require('bun:test');
 
 describe('Truncation Logic Regression Test', () => {
 

@@ -1,9 +1,12 @@
-const { describe, it, beforeEach, expect } = require('@jest/globals');
+const { describe, it, beforeEach, afterEach, expect, jest } = require('bun:test');
 const sinon = require('sinon');
 const path = require('path');
 const proxyquire = require('proxyquire');
 const vscodeMock = require('../mocks/vscode');
-jest.mock('vscode', () => require('../mocks/vscode'), { virtual: true });
+
+afterEach(() => {
+    jest.clearAllMocks();
+});
 
 describe('mcp-client normalizeResponse', () => {
     it('keeps longest stdout including logText tail', () => {

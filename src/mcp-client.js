@@ -441,7 +441,7 @@ class StataMcpClient {
         if (!Client || !StdioClientTransport) {
             this._statusEmitter.emit('status', 'error');
             const detail = sdkLoadError?.message ? ` (${sdkLoadError.message})` : '';
-            throw new Error(`MCP SDK not found. Please run \`npm install\` to fetch @modelcontextprotocol/sdk.${detail}`);
+            throw new Error(`MCP SDK not found. Please run \`bun install\` to fetch @modelcontextprotocol/sdk.${detail}`);
         }
 
         const config = vscode.workspace.getConfiguration('stataMcp');

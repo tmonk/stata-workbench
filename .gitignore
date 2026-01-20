@@ -10,3 +10,6 @@ test/integration/fixture/
 .gemini/
 img/screenshot.psd
 img/screenshot-data.psd
+test-results*.txt
+test_output.log
+original_extension.test.js.tmp
