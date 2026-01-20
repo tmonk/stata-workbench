@@ -1,12 +1,15 @@
-// Import with `import * as Sentry from "@sentry/node"` if you are using ESM
-const Sentry = require("@sentry/node");
-const pkg = require("../package.json");
 const path = require("path");
 
 // Set the binary directory for native modules to the current directory (dist/)
 // This allows the Sentry profiler to find its platform-specific .node files
 // when running from a bundled VS Code extension.
+// IMPORTANT: This must be set BEFORE any @sentry imports, as some Sentry 
+// modules might trigger the profiler's top-level loading logic.
 process.env.SENTRY_PROFILER_BINARY_DIR = __dirname;
+
+// Import with `require` for CommonJS compatibility
+const Sentry = require("@sentry/node");
+const pkg = require("../package.json");
 
 const isBun = !!process.versions.bun;
 let nodeProfilingIntegration;
@@ -61,6 +64,10 @@ Sentry.init({
             }
             // Ignore SMCL error markers which indicate Stata output slipped into an error message
             if (msg.includes('{err}') || msg.includes('stata error:')) {
+                return null;
+            }
+            // Ignore VS Code "Canceled" errors and internal disposal tracking warnings
+            if (msg === 'canceled' || msg.includes('canceled') || msg.includes('leaking disposables')) {
                 return null;
             }
         }

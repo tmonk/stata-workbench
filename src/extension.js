@@ -1,3 +1,5 @@
+// Instrument Sentry must be first to capture all errors
+// and ensure native modules find their binaries before evaluation.
 require("./instrument.js");
 const Sentry = require("@sentry/node");
 const path = require('path');
