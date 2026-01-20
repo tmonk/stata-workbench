@@ -70,6 +70,14 @@ Sentry.init({
             if (msg === 'canceled' || msg.includes('canceled') || msg.includes('leaking disposables')) {
                 return null;
             }
+            // Ignore internal Cursor/VS Code workbench errors and channel closures
+            if (
+                msg.includes('_chat.') ||
+                msg.includes('channel has been closed') ||
+                msg.includes('command not found')
+            ) {
+                return null;
+            }
         }
         return event;
     },
