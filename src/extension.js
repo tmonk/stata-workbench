@@ -65,6 +65,22 @@ function getUvInstallCommand(platform = process.platform) {
 
 function activate(context) {
     globalContext = context;
+
+    // Use Sentry to track extension lifecycle and environment
+    try {
+        const version = pkg?.version || 'unknown';
+        Sentry.setTag("extension.version", version);
+        Sentry.setTag("vscode.version", vscode.version);
+        Sentry.setTag("os.platform", process.platform);
+        Sentry.setContext("extension", {
+            installSource: context.extensionUri.fsPath.includes('.vscode-insiders') ? 'insiders' : 'stable',
+            mode: context.extensionMode === vscode.ExtensionMode.Development ? 'development' : 
+                  context.extensionMode === vscode.ExtensionMode.Test ? 'test' : 'production'
+        });
+    } catch (_err) {
+        // Telemetry should never crash the extension
+    }
+
     outputChannel = vscode.window.createOutputChannel('Stata Workbench');
     const settings = vscode.workspace.getConfiguration('stataMcp');
     const version = pkg?.version || 'unknown';
@@ -145,6 +161,9 @@ function activate(context) {
         const refreshed = refreshMcpPackage();
         mcpPackageVersion = refreshed || getMcpPackageVersion();
         outputChannel.appendLine(`mcp-stata version: ${mcpPackageVersion}`);
+        try {
+            Sentry.setTag("mcp.version", mcpPackageVersion);
+        } catch (_err) { }
     }
     updateStatusBar(missingCli ? 'missing' : 'idle');
 
@@ -581,8 +600,11 @@ function mergeConfigEntry(existing, expected) {
     return base;
 }
 
-function deactivate() {
+async function deactivate() {
     mcpClient.dispose();
+    try {
+        await Sentry.flush(2000);
+    } catch (_err) { }
 }
 
 function updateStatusBar(status) {

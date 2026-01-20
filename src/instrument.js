@@ -1,5 +1,6 @@
 // Import with `import * as Sentry from "@sentry/node"` if you are using ESM
 const Sentry = require("@sentry/node");
+const pkg = require("../package.json");
 
 const isBun = !!process.versions.bun;
 const { nodeProfilingIntegration } = isBun 
@@ -8,9 +9,14 @@ const { nodeProfilingIntegration } = isBun
 
 Sentry.init({
     dsn: "https://97f5f46047e65ebbf758c0e9e4ffe6c5@o4510744386732032.ingest.de.sentry.io/4510744389550160",
+    release: `stata-workbench@${pkg.version}`,
+    environment: process.env.NODE_ENV || "production",
     integrations: isBun ? [] : [
         nodeProfilingIntegration(),
     ],
+
+    // Release Health / Session Tracking
+    autoSessionTracking: true,
 
     // Send structured logs to Sentry
     enableLogs: true,
@@ -23,6 +29,10 @@ Sentry.init({
     // Setting this option to true will send default PII data to Sentry.
     // For example, automatic IP address collection on events
     sendDefaultPii: true,
+    // Capture stack traces for all messages
+    attachStacktrace: true,
+    // Maximum number of breadcrumbs to keep
+    maxBreadcrumbs: 100,
 
     // Filter out Stata user errors (not system failures)
     beforeSend(event, hint) {
