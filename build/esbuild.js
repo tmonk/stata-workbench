@@ -1,13 +1,15 @@
 const esbuild = require('esbuild');
 const path = require('path');
+const fs = require('fs');
 const { sentryEsbuildPlugin } = require("@sentry/esbuild-plugin");
 const pkg = require('../package.json');
 
 const production = process.argv.includes('--production');
 const watch = process.argv.includes('--watch');
 const rootDir = path.resolve(__dirname, '..');
+const distDir = path.join(rootDir, 'dist');
 const entryFile = path.join(rootDir, 'src', 'extension.js');
-const outFile = path.join(rootDir, 'dist', 'extension.js');
+const outFile = path.join(distDir, 'extension.js');
 
 const release = process.env.SENTRY_RELEASE || `v${pkg.version}`;
 const sentryAuthToken = process.env.SENTRY_AUTH_TOKEN?.trim();
@@ -41,6 +43,26 @@ async function main() {
   if (production && sentryUpload && !sentryAuthToken) {
     throw new Error('[sentry-esbuild-plugin] SENTRY_UPLOAD is true but SENTRY_AUTH_TOKEN is missing.');
   }
+
+  // Ensure dist exists
+  if (!fs.existsSync(distDir)) {
+    fs.mkdirSync(distDir, { recursive: true });
+  }
+
+  // Copy all Sentry profiler binaries to dist/
+  // Esbuild's automatic 'file' loader only catches static requires.
+  // Sentry uses dynamic requires for some ABIs, so we must copy everything.
+  const sentryProfilerDir = path.join(rootDir, 'node_modules', '@sentry-internal', 'node-cpu-profiler', 'lib');
+  if (fs.existsSync(sentryProfilerDir)) {
+    const files = fs.readdirSync(sentryProfilerDir);
+    for (const file of files) {
+      if (file.endsWith('.node')) {
+        fs.copyFileSync(path.join(sentryProfilerDir, file), path.join(distDir, file));
+      }
+    }
+    console.log(`Copied ${files.filter(f => f.endsWith('.node')).length} Sentry profiler binaries to dist/`);
+  }
+
   // Build Extension Host
   const extensionCtx = await esbuild.context({
     entryPoints: [entryFile],

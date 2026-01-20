@@ -7,24 +7,51 @@ const path = require("path");
 // modules might trigger the profiler's top-level loading logic.
 process.env.SENTRY_PROFILER_BINARY_DIR = __dirname;
 
-// Import with `require` for CommonJS compatibility
 const Sentry = require("@sentry/node");
 const pkg = require("../package.json");
+const fs = require("fs");
 
 const isBun = !!process.versions.bun;
-let nodeProfilingIntegration;
+let nodeProfilingIntegration = null;
 let profilingError = null;
 
+// Pre-flight check: see if we have the binary for this platform/abi
+// This prevents "Cannot find module" errors on unsupported environments (like new Electron/Node versions)
+let hasProfilingBinary = false;
+if (!isBun) {
+    try {
+        const abi = process.versions.modules;
+        const arch = process.arch;
+        const platform = process.platform;
+        // Sentry binaries are named: sentry_cpu_profiler-<platform>-<arch>-<stdlib>-<abi>.node
+        // stdlib is only present on Linux (glibc/musl).
+        const files = fs.readdirSync(__dirname);
+        hasProfilingBinary = files.some(f => 
+            f.startsWith('sentry_cpu_profiler-') && 
+            f.includes(platform) && 
+            f.includes(arch) && 
+            f.endsWith(`-${abi}.node`)
+        );
+    } catch (e) {
+        // Ignored
+    }
+}
+
 try {
-    const profiling = isBun 
-        ? { nodeProfilingIntegration: () => ({ name: 'MockProfiling' }) }
-        : require("@sentry/profiling-node");
-    nodeProfilingIntegration = profiling.nodeProfilingIntegration;
+    if (isBun) {
+        nodeProfilingIntegration = () => ({ name: 'MockProfiling' });
+    } else if (hasProfilingBinary) {
+        const profiling = require("@sentry/profiling-node");
+        nodeProfilingIntegration = profiling.nodeProfilingIntegration;
+    } else {
+        // Skip loading if binary is missing to avoid noisy errors
+        // We'll still report it to Sentry once initialized (below)
+        profilingError = new Error(`No Sentry profiling binary found for ABI ${process.versions.modules} (${process.platform}-${process.arch})`);
+    }
 } catch (e) {
     // If native profiling fails to load (e.g. missing .node file), 
     // we still want the rest of Sentry to work so we can report it.
     profilingError = e;
-    console.warn("Sentry profiling integration failed to load:", e);
 }
 
 Sentry.init({
