@@ -1,3 +1,16 @@
+# [0.14.0](https://github.com/tmonk/stata-workbench/compare/v0.13.6...v0.14.0) (2026-01-20)
+
+
+### Bug Fixes
+
+* added bun.lock ([ef05f4a](https://github.com/tmonk/stata-workbench/commit/ef05f4ac7f24ebf975fe2e09e3e25ba0a1024466))
+* enhance Sentry integration for Bun compatibility and improve test mocks ([4aefb71](https://github.com/tmonk/stata-workbench/commit/4aefb716ef39a7cbd639db7c7980ed2c489278d2))
+
+
+### Features
+
+* integrate Sentry for error tracking and profiling ([f2d8392](https://github.com/tmonk/stata-workbench/commit/f2d83926c4ff45089d10ba41bea34175e70694f9))
+
 ## [0.13.6](https://github.com/tmonk/stata-workbench/compare/v0.13.5...v0.13.6) (2026-01-20)
 
 
