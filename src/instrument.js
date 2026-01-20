@@ -3,17 +3,26 @@ const Sentry = require("@sentry/node");
 const pkg = require("../package.json");
 
 const isBun = !!process.versions.bun;
-const { nodeProfilingIntegration } = isBun 
-    ? { nodeProfilingIntegration: () => ({ name: 'MockProfiling' }) }
-    : require("@sentry/profiling-node");
+let nodeProfilingIntegration;
+let profilingError = null;
+
+try {
+    const profiling = isBun 
+        ? { nodeProfilingIntegration: () => ({ name: 'MockProfiling' }) }
+        : require("@sentry/profiling-node");
+    nodeProfilingIntegration = profiling.nodeProfilingIntegration;
+} catch (e) {
+    // If native profiling fails to load (e.g. missing .node file), 
+    // we still want the rest of Sentry to work so we can report it.
+    profilingError = e;
+    console.warn("Sentry profiling integration failed to load:", e);
+}
 
 Sentry.init({
     dsn: "https://97f5f46047e65ebbf758c0e9e4ffe6c5@o4510744386732032.ingest.de.sentry.io/4510744389550160",
     release: process.env.SENTRY_RELEASE || `v${pkg.version}`,
     environment: process.env.NODE_ENV || "production",
-    integrations: isBun ? [] : [
-        nodeProfilingIntegration(),
-    ],
+    integrations: isBun ? [] : (nodeProfilingIntegration ? [nodeProfilingIntegration()] : []),
 
     // Release Health / Session Tracking
     autoSessionTracking: true,
@@ -52,3 +61,9 @@ Sentry.init({
         return event;
     },
 });
+
+if (profilingError) {
+    Sentry.captureException(profilingError, {
+        tags: { type: "initialization_failure", component: "profiling-node" }
+    });
+}

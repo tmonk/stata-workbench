@@ -7,6 +7,8 @@ tests/**
 test/**
 node_modules/**
 build/**
+scripts/**
+!scripts/verify-build.js
 src/**
 !src/ui-shared/**
 !src/grammars/**
@@ -14,6 +16,8 @@ src/**
 test_samples/**
 config/**
 .cursor/**
+.cursorrules/**
+.claude/**
 virtualenv/**
 .venv/**
 .python-local/**
@@ -27,9 +31,24 @@ virtualenv/**
 ~/**
 **/*.log
 **/*.map
+# Ignore all dotfiles and dev configs
+.*
+!.vscodeignore
+!.gitignore
+jest.config.js
+commitlint.config.js
+.releaserc.json
+.husky/**
+.pytest_cache/**
+bun.lock
+# Whitelist bundled output
 dist/**
 !dist/extension.js
 !dist/extension.js.map
 !dist/ui-shared/**
+!dist/*.node
+!dist/*.wasm
+# Assets
 img/*.psd
 img/screenshot*
+*.vsix
