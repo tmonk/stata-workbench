@@ -4,40 +4,6 @@ const path = require('path');
 const proxyquire = require('proxyquire');
 const vscodeMock = require('../mocks/vscode');
 
-afterEach(() => {
-    jest.clearAllMocks();
-});
-
-describe('mcp-client normalizeResponse', () => {
-    it('keeps longest stdout including logText tail', () => {
-        const { StataMcpClient } = require('../../src/mcp-client');
-        const client = new StataMcpClient();
-
-        const meta = { logText: 'live stream tail', command: 'do foo' };
-        const response = { stdout: 'short', rc: 1 };
-        const normalized = client._normalizeResponse(response, meta);
-
-        expect(normalized.stdout).toEqual('live stream tail');
-    });
-
-    it('falls back to log tail for stderr on non-zero rc', () => {
-        const { StataMcpClient } = proxyquire('../../src/mcp-client', {
-            vscode: { workspace: { getConfiguration: () => ({ get: () => 0 }) } },
-            fs: {},
-            path: require('path'),
-            os: require('os')
-        });
-        const client = new StataMcpClient();
-
-        const meta = { logText: '... type mismatch\nr(109);\n', command: 'do foo' };
-        const response = { rc: 109 };
-        const normalized = client._normalizeResponse(response, meta);
-
-        expect(normalized.stderr).toContain('type mismatch');
-        expect(normalized.stderr).toContain('r(109)');
-        expect(normalized.success).toEqual(false);
-    });
-});
 // Mock MCP SDK
 const ClientMock = class {
     constructor() {
@@ -67,6 +33,35 @@ const { StataMcpClient: McpClient } = proxyquire.noCallThru().load('../../src/mc
             kill: sinon.stub()
         })
     }
+});
+
+afterEach(() => {
+        const config = vscodeMock.workspace.getConfiguration();
+        if (config.get.restore) config.get.restore();
+});
+
+describe('mcp-client normalizeResponse', () => {
+    it('keeps longest stdout including logText tail', () => {
+        const client = new McpClient();
+
+        const meta = { logText: 'live stream tail', command: 'do foo' };
+        const response = { stdout: 'short', rc: 1 };
+        const normalized = client._normalizeResponse(response, meta);
+
+        expect(normalized.stdout).toEqual('live stream tail');
+    });
+
+    it('falls back to log tail for stderr on non-zero rc', () => {
+        const client = new McpClient();
+
+        const meta = { logText: '... type mismatch\nr(109);\n', command: 'do foo' };
+        const response = { rc: 109 };
+        const normalized = client._normalizeResponse(response, meta);
+
+        expect(normalized.stderr).toContain('type mismatch');
+        expect(normalized.stderr).toContain('r(109)');
+        expect(normalized.success).toEqual(false);
+    });
 });
 
 describe('McpClient', () => {
