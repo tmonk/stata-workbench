@@ -1,3 +1,10 @@
+## [0.14.7](https://github.com/tmonk/stata-workbench/compare/v0.14.6...v0.14.7) (2026-01-20)
+
+
+### Bug Fixes
+
+* import order for Sentry in extension and instrument files ([60f8b3c](https://github.com/tmonk/stata-workbench/commit/60f8b3cebaa2d0d3f7dd1646abfb5ff0abd4f037))
+
 ## [0.14.6](https://github.com/tmonk/stata-workbench/compare/v0.14.5...v0.14.6) (2026-01-20)
 
 
