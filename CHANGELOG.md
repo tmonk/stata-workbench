@@ -1,3 +1,11 @@
+## [0.13.6](https://github.com/tmonk/stata-workbench/compare/v0.13.5...v0.13.6) (2026-01-20)
+
+
+### Bug Fixes
+
+* gate stdout on success ([ea205ef](https://github.com/tmonk/stata-workbench/commit/ea205efb857f2cbfdd71e061b3aa74f2742f7111))
+* implement dynamic versioning for mcp-stata with PyPI integration and add tests ([643a45e](https://github.com/tmonk/stata-workbench/commit/643a45e5f91a5113c6c4ac7e4aa115479846f131))
+
 ## [0.13.5](https://github.com/tmonk/stata-workbench/compare/v0.13.4...v0.13.5) (2026-01-20)
 
 
