@@ -1,3 +1,10 @@
+## [0.14.1](https://github.com/tmonk/stata-workbench/compare/v0.14.0...v0.14.1) (2026-01-20)
+
+
+### Bug Fixes
+
+* update Sentry integration ([0c94da9](https://github.com/tmonk/stata-workbench/commit/0c94da92b756b699dc050915c082c465f909b6c6))
+
 # [0.14.0](https://github.com/tmonk/stata-workbench/compare/v0.13.6...v0.14.0) (2026-01-20)
 
 
