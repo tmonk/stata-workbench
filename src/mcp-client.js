@@ -535,6 +535,10 @@ class StataMcpClient {
             if (check.error && check.error.code === 'ENOENT') {
                 throw new Error(`Command not found: ${finalCommand}. Ensure 'uv' (which provides 'uvx') is installed and on your PATH.`);
             }
+            // On Windows with shell:true, the process might start but the command fails
+            if (process.platform === 'win32' && check.status !== 0 && (check.stderr || '').includes('is not recognized')) {
+                throw new Error(`Command not found: ${finalCommand}. Ensure 'uv' (which provides 'uvx') is installed and on your PATH.`);
+            }
         } catch (err) {
             if (err.message.includes('Command not found')) throw err;
             // Ignore other pre-flight errors to let the transport try anyway.

@@ -1315,7 +1315,7 @@ async function withStataProgress(title, task, sample) {
                 return result;
             } catch (error) {
                 const detail = error?.message || String(error);
-                const isMissingCli = detail.includes('uvx') || detail.includes('ENOENT') || detail.includes('not found');
+                const isMissingCli = detail.includes('uvx') || detail.includes('ENOENT') || detail.includes('not found') || detail.includes('not recognized');
 
                 if (isMissingCli) {
                     vscode.window.showErrorMessage(
