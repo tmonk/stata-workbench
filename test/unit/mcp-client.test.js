@@ -16,8 +16,8 @@ const StdioClientTransportMock = class {
     constructor() { }
 };
 
-// Load McpClient with mocks
-const { StataMcpClient: McpClient } = proxyquire.noCallThru().load('../../src/mcp-client', {
+// Load McpClient with mocks (force fresh module instance per file)
+const { StataMcpClient: McpClient } = proxyquire.noCallThru().noPreserveCache().load('../../src/mcp-client', {
     'vscode': vscodeMock,
     'fs': {
         existsSync: sinon.stub().returns(true),
@@ -33,11 +33,6 @@ const { StataMcpClient: McpClient } = proxyquire.noCallThru().load('../../src/mc
             kill: sinon.stub()
         })
     }
-});
-
-afterEach(() => {
-        const config = vscodeMock.workspace.getConfiguration();
-        if (config.get.restore) config.get.restore();
 });
 
 describe('mcp-client normalizeResponse', () => {
