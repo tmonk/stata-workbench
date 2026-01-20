@@ -588,7 +588,6 @@ class StataMcpClient {
                             }
                             run._tailCancelled = true;
                             run._fastDrain = true;
-                            run._skipDrain = true;
                             if (typeof run._taskDoneResolve === 'function') {
                                 run._taskDoneResolve(parsed);
                             }
@@ -956,10 +955,12 @@ class StataMcpClient {
     async _readLogSlice(client, path, offset, maxBytes) {
         try {
             const resp = await this._callTool(client, 'read_log', { path, offset, max_bytes: maxBytes });
-            const text = this._extractText(resp);
-            const parsed = this._tryParseJson(text);
-            if (!parsed || typeof parsed !== 'object') return null;
-            return parsed;
+            const parsed = this._parseToolJson(resp);
+            if (parsed && typeof parsed === 'object' && (parsed.data !== undefined || parsed.next_offset !== undefined)) {
+                 return parsed;
+            }
+            this._log(`[mcp-stata] read_log returned unexpected format or failed to parse. resp type: ${typeof resp}`);
+            return null;
         } catch (err) {
             this._log(`[mcp-stata] read_log failed: ${err?.message || err}`);
             return null;
@@ -1004,6 +1005,10 @@ class StataMcpClient {
     _parseToolJson(response) {
         if (!response) return null;
         if (typeof response === 'object' && !Array.isArray(response)) {
+            if (Array.isArray(response.content)) {
+                const text = this._extractText(response);
+                return this._tryParseJson(text);
+            }
             return response;
         }
         const text = this._extractText(response);
@@ -1033,7 +1038,6 @@ class StataMcpClient {
         if (!taskId) return kickoff;
         const taskDone = await this._awaitTaskDone(runState, taskId, cts?.token);
         runState._fastDrain = true;
-        runState._skipDrain = true;
         if (runState?._tailPromise) {
             runState._tailCancelled = true;
         }
@@ -1253,6 +1257,7 @@ class StataMcpClient {
             filePath: meta.filePath,
             contentText: safeContentText || parsed.stdout || '',
             logPath: meta.logPath || parsed.log_path || payload.log_path || payload?.error?.log_path || parsed?.error?.log_path || null,
+            logSize: parsed.log_size || payload.log_size || parsed.logSize || payload.logSize || null,
             raw: response
         };
 

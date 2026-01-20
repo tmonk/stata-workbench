@@ -102,7 +102,36 @@ function activate(context) {
     context.subscriptions.push(...subscriptions, statusBarItem, outputChannel);
     globalExtensionUri = context.extensionUri;
     TerminalPanel.setExtensionUri(context.extensionUri);
-    TerminalPanel.setLogProvider((path, offset, maxBytes) => mcpClient.readLog(path, offset, maxBytes));
+    TerminalPanel.setLogProvider(async (logPath, offset, maxBytes) => {
+        try {
+            if (logPath && fs.existsSync(logPath)) {
+                const stats = fs.statSync(logPath);
+                const size = stats.size;
+                const effectiveOffset = Math.min(offset, size);
+                const bytesToRead = Math.min(maxBytes, size - effectiveOffset);
+
+                if (bytesToRead <= 0) {
+                    return { data: '', next_offset: effectiveOffset };
+                }
+
+                const fd = fs.openSync(logPath, 'r');
+                try {
+                    const buffer = Buffer.allocUnsafe(bytesToRead);
+                    const bytesRead = fs.readSync(fd, buffer, 0, bytesToRead, effectiveOffset);
+                    const data = buffer.slice(0, bytesRead).toString('utf8');
+                    return {
+                        data,
+                        next_offset: effectiveOffset + bytesRead
+                    };
+                } finally {
+                    fs.closeSync(fd);
+                }
+            }
+        } catch (err) {
+            outputChannel?.appendLine(`[LogProvider] Local read failed for ${logPath}: ${err.message || err}`);
+        }
+        return null;
+    });
     missingCli = !ensureMcpCliAvailable(context);
     if (!missingCli) {
         const autoConfigureMcp = settings.get('autoConfigureMcp', true);
@@ -655,6 +684,13 @@ async function runSelection() {
                 }
             });
             if (runId) {
+                // Enrich result with logSize if it's missing but we can find it
+                if (result.logPath && (result.logSize === undefined || result.logSize === null)) {
+                    try {
+                        const stats = fs.statSync(result.logPath);
+                        result.logSize = stats.size;
+                    } catch (_err) { }
+                }
                 logRunToOutput(result, text);
                 TerminalPanel.finishStreamingEntry(runId, result);
             } else {
@@ -754,6 +790,13 @@ async function runFile() {
                     }
                 });
                 if (runId) {
+                    // Enrich result with logSize if it's missing but we can find it
+                    if (result.logPath && (result.logSize === undefined || result.logSize === null)) {
+                        try {
+                            const stats = fs.statSync(result.logPath);
+                            result.logSize = stats.size;
+                        } catch (_err) { }
+                    }
                     logRunToOutput(result, commandText);
                     TerminalPanel.finishStreamingEntry(runId, result);
                 } else {

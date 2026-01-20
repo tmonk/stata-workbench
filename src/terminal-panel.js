@@ -385,8 +385,7 @@ class TerminalPanel {
         success,
         hasError: parsed.hasError,
         durationMs: result?.durationMs ?? null,
-        // Main stdout: only show if success=true.
-        stdout: success ? (result?.stdout || result?.contentText || '') : '',
+        stdout: result?.stdout || result?.contentText || '',
         // fullStdout: always available for the 'Log' tab.
         fullStdout: (result?.stdout || result?.contentText || ''),
         stderr: success ? '' : finalStderr,
@@ -530,11 +529,9 @@ class TerminalPanel {
       rc: finalRC,
       success,
       durationMs: result?.durationMs ?? null,
-      // Do not ship full stdout on failure; rely on stderr/tail.
       // Apply smclToHtml to the final result
       stdout: success ? (result?.stdout || result?.contentText || '') : '',
-      // fullStdout: OMITTED intentionally if we have a log path to safe memory
-      // The frontend will now use the LogViewer to fetch data from disk.
+      fullStdout: result?.stdout || result?.contentText || '',
       stderr: success ? '' : finalStderr,
       logPath: result?.logPath || null,
       logSize,
@@ -1776,7 +1773,7 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
           return;
       }
 
-      if (msg.type === 'taskDone') {
+      if (msg.type === 'task_done' || msg.type === 'taskDone') {
         const runId = msg.runId;
         const run = runs[runId];
         if (runId) taskDoneRuns.add(runId);
@@ -1989,16 +1986,15 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
             // Use LogViewer only if the file is large. Otherwise, use the backfilled string
             // for a zero-flicker experience.
             if (msg.logSize > LOG_VIEWER_THRESHOLD) {
-                run.viewer = new LogViewer(run.stdoutEl, msg.logPath, msg.logSize, runId);
+              run.viewer = new LogViewer(run.stdoutEl, msg.logPath, msg.logSize, runId, { autoLoadAll: true });
             } else {
                 const finalStdout = window.stataUI.smclToHtml(String(msg.stdout || ''));
                 const currentStdout = run.stdoutEl ? run.stdoutEl.innerHTML : '';
                 const skipReplace = run._taskDoneApplied === true || (currentStdout && Math.abs(currentStdout.length - finalStdout.length) < 20);
-                if (skipReplace) {
-                    if (autoScrollPinned) scrollToBottomSmooth();
-                    return;
+                
+                if (!skipReplace && finalStdout) {
+                    run.stdoutEl.innerHTML = finalStdout;
                 }
-                run.stdoutEl.innerHTML = finalStdout;
             }
             run.stdoutEl.style.display = 'block';
         } else if (success) {
@@ -2014,13 +2010,18 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
                  }
                  run.stdoutEl.style.display = 'block';
              }
+        } else {
+            // FAILURE: Automatic hiding of stdout 
+            if (run.stdoutEl) {
+                run.stdoutEl.style.display = 'none';
+            }
         }
         
         if (run.logEl) {
              if (useBufferedLog) {
                  if (!success) {
                     run.logEl.innerHTML = '';
-                    run.viewer = new LogViewer(run.logEl, msg.logPath, msg.logSize, runId);
+                    run.viewer = new LogViewer(run.logEl, msg.logPath, msg.logSize, runId, { autoLoadAll: true });
                 } else {
                      // On success, we prioritize the Result pane.
                      run.logEl.innerHTML = '<div class="text-muted">Log viewed in Result pane</div>';
@@ -2057,11 +2058,6 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
             const fallback = msg.rc != null ? ('Run failed (RC ' + msg.rc + ')') : 'Run failed';
             run.stderrEl.style.display = 'block';
             run.stderrEl.innerHTML = fallback;
-        }
-
-        // If the run failed, prioritize showing the error and hide the bulky stdout content.
-        if (!success && run.stdoutEl) {
-            run.stdoutEl.style.display = 'none';
         }
 
         if (run.progressWrap) {
@@ -2500,22 +2496,28 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
     }
 
     class LogViewer {
-        constructor(container, logPath, logSize, runId) {
+      constructor(container, logPath, logSize, runId, options = {}) {
             this.container = container;
             this.logPath = logPath;
             this.logSize = logSize || 0;
             this.runId = runId;
-            this.offset = 0; 
-            this.maxBytes = 50000;
+        this.offset = 0; 
+        const defaultMax = Number.isFinite(options.maxBytes) ? options.maxBytes : 50000;
+        this.maxBytes = (options.autoLoadAll === true && Number.isFinite(this.logSize) && this.logSize > 0)
+          ? this.logSize
+          : defaultMax;
+        this.autoLoadAll = options.autoLoadAll === true;
             this.isFirstLoad = true;
             this.isLoading = false;
             
-            // Calculate initial offset to show tail
-            if (this.logSize > this.maxBytes) {
-                this.offset = this.logSize -this.maxBytes;
-            } else {
-                this.offset = 0;
-            }
+        // Calculate initial offset to show tail unless auto-loading full log
+        if (this.autoLoadAll) {
+          this.offset = 0;
+        } else if (this.logSize > this.maxBytes) {
+          this.offset = this.logSize -this.maxBytes;
+        } else {
+          this.offset = 0;
+        }
             
             // Do NOT clear the container immediately with "Loading..." to avoid flash.
             // Keeping existing content (streamed output) until the first chunk arrives is smoother.
@@ -2525,7 +2527,7 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
             this.container.classList.add('scrollable-log');
             this.container.addEventListener('scroll', this.onScroll.bind(this));
             
-            console.log('[LogViewer] Initializing. Size:', this.logSize, 'Start Offset:', this.offset);
+            console.log('[LogViewer] Initializing. Size:', this.logSize, 'Start Offset:', this.offset, 'AutoLoadAll:', this.autoLoadAll);
             this.fetchChunk(this.offset);
         }
         
@@ -2565,11 +2567,30 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
              if (this.isFirstLoad) {
                  this.container.innerHTML = '';
                  this.isFirstLoad = false;
+                 
+                  // If we got no data on the first chunk of a non-empty log, something is wrong.
+                  // We'll show a small warning so the user knows why it's blank.
+                  if (!data && this.logSize > 0) {
+                      console.error('[LogViewer] Received empty data for first chunk of non-empty log', {
+                          path: this.logPath,
+                          size: this.logSize,
+                          offset: this.offset
+                      });
+                      const errorDiv = document.createElement('div');
+                      errorDiv.className = 'log-error';
+                      errorDiv.style.padding = '12px';
+                      errorDiv.style.opacity = '0.7';
+                      errorDiv.innerHTML = '<i class="codicon codicon-warning"></i> Log file contains ' + this.logSize + ' bytes but tail read returned no data. Check developer console for details.';
+                      this.container.appendChild(errorDiv);
+                      return;
+                  }
              }
              
+             if (!data && !this.pendingPrepend) return;
+
              const div = document.createElement('div');
              div.className = 'log-chunk';
-             div.innerHTML = window.stataUI.smclToHtml(data);
+             div.innerHTML = window.stataUI.smclToHtml(data || '');
              
              if (this.pendingPrepend) {
                  // Prepend
@@ -2594,6 +2615,12 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
                      // Wait, checking offset against size is tricky with bytes vs chars.
                      // Simple heuristic: If it's the very first render of the tail, scroll to bottom.
                       this.container.scrollTop = this.container.scrollHeight;
+                 }
+
+                 // If configured, keep loading forward until the end of the log.
+                 if (this.autoLoadAll && typeof nextOffset === 'number' && nextOffset > this.offset && nextOffset < this.logSize) {
+                   this.offset = nextOffset;
+                   this.fetchChunk(nextOffset);
                  }
              }
         }

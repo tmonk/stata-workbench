@@ -59,7 +59,7 @@ describe('Panels', () => {
             expect(entry.fullStdout).toContain('hello');
         });
 
-        it('toEntry should hide stdout but keep fullStdout on failure', () => {
+        it('toEntry should hide stdout and keep fullStdout on failure', () => {
             const result = {
                 stdout: '{com}. nosuchcommand\n{err}command nosuchcommand not found',
                 rc: 199,
@@ -71,7 +71,7 @@ describe('Panels', () => {
             expect(entry.success).toBe(false);
             expect(entry.hasError).toBe(true);
             expect(entry.rc).toBe(199);
-            expect(entry.stdout).toEqual(''); // Result view cleared
+            expect(entry.stdout).toBe(''); // Hidden on failure
             expect(entry.fullStdout).toContain('nosuchcommand'); // Log kept
             expect(entry.stderr).toContain('not found');
         });
