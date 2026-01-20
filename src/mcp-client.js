@@ -526,6 +526,20 @@ class StataMcpClient {
         const currentSpec = process.env.MCP_STATA_PACKAGE_SPEC || (this._forceLatestServer ? `${MCP_PACKAGE_NAME}@latest` : resolvedSpec);
 
         const finalCommand = serverConfig.command || uvCommand;
+
+        // Perform a pre-flight check to avoid ENOENT crashes in the transport layer.
+        // On Windows, spawnSync handles .cmd/.exe suffixing when shell is not used if the command is on PATH.
+        try {
+            const { spawnSync } = require('child_process');
+            const check = spawnSync(finalCommand, ['--version'], { encoding: 'utf8', shell: process.platform === 'win32' });
+            if (check.error && check.error.code === 'ENOENT') {
+                throw new Error(`Command not found: ${finalCommand}. Ensure 'uv' (which provides 'uvx') is installed and on your PATH.`);
+            }
+        } catch (err) {
+            if (err.message.includes('Command not found')) throw err;
+            // Ignore other pre-flight errors to let the transport try anyway.
+        }
+
         const finalArgs = serverConfig.args || ['--refresh', '--refresh-package', MCP_PACKAGE_NAME, '--from', currentSpec, MCP_PACKAGE_NAME];
         const configuredEnv = serverConfig.env || {};
 

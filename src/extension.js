@@ -114,7 +114,7 @@ function activate(context) {
         vscode.commands.registerCommand('stata-workbench.runFile', runFile),
         vscode.commands.registerCommand('stata-workbench.testMcpServer', testConnection),
         vscode.commands.registerCommand('stata-workbench.viewData', viewData),
-        vscode.commands.registerCommand('stata-workbench.installMcpCli', promptInstallMcpCli),
+        vscode.commands.registerCommand('stata-workbench.installMcpCli', () => promptInstallMcpCli(globalContext, true)),
         vscode.commands.registerCommand('stata-workbench.cancelRequest', cancelRequest),
         mcpClient.onStatusChanged(updateStatusBar)
     ];
@@ -215,7 +215,9 @@ function ensureMcpCliAvailable(context) {
 }
 
 function getMcpPackageVersion() {
-    const cmd = uvCommand || 'uvx';
+    const cmd = uvCommand;
+    if (!cmd) return 'unknown';
+
     // 1) Try reading the installed package metadata via Python (works even if CLI is quiet).
     try {
         const pyResult = spawnSync(cmd, ['--from', MCP_PACKAGE_SPEC, 'python', '-c', 'import importlib.metadata as im; print(im.version("mcp-stata"))'], {
@@ -259,7 +261,12 @@ function getMcpPackageVersion() {
 }
 
 function refreshMcpPackage() {
-    const cmd = uvCommand || 'uvx';
+    const cmd = uvCommand;
+    if (!cmd) {
+        outputChannel?.appendLine?.('Skipping mcp-stata refresh: uvx not found');
+        return null;
+    }
+
     const args = ['--refresh', '--refresh-package', MCP_PACKAGE_NAME, '--from', MCP_PACKAGE_SPEC, MCP_PACKAGE_NAME, '--version'];
     try {
         const result = spawnSync(cmd, args, { encoding: 'utf8', timeout: 10000 });
@@ -294,12 +301,12 @@ function refreshMcpPackage() {
     return null;
 }
 
-function promptInstallMcpCli(context) {
-    const ctx = context || globalContext;
-    if (!missingCliPrompted) {
+function promptInstallMcpCli(context, force = false) {
+    const ctx = context && typeof context.globalState === 'object' ? context : globalContext;
+    if (!force && !missingCliPrompted) {
         missingCliPrompted = !!ctx?.globalState?.get?.(MISSING_CLI_PROMPT_KEY);
     }
-    if (missingCliPrompted) {
+    if (!force && missingCliPrompted) {
         missingCli = true;
         updateStatusBar('missing');
         return false;
@@ -1308,7 +1315,20 @@ async function withStataProgress(title, task, sample) {
                 return result;
             } catch (error) {
                 const detail = error?.message || String(error);
-                vscode.window.showErrorMessage(`${title} failed: ${detail}${hints ? ` (snippet: ${hints})` : ''}`);
+                const isMissingCli = detail.includes('uvx') || detail.includes('ENOENT') || detail.includes('not found');
+
+                if (isMissingCli) {
+                    vscode.window.showErrorMessage(
+                        `${title} failed: uvx (uv) not found on PATH. Install uv to run mcp-stata.`,
+                        'Install uv'
+                    ).then(choice => {
+                        if (choice === 'Install uv') {
+                            promptInstallMcpCli(globalContext, true);
+                        }
+                    });
+                } else {
+                    vscode.window.showErrorMessage(`${title} failed: ${detail}${hints ? ` (snippet: ${hints})` : ''}`);
+                }
                 showOutput(error?.stack || detail);
                 throw error;
             } finally {
