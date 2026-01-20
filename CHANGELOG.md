@@ -1,3 +1,10 @@
+## [0.13.1](https://github.com/tmonk/stata-workbench/compare/v0.13.0...v0.13.1) (2026-01-20)
+
+
+### Bug Fixes
+
+* Update MCP package management commands to include --reinstall-package option to try and ensure latest version is obtained. ([3b5fec6](https://github.com/tmonk/stata-workbench/commit/3b5fec6276ec7f636f6222cab3420944459c871e))
+
 # [0.13.0](https://github.com/tmonk/stata-workbench/compare/v0.12.1...v0.13.0) (2026-01-19)
 
 
