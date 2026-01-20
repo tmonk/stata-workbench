@@ -1,3 +1,21 @@
+# [0.15.0](https://github.com/tmonk/stata-workbench/compare/v0.14.8...v0.15.0) (2026-01-20)
+
+
+### Bug Fixes
+
+* adjust spacing in SMCL layout to prevent double-spacing in tables ([812229a](https://github.com/tmonk/stata-workbench/commit/812229ab19fd68dc0afbe6e37c0017f6e8b7f7f5))
+* enhance MCP CLI installation prompts and add pre-flight checks for command availability ([e02e828](https://github.com/tmonk/stata-workbench/commit/e02e828c1f5ef43ab048b9818aeb24b34f7e9ab1))
+* error filtering in Sentry integration to ignore non-extension related errors ([0466293](https://github.com/tmonk/stata-workbench/commit/04662936325aca9f9313b038429b6cddb29cc25c))
+* improve error handling for missing CLI commands on Windows ([35d4b2a](https://github.com/tmonk/stata-workbench/commit/35d4b2a39c9685952e2e9f1e59a2a33a1376fd3e))
+* integrate all Sentry profiles ([91c5243](https://github.com/tmonk/stata-workbench/commit/91c52438faff533749c6afe31a29523d8c1ebdad))
+* local builds ([df74dd2](https://github.com/tmonk/stata-workbench/commit/df74dd29858f1838791653f3a1028a995e3c10ec))
+* SMCL layout + tests for complex tables and nested colors ([3ae48c9](https://github.com/tmonk/stata-workbench/commit/3ae48c948732b3adb11f724506ca087525038ee0))
+
+
+### Features
+
+* add advanced rendering support for paragraph settings and highlights ([85d66b2](https://github.com/tmonk/stata-workbench/commit/85d66b220d43df0414a1f740693474c580d97d56))
+
 ## [0.14.8](https://github.com/tmonk/stata-workbench/compare/v0.14.7...v0.14.8) (2026-01-20)
 
 
