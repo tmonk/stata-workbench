@@ -132,6 +132,7 @@ describe('extension unit tests', () => {
             expect(args).toContain('--refresh');
             expect(args).toContain('--from');
             expect(args).toContain('mcp-stata@latest');
+            expect(args).toContain('--reinstall-package');
         });
 
         it('returns null when uvx fails', () => {
@@ -185,7 +186,7 @@ describe('extension unit tests', () => {
             expect(fs.writeFileSync).toHaveBeenCalled();
             const updated = JSON.parse(fs.writeFileSync.mock.calls[0][1]);
             const serverEntry = updated.servers.mcp_stata;
-            expect(serverEntry.args.slice(0, 3)).toEqual(['--refresh', '--from', 'mcp-stata@latest']);
+            expect(serverEntry.args).toEqual(['--refresh', '--from', 'mcp-stata@latest', 'mcp-stata', '--reinstall-package', 'mcp-stata']);
             expect(serverEntry.env).toEqual({ STATA_LICENSE: 'abc', STATA_HOME: '/opt/stata' });
             expect(serverEntry.note).toEqual('keep-me');
             expect(updated.servers.other_server).toEqual({
@@ -245,7 +246,7 @@ describe('extension unit tests', () => {
             expect(fs.writeFileSync).toHaveBeenCalled();
             const updated = JSON.parse(fs.writeFileSync.mock.calls[0][1]);
             const cursorEntry = updated.mcpServers.mcp_stata;
-            expect(cursorEntry.args.slice(0, 3)).toEqual(['--refresh', '--from', 'mcp-stata@latest']);
+            expect(cursorEntry.args).toEqual(['--refresh', '--from', 'mcp-stata@latest', 'mcp-stata', '--reinstall-package', 'mcp-stata']);
             expect(cursorEntry.env).toEqual({ STATA_HOME: '/opt/stata', STATA_LICENSE: 'abc' });
             expect(cursorEntry.retry).toEqual(3);
             expect(updated.mcpServers.other_cursor).toEqual({
@@ -261,6 +262,43 @@ describe('extension unit tests', () => {
                 args: ['bar'],
                 env: { KEEP: 'me' }
             });
+        });
+
+        it('writeMcpConfig auto-updates old mcp.json formatting to the new uvx command', () => {
+            fs.existsSync.mockReturnValue(true);
+            fs.readFileSync.mockReturnValue(JSON.stringify({
+                servers: {
+                    mcp_stata: {
+                        type: 'stdio',
+                        command: 'uvx',
+                        args: ['--from', 'mcp-stata', 'mcp-stata', '--refresh'],
+                        env: { STATA_HOME: '/opt/stata' }
+                    }
+                }
+            }));
+
+            extension.writeMcpConfig({
+                configPath: '/tmp/test.json',
+                writeVscode: true,
+                writeCursor: false
+            });
+
+            expect(fs.writeFileSync).toHaveBeenCalled();
+            const updated = JSON.parse(fs.writeFileSync.mock.calls[0][1]);
+            const serverEntry = updated.servers.mcp_stata;
+            
+            // Should now have the full expanded argument list including --reinstall-package
+            expect(serverEntry.args).toEqual([
+                '--refresh', 
+                '--from', 
+                'mcp-stata@latest', 
+                'mcp-stata', 
+                '--reinstall-package', 
+                'mcp-stata'
+            ]);
+            
+            // Environment variables should be preserved
+            expect(serverEntry.env).toEqual({ STATA_HOME: '/opt/stata' });
         });
     });
 

@@ -124,7 +124,7 @@ describe('MCP Config Integration', () => {
         // Env should be merged from any legacy cursor entry.
         expect(server.env).toEqual({ STATA_LICENSE: 'abc', STATA_PATH: '/opt/stata' });
         expect(server.note).toEqual('keep-me');
-        expect(server.args.slice(0, 2)).toEqual(['--refresh', '--from']);
+        expect(server.args).toEqual(['--refresh', '--from', 'mcp-stata@latest', 'mcp-stata', '--reinstall-package', 'mcp-stata']);
         expect('mcpServers' in json).toBeFalsy();
     });
 

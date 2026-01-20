@@ -84,7 +84,7 @@ Offline/VSIX fallback:
 - **Test MCP Server** (`stata-workbench.testMcpServer`) for quick smoke checks.
 - **Install MCP CLI helper** (`stata-workbench.installMcpCli`): Bootstraps uv locally when it is missing.
 - **Status bar + cancel** (`stata-workbench.cancelRequest`): Live request states with one-click cancellation routed through the MCP client.
-- **Auto-manage MCP configs**: Writes the user-level `mcp.json` in your editor's user data so AI agents reuse the same `uvx --from mcp-stata@latest --refresh mcp-stata` wiring.
+- **Auto-manage MCP configs**: Writes the user-level `mcp.json` in your editor's user data so AI agents reuse the same `uvx --refresh --from mcp-stata@latest mcp-stata --reinstall-package mcp-stata` wiring.
 - **Durable logs**: All run results are logged to the `Stata Workbench` output channel for reference.
 
 ## Settings
@@ -104,7 +104,7 @@ Offline/VSIX fallback:
 
 Stata Workbench **automatically writes** your MCP configuration when you first run it. The extension detects your editor and creates the appropriate config file.
 - User-level `mcp.json` with Stata MCP server entry
-- Uses `uvx --from mcp-stata@latest --refresh` for auto-updates
+- Uses `uvx --refresh --from mcp-stata@latest mcp-stata --reinstall-package mcp-stata` for auto-updates
 - Works for: Claude Code, Cursor, Cline, Windsurf, Antigravity
 
 **Config file locations:**
@@ -125,7 +125,7 @@ If you want to manage the file yourself, here is the content to add. User-level 
     "mcp_stata": {
       "type": "stdio",
       "command": "uvx",
-      "args": ["--from", "mcp-stata", "mcp-stata", "--refresh"]
+      "args": ["--refresh", "--from", "mcp-stata@latest", "mcp-stata", "--reinstall-package", "mcp-stata"]
     }
   }
 }
