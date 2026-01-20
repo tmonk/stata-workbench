@@ -22,7 +22,7 @@
             "semantic-release-vsce",
             {
                 "packageVsix": "dist/stata-workbench-${nextRelease.version}.vsix",
-                "publish": true
+                "publish": false
             }
         ],
         [

@@ -31,6 +31,10 @@ virtualenv/**
 ~/**
 **/*.log
 **/*.map
+# Binaries
+!bin/**
+bin/**/*.zip
+bin/**/*.tar.gz
 # Ignore all dotfiles and dev configs
 .*
 !.vscodeignore

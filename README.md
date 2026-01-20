@@ -72,8 +72,8 @@ Offline/VSIX fallback:
 
 
 ## Requirements
-- Stata 17+ on Mac OS, Windows, or Linux.
-- uv/uvx on PATH (to run the published mcp-stata tool). If missing, the extension automatically bootstraps uv locally into its storage.
+- Stata 17+ on macOS, Windows, or Linux.
+- **uv/uvx**: The extension includes bundled `uv` binaries for standard platforms. It will automatically use the system `uv` if available on your `PATH`, or fall back to the bundled version. No manual installation is required for most users.
 
 ## Features & Commands
 - **Syntax highlighting** for Stata, Dyndoc Markdown, and Dyndoc LaTeX.
@@ -133,8 +133,8 @@ If you want to manage the file yourself, here is the content to add. User-level 
 
 ## Troubleshooting
 - **Icons not visible in editor title bar**: If the play, run, and graph icons don't appear when you open a `.do` file, click the `...` menu in the editor title bar and enable the Stata Workbench icons to make them visible.
-- Status bar says "CLI missing": install uv (includes uvx) with `curl -LsSf https://astral.sh/uv/install.sh | sh` (macOS/Linux) or `powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -Command "iwr https://astral.sh/uv/install.ps1 -useb | iex"` (Windows).
-- Requests time out: raise `stataMcp.requestTimeoutMs`.
+- **Status bar says "CLI missing"**: This usually only occurs on unsupported platforms where a bundled binary is not provided. Install `uv` manually with `curl -LsSf https://astral.sh/uv/install.sh | sh` (macOS/Linux) or `powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -Command "iwr https://astral.sh/uv/install.ps1 -useb | iex"` (Windows).
+- **Requests time out**: raise `stataMcp.requestTimeoutMs`.
 - Unexpected MCP errors: open the output channel for a structured error message.
 - Cancel a stuck run: run `Stata: Cancel Current Request` from the command palette.
 

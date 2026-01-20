@@ -335,7 +335,37 @@ function promptInstallMcpCli(context, force = false) {
 
 function findUvBinary(optionalInstallDir) {
     const base = ['uvx', 'uvx.exe', 'uv', 'uv.exe'];
-    const candidates = [...base];
+
+    // 1. Check system PATH first
+    for (const name of base) {
+        const result = spawnSync(name, ['--version'], { encoding: 'utf8' });
+        if (!result.error && result.status === 0) {
+            return name;
+        }
+    }
+
+    const candidates = [];
+
+    // 2. Check for bundled binary as first fallback
+    if (globalContext && globalContext.extensionUri && globalContext.extensionUri.fsPath) {
+        const platform = process.platform;
+        const arch = process.arch;
+        const binNames = platform === 'win32' ? ['uvx.exe', 'uv.exe'] : ['uvx', 'uv'];
+
+        for (const binName of binNames) {
+            // Try platform-specific subdirectory first
+            const platformSpecific = path.join(globalContext.extensionUri.fsPath, 'bin', `${platform}-${arch}`, binName);
+            if (fs.existsSync(platformSpecific)) {
+                return platformSpecific;
+            }
+
+            // Fallback to generic bin directory
+            const genericBundled = path.join(globalContext.extensionUri.fsPath, 'bin', binName);
+            if (fs.existsSync(genericBundled)) {
+                return genericBundled;
+            }
+        }
+    }
 
     // On Windows, the installer defaults to %USERPROFILE%\.local\bin when PATH isn't updated.
     const defaultDirs = new Set();

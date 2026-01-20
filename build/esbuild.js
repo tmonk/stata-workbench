@@ -4,8 +4,15 @@ const fs = require('fs');
 const { sentryEsbuildPlugin } = require("@sentry/esbuild-plugin");
 const pkg = require('../package.json');
 
-const production = process.argv.includes('--production');
+// Force development mode on local environments, even if --production is passed.
+// Production mode is only enabled in CI environments.
+const production = process.argv.includes('--production') && process.env.CI === 'true';
 const watch = process.argv.includes('--watch');
+
+// Parse target if provided via --target=xyz
+const targetArg = process.argv.find(arg => arg.startsWith('--target='));
+const buildTarget = targetArg ? targetArg.split('=')[1] : null;
+
 const rootDir = path.resolve(__dirname, '..');
 const distDir = path.join(rootDir, 'dist');
 const entryFile = path.join(rootDir, 'src', 'extension.js');
@@ -51,10 +58,11 @@ async function main() {
     }
   }
 
-  // Ensure dist exists
-  if (!fs.existsSync(distDir)) {
-    fs.mkdirSync(distDir, { recursive: true });
+  // Ensure dist exists and is clean
+  if (fs.existsSync(distDir)) {
+    fs.rmSync(distDir, { recursive: true, force: true });
   }
+  fs.mkdirSync(distDir, { recursive: true });
 
   // Copy all Sentry profiler binaries to dist/
   // Esbuild's automatic 'file' loader only catches static requires.
@@ -62,12 +70,14 @@ async function main() {
   const sentryProfilerDir = path.join(rootDir, 'node_modules', '@sentry-internal', 'node-cpu-profiler', 'lib');
   if (fs.existsSync(sentryProfilerDir)) {
     const files = fs.readdirSync(sentryProfilerDir);
+    let copiedCount = 0;
     for (const file of files) {
       if (file.endsWith('.node')) {
         fs.copyFileSync(path.join(sentryProfilerDir, file), path.join(distDir, file));
+        copiedCount++;
       }
     }
-    console.log(`Copied ${files.filter(f => f.endsWith('.node')).length} Sentry profiler binaries to dist/`);
+    console.log(`Copied ${copiedCount} Sentry profiler binaries to dist/`);
   }
 
   // Build Extension Host
@@ -77,13 +87,13 @@ async function main() {
     format: 'cjs',
     minify: production,
     sourcemap: true,
-    sourcesContent: false,
     platform: 'node',
     outfile: outFile,
     external: ['vscode'],
     assetNames: '[name]',
     define: {
       'process.env.SENTRY_RELEASE': JSON.stringify(release),
+      'process.env.NODE_ENV': JSON.stringify(production ? 'production' : 'development'),
     },
     loader: {
       '.node': 'file',
@@ -96,10 +106,11 @@ async function main() {
         org: "tdmonk",
         project: "4510744389550160",
         telemetry: false,
+        sourcemaps: {
+          assets: ['./dist/**'],
+        },
         release: {
           name: release,
-          create: false,
-          finalize: false,
         },
       }),
     ].filter(Boolean)
@@ -124,11 +135,11 @@ async function main() {
       format: 'iife',
       minify: production,
       sourcemap: true,
-      sourcesContent: false,
       platform: 'browser',
       outfile: script.out,
       define: {
         'process.env.SENTRY_RELEASE': JSON.stringify(release),
+        'process.env.NODE_ENV': JSON.stringify(production ? 'production' : 'development'),
       },
       logLevel: 'warning',
       plugins: [
@@ -138,10 +149,11 @@ async function main() {
           org: "tdmonk",
           project: "4510744389550160",
           telemetry: false,
+          sourcemaps: {
+            assets: ['./dist/**'],
+          },
           release: {
             name: release,
-            create: false,
-            finalize: false,
           },
         }),
       ].filter(Boolean)
@@ -154,6 +166,26 @@ async function main() {
   } else {
     await extensionCtx.rebuild();
     await Promise.all(webviewCtxs.map(ctx => ctx.rebuild()));
+
+    // Post-build cleanup: if a target is specified, remove non-matching Sentry binaries
+    if (buildTarget) {
+      const [platform, arch] = buildTarget.split('-');
+      const files = fs.readdirSync(distDir);
+      let removedCount = 0;
+      for (const file of files) {
+        if (file.endsWith('.node')) {
+          const isMatch = file.includes(`-${platform}-`) && file.includes(`-${arch}-`);
+          if (!isMatch) {
+            fs.unlinkSync(path.join(distDir, file));
+            removedCount++;
+          }
+        }
+      }
+      if (removedCount > 0) {
+        console.log(`Post-build: Removed ${removedCount} non-matching Sentry binaries for target ${buildTarget}`);
+      }
+    }
+
     await extensionCtx.dispose();
     await Promise.all(webviewCtxs.map(ctx => ctx.dispose()));
   }
