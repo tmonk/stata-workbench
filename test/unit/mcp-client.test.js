@@ -35,6 +35,22 @@ const { StataMcpClient: McpClient } = proxyquire.noCallThru().noPreserveCache().
     }
 });
 
+const getVscodeModule = () => {
+    try {
+        return require('vscode');
+    } catch (_err) {
+        return vscodeMock;
+    }
+};
+
+const setWorkspaceFolders = (folders) => {
+    vscodeMock.workspace.workspaceFolders = folders;
+    const vscodeRuntime = getVscodeModule();
+    if (vscodeRuntime && vscodeRuntime !== vscodeMock && vscodeRuntime.workspace) {
+        vscodeRuntime.workspace.workspaceFolders = folders;
+    }
+};
+
 const setConfig = (overrides = {}) => {
     const merged = {
         requestTimeoutMs: 1000,
@@ -48,7 +64,17 @@ const setConfig = (overrides = {}) => {
             return def;
         })
     };
-    vscodeMock.workspace.getConfiguration.mockReturnValue(config);
+    const applyConfig = (target) => {
+        if (!target?.workspace) return;
+        if (target.workspace.getConfiguration?.mockReturnValue) {
+            target.workspace.getConfiguration.mockReturnValue(config);
+            return;
+        }
+        target.workspace.getConfiguration = () => config;
+    };
+
+    applyConfig(vscodeMock);
+    applyConfig(getVscodeModule());
     return config;
 };
 
@@ -86,7 +112,7 @@ describe('McpClient', () => {
             extensionUri: { fsPath: '/test/path' }
         });
 
-        vscodeMock.workspace.workspaceFolders = [{ uri: { fsPath: '/mock/workspace' } }];
+        setWorkspaceFolders([{ uri: { fsPath: '/mock/workspace' } }]);
 
         setConfig();
 
@@ -331,7 +357,7 @@ describe('McpClient', () => {
     describe('runFile', () => {
         it('should honor resolved cwd when no workspace folders exist', async () => {
             const originalFolders = vscodeMock.workspace.workspaceFolders;
-            vscodeMock.workspace.workspaceFolders = [];
+            setWorkspaceFolders([]);
 
             setConfig({ runFileWorkingDirectory: 'relative/run' });
 
@@ -363,7 +389,7 @@ describe('McpClient', () => {
             expect(result.taskResult.args.path).toEqual('/tmp/project/script.do');
 
             enqueueStub.restore();
-            vscodeMock.workspace.workspaceFolders = originalFolders;
+            setWorkspaceFolders(originalFolders);
         });
 
         it('should respect explicitly provided cwd in options', async () => {
@@ -704,14 +730,14 @@ describe('McpClient', () => {
 
         it('should resolve relative paths against process cwd when workspace is missing', () => {
             const originalFolders = vscodeMock.workspace.workspaceFolders;
-            vscodeMock.workspace.workspaceFolders = [];
+            setWorkspaceFolders([]);
 
             setConfig({ runFileWorkingDirectory: 'relative/run' });
 
             const cwd = client._resolveRunFileCwd('/tmp/project/script.do');
             expect(cwd).toEqual(path.normalize(path.resolve('relative/run')));
 
-            vscodeMock.workspace.workspaceFolders = originalFolders;
+            setWorkspaceFolders(originalFolders);
         });
     });
 
