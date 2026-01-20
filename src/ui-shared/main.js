@@ -137,6 +137,9 @@ window.stataUI = {
                         }
                     }
                 }
+                // If we just ended a block (DIV/DIV_ROW), this newline might be redundant
+                // but for pre-wrap consistency we usually want it. 
+                // However, the user is seeing double spacing.
                 result += '\n';
                 currentLineLen = 0;
                 wasNewline = true;
@@ -222,9 +225,10 @@ window.stataUI = {
                     const i3 = settings[2] || 0;
                     
                     if (result.length > 0 && !result.endsWith('\n')) result += '\n';
+                    // Reduced margin-bottom to 0 for tighter table rows.
                     // We must use white-space: pre-wrap to preserve multiple spaces and ensure ch unit alignment.
                     // Also use min-width to ensure the div doesn't collapse excessively.
-                    result += `<div style="padding-left:${i2}ch; text-indent:${i1 - i2}ch; padding-right:${i3}ch; margin-bottom:4px; white-space:pre-wrap; min-width: max-content;">`;
+                    result += `<div style="padding-left:${i2}ch; text-indent:${i1 - i2}ch; padding-right:${i3}ch; margin-bottom:0px; white-space:pre-wrap; min-width: max-content;">`;
                     openTags.push('DIV');
                     currentLineLen = 0;
                     continue;
@@ -240,7 +244,7 @@ window.stataUI = {
                         }
                         result += '</span>';
                     }
-                    if (!result.endsWith('\n')) result += '\n';
+                    // Removed extra newline addition here to prevent double-spacing in tables
                     currentLineLen = 0;
                     continue;
                 }
@@ -269,7 +273,7 @@ window.stataUI = {
                         }
                     }
 
-                    result += `<div style="display:flex; flex-direction:row; padding-left:${i1}ch; padding-right:${mr}ch; margin-bottom:2px; white-space:pre;">`;
+                    result += `<div style="display:flex; flex-direction:row; padding-left:${i1}ch; padding-right:${mr}ch; margin-bottom:0px; white-space:pre;">`;
                     result += `<div style="flex: 0 0 ${c2 - i1}ch; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; margin-right:2ch;">`;
                     if (tagContent) {
                         let contentToRender = tagContent;

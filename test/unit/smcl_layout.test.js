@@ -194,7 +194,7 @@ describe('SMCL Layout Principles', () => {
             assert(html.includes('white-space:pre'), 'Binds should preserve internal spacing');
             assert(html.includes('make           '), 'Should preserve trailing spaces in variable name');
             assert(html.includes('Make and model'), 'Should contain variable label');
-            assert(html.endsWith('</div>\n'), 'Should end with a closed div and newline');
+            assert(html.endsWith('</div>'), 'Should end with a closed div');
         });
 
         it('should handle a mix of headers, lines, and table rows sensibly', () => {
