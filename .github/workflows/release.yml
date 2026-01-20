@@ -61,7 +61,12 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
-          OVSX_PAT: ${{ secrets.OVSX_TOKEN }}
+
+      - name: Package Universal VSIX
+        if: steps.semantic.outputs.new_release_published == 'true'
+        run: |
+          mkdir -p dist
+          bunx vsce package --out dist/stata-workbench-${{ steps.semantic.outputs.new_release_version }}.vsix
 
       - name: Publish Universal VSIX
         if: steps.semantic.outputs.new_release_published == 'true'
