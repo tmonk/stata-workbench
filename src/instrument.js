@@ -1,10 +1,14 @@
 // Import with `import * as Sentry from "@sentry/node"` if you are using ESM
 const Sentry = require("@sentry/node");
-const { nodeProfilingIntegration } = require("@sentry/profiling-node");
+
+const isBun = !!process.versions.bun;
+const { nodeProfilingIntegration } = isBun 
+    ? { nodeProfilingIntegration: () => ({ name: 'MockProfiling' }) }
+    : require("@sentry/profiling-node");
 
 Sentry.init({
     dsn: "https://97f5f46047e65ebbf758c0e9e4ffe6c5@o4510744386732032.ingest.de.sentry.io/4510744389550160",
-    integrations: [
+    integrations: isBun ? [] : [
         nodeProfilingIntegration(),
     ],
 
