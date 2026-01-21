@@ -1,3 +1,10 @@
+## [0.16.4](https://github.com/tmonk/stata-workbench/compare/v0.16.3...v0.16.4) (2026-01-21)
+
+
+### Bug Fixes
+
+* heavier filtering to stop noise from IDE ([e0cbf08](https://github.com/tmonk/stata-workbench/commit/e0cbf08d6349fc06128d26da18389505cebd1d73))
+
 ## [0.16.3](https://github.com/tmonk/stata-workbench/compare/v0.16.2...v0.16.3) (2026-01-21)
 
 
