@@ -155,23 +155,25 @@ if (telemetryEnabled) {
             ...(nodeProfilingIntegration ? [nodeProfilingIntegration()] : []),
             Sentry.httpIntegration({
                 // Ignore internal loopback requests from VS Code core (like PDF viewers)
-                // only tracking our actual backend or MCP traffic.
+                // to reduce noise, while keeping our own backend/MCP traffic and external checks.
                 shouldCreateSpanForRequest: (url) => {
+                    if (url.includes('pypi.org')) return true; // Keep PyPI version checks to ensure valid
+
                     const isLocal = url.includes('127.0.0.1') || url.includes('localhost');
                     if (isLocal) {
-                        // Keep spans for our own API interactions
+                        // Keep spans for our own API interactions (Data Browser / MCP)
                         return url.includes('/v1/') || url.includes('/mcp/');
                     }
                     return true;
                 }
             })
         ],
-        tracePropagationTargets: ["localhost", /^\//, /^\/api\//],
+        tracePropagationTargets: ["localhost", /^\//, /^\/api\//, "pypi.org"],
 
         // Release Health / Session Tracking
         autoSessionTracking: true,
 
-        // Enable Sentry logs
+        // Enable internal logs for debugging telemetry transitions
         enableLogs: true,
         // Tracing
         tracesSampleRate: 1.0, //  Capture 100% of the transactions
