@@ -190,6 +190,7 @@ function ensureMcpCliAvailable(context) {
     const found = findUvBinary();
     if (found) {
         uvCommand = found;
+        outputChannel?.appendLine(`Using uv binary at: ${uvCommand}`);
         // Only set the env var if it's not already set to this value
         // or if we want to ensure it's propagated to children.
         // For tests, we want to AVOID overwriting a specific path override with "uvx"
@@ -215,6 +216,7 @@ function ensureMcpCliAvailable(context) {
     const installed = findUvBinary(installDir);
     if (result.status === 0 && installed) {
         uvCommand = installed;
+        outputChannel?.appendLine(`Using uv binary at: ${uvCommand} (automatically installed)`);
         process.env.MCP_STATA_UVX_CMD = uvCommand;
         return true;
     }
