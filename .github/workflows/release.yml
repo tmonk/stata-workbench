@@ -61,6 +61,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
+          NPM_CONFIG_PACKAGE_LOCK: "false"
 
       - name: Publish Universal to VS Code Marketplace
         if: steps.semantic.outputs.new_release_published == 'true'
