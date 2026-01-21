@@ -143,5 +143,9 @@ If you added agent configs and want to remove them, edit your user-level `mcp.js
 - VS Code format → delete `servers.mcp_stata`
 - Cursor format → delete `mcpServers.mcp_stata`
 
+## Telemetry
+
+This extension uses Sentry to collect error and performance data to improve reliability. No personal data is collected. You can disable telemetry by setting `"stata-workbench.telemetry.enabled": false` in your VS Code settings.
+
 ## Acknowledgments
 Portions of this file are derived from [stata-mcp](https://github.com/hanlulong/stata-mcp) (MIT License), [language-stata](https://github.com/kylebarron/language-stata) by Kyle Barron (MIT License), and [vscode-stata](https://github.com/kylebutts/vscode-stata) by Kyle Butts (MIT License). See license_extras for the full license texts. Do check their projects out!

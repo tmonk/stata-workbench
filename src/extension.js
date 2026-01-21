@@ -38,12 +38,40 @@ function revealOutput() {
     }
 }
 
+/**
+ * Log a line to the Output channel and Sentry log buffer.
+ */
+function appendLine(msg) {
+    if (!outputChannel) return;
+    outputChannel.appendLine(msg);
+    if (typeof global.addLogToSentryBuffer === 'function') {
+        global.addLogToSentryBuffer(msg);
+    }
+}
+
+/**
+ * Log a string to the Output channel and Sentry log buffer (no newline).
+ */
+function append(msg) {
+    if (!outputChannel) return;
+    outputChannel.append(msg);
+    if (typeof global.addLogToSentryBuffer === 'function') {
+        global.addLogToSentryBuffer(msg);
+    }
+}
+
 function getOutputLogHandler() {
     const config = vscode.workspace.getConfiguration('stataMcp');
-    if (!config.get('showAllLogsInOutput', false)) return null;
+    const showLogsInOutput = !!config.get('showAllLogsInOutput', false);
+
     return (chunk) => {
         if (!chunk) return;
-        outputChannel?.append?.(String(chunk));
+        if (showLogsInOutput) {
+            append(String(chunk));
+        } else if (typeof global.addLogToSentryBuffer === 'function') {
+            // Keep logs for Sentry even if they aren't shown in Output
+            global.addLogToSentryBuffer(String(chunk));
+        }
     };
 }
 
@@ -84,16 +112,17 @@ function activate(context) {
     }
 
     outputChannel = vscode.window.createOutputChannel('Stata Workbench');
+
     const settings = vscode.workspace.getConfiguration('stataMcp');
     const version = pkg?.version || 'unknown';
-    outputChannel.appendLine(`Stata Workbench ready (extension v${version})`);
+    appendLine(`Stata Workbench ready (extension v${version})`);
     missingCliPrompted = !!context.globalState?.get?.(MISSING_CLI_PROMPT_KEY);
     if (!missingCliPrompted && hasExistingMcpConfig(context)) {
         missingCliPrompted = true;
         context.globalState?.update?.(MISSING_CLI_PROMPT_KEY, true).catch?.(() => { });
     }
     if (typeof mcpClient.setLogger === 'function') {
-        mcpClient.setLogger((msg) => outputChannel.appendLine(msg));
+        mcpClient.setLogger((msg) => appendLine(msg));
     }
     if (typeof mcpClient.setTaskDoneHandler === 'function') {
         mcpClient.setTaskDoneHandler((payload) => {
@@ -102,7 +131,7 @@ function activate(context) {
             }
         });
     }
-    DataBrowserPanel.setLogger((msg) => outputChannel.appendLine(msg));
+    DataBrowserPanel.setLogger((msg) => appendLine(msg));
 
     statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
     statusBarItem.text = '$(beaker) Stata Workbench: Idle';
@@ -162,7 +191,7 @@ function activate(context) {
         }
         const refreshed = refreshMcpPackage();
         mcpPackageVersion = refreshed || getMcpPackageVersion();
-        outputChannel.appendLine(`mcp-stata version: ${mcpPackageVersion}`);
+        appendLine(`mcp-stata version: ${mcpPackageVersion}`);
         try {
             Sentry.setTag("mcp.version", mcpPackageVersion);
         } catch (_err) { }
@@ -299,24 +328,18 @@ function refreshMcpPackage() {
             if (text) {
                 mcpPackageVersion = text;
             }
-            if (outputChannel) {
-                outputChannel.appendLine(`Ensured latest mcp-stata via uvx --refresh --refresh-package mcp-stata (${text || 'version not reported'})`);
-            }
+            appendLine(`Ensured latest mcp-stata via uvx --refresh --refresh-package mcp-stata (${text || 'version not reported'})`);
             return mcpPackageVersion;
         }
 
-        if (outputChannel) {
-            outputChannel.appendLine(`Failed to refresh mcp-stata (exit ${result.status}): ${text}`);
-            outputChannel.appendLine('If you are behind a proxy or corporate network, set HTTPS_PROXY/HTTP_PROXY and retry.');
-            outputChannel.appendLine('You can also run: uvx --refresh --refresh-package mcp-stata --from mcp-stata@latest mcp-stata --version');
-            revealOutput();
-        }
+        appendLine(`Failed to refresh mcp-stata (exit ${result.status}): ${text}`);
+        appendLine('If you are behind a proxy or corporate network, set HTTPS_PROXY/HTTP_PROXY and retry.');
+        appendLine('You can also run: uvx --refresh --refresh-package mcp-stata --from mcp-stata@latest mcp-stata --version');
+        revealOutput();
     } catch (err) {
-        if (outputChannel) {
-            outputChannel.appendLine(`Error refreshing mcp-stata: ${err.message}`);
-            outputChannel.appendLine('Network/permission issues can block uv downloads. Check firewall/proxy settings and retry.');
-            revealOutput();
-        }
+        appendLine(`Error refreshing mcp-stata: ${err.message}`);
+        appendLine('Network/permission issues can block uv downloads. Check firewall/proxy settings and retry.');
+        revealOutput();
     }
 
     return null;
@@ -923,8 +946,8 @@ async function testConnection() {
 function showOutput(content) {
     if (content === undefined || content === null) return;
     const now = new Date().toISOString();
-    outputChannel.appendLine(`\n=== ${now} ===`);
-    outputChannel.appendLine(typeof content === 'string' ? content : JSON.stringify(content, null, 2));
+    appendLine(`\n=== ${now} ===`);
+    appendLine(typeof content === 'string' ? content : JSON.stringify(content, null, 2));
     const config = vscode.workspace.getConfiguration('stataMcp');
     if (config.get('autoRevealOutput', true)) {
         outputChannel.show(true);

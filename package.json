@@ -167,6 +167,11 @@
           "type": "number",
           "default": 100,
           "description": "Default number of variables to select when opening the Data Browser (0 = all). Useful for huge datasets with thousands of variables."
+        },
+        "stata-workbench.telemetry.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable Sentry telemetry to help improve Stata Workbench. No personal data or Stata content is collected."
         }
       }
     },
