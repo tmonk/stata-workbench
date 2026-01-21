@@ -1,3 +1,10 @@
+## [0.15.11](https://github.com/tmonk/stata-workbench/compare/v0.15.10...v0.15.11) (2026-01-21)
+
+
+### Bug Fixes
+
+* update bundled binary handling and improve environment variable management ([81783cf](https://github.com/tmonk/stata-workbench/commit/81783cffa3653c6d0e3e121ef8fe4c80924b7f99))
+
 ## [0.15.10](https://github.com/tmonk/stata-workbench/compare/v0.15.9...v0.15.10) (2026-01-21)
 
 
