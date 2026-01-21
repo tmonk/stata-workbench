@@ -151,13 +151,27 @@ if (telemetryEnabled) {
         dsn: "https://97f5f46047e65ebbf758c0e9e4ffe6c5@o4510744386732032.ingest.de.sentry.io/4510744389550160",
         release: process.env.SENTRY_RELEASE || `${pkg.name}@${pkg.version}`,
         environment: process.env.NODE_ENV || "production",
-        integrations: isBun ? [] : (nodeProfilingIntegration ? [nodeProfilingIntegration()] : []),
+        integrations: isBun ? [] : [
+            ...(nodeProfilingIntegration ? [nodeProfilingIntegration()] : []),
+            Sentry.httpIntegration({
+                // Ignore internal loopback requests from VS Code core (like PDF viewers)
+                // only tracking our actual backend or MCP traffic.
+                shouldCreateSpanForRequest: (url) => {
+                    const isLocal = url.includes('127.0.0.1') || url.includes('localhost');
+                    if (isLocal) {
+                        // Keep spans for our own API interactions
+                        return url.includes('/v1/') || url.includes('/mcp/');
+                    }
+                    return true;
+                }
+            })
+        ],
         tracePropagationTargets: ["localhost", /^\//, /^\/api\//],
 
         // Release Health / Session Tracking
         autoSessionTracking: true,
 
-        // Send structured logs to Sentry
+        // Enable Sentry logs
         enableLogs: true,
         // Tracing
         tracesSampleRate: 1.0, //  Capture 100% of the transactions
