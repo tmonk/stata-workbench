@@ -1,3 +1,10 @@
+## [0.16.1](https://github.com/tmonk/stata-workbench/compare/v0.16.0...v0.16.1) (2026-01-21)
+
+
+### Bug Fixes
+
+* Enhance error handling and logging with Sentry integration across multiple components ([0ef07b0](https://github.com/tmonk/stata-workbench/commit/0ef07b03ca4f12b7e8004d935bd42c070f749665))
+
 # [0.16.0](https://github.com/tmonk/stata-workbench/compare/v0.15.12...v0.16.0) (2026-01-21)
 
 
