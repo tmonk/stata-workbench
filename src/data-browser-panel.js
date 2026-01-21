@@ -126,36 +126,38 @@ class DataBrowserPanel {
     }
 
     async _fetchCredentials() {
-        DataBrowserPanel._log('[DataBrowserPanel] Fetching UI channel details...');
-        try {
-            const channel = await mcpClient.getUiChannel();
-            if (channel && channel.baseUrl && channel.token) {
-                this._credentials = {
-                    baseUrl: channel.baseUrl,
-                    token: channel.token
-                };
+        return Sentry.startSpan({ name: 'databrowser.fetchCredentials', op: 'extension.operation' }, async () => {
+            DataBrowserPanel._log('[DataBrowserPanel] Fetching UI channel details...');
+            try {
+                const channel = await mcpClient.getUiChannel();
+                if (channel && channel.baseUrl && channel.token) {
+                    this._credentials = {
+                        baseUrl: channel.baseUrl,
+                        token: channel.token
+                    };
 
-                const config = vscode.workspace.getConfiguration('stataMcp');
-                this._config = {
-                    variableLimit: config.get('defaultVariableLimit', 0)
-                };
+                    const config = vscode.workspace.getConfiguration('stataMcp');
+                    this._config = {
+                        variableLimit: config.get('defaultVariableLimit', 0)
+                    };
 
-                DataBrowserPanel._log('[DataBrowserPanel] Credentials fetched.');
+                    DataBrowserPanel._log('[DataBrowserPanel] Credentials fetched.');
 
-                if (this._isWebviewReady) {
-                    DataBrowserPanel._log('[DataBrowserPanel] Webview already ready, sending init.');
-                    this._panel.webview.postMessage({
-                        type: 'init',
-                        ...this._credentials,
-                        config: this._config
-                    });
-                } else {
-                    DataBrowserPanel._log('[DataBrowserPanel] Waiting for webview ready signal...');
+                    if (this._isWebviewReady) {
+                        DataBrowserPanel._log('[DataBrowserPanel] Webview already ready, sending init.');
+                        this._panel.webview.postMessage({
+                            type: 'init',
+                            ...this._credentials,
+                            config: this._config
+                        });
+                    } else {
+                        DataBrowserPanel._log('[DataBrowserPanel] Waiting for webview ready signal...');
+                    }
                 }
+            } catch (err) {
+                DataBrowserPanel._log(`[DataBrowserPanel] Error fetching channel: ${err.message}`);
             }
-        } catch (err) {
-            DataBrowserPanel._log(`[DataBrowserPanel] Error fetching channel: ${err.message}`);
-        }
+        });
     }
 
     dispose() {
@@ -177,62 +179,64 @@ class DataBrowserPanel {
     }
 
     static _performRequest(urlStr, options, expectBinary = false) {
-        return new Promise((resolve, reject) => {
-            try {
-                const url = new URL(urlStr);
-                const body = options.body;
-                const headers = { ...options.headers };
+        return Sentry.startSpan({ name: 'databrowser.apiCall', op: 'extension.operation' }, () => {
+            return new Promise((resolve, reject) => {
+                try {
+                    const url = new URL(urlStr);
+                    const body = options.body;
+                    const headers = { ...options.headers };
 
-                if (body) {
-                    DataBrowserPanel._log(`[DataBrowser Proxy] Sending ${options.method} request to ${url.toString()} with body length ${Buffer.byteLength(body)}`);
-                    headers['Content-Length'] = Buffer.byteLength(body);
-                    if (!headers['Content-Type']) {
-                        headers['Content-Type'] = 'application/json';
-                    }
-                } else {
-                    DataBrowserPanel._log(`[DataBrowser Proxy] Sending ${options.method} request to ${url.toString()}`);
-                }
-
-                const opts = {
-                    method: options.method,
-                    headers: headers
-                };
-
-                const req = http.request(url, opts, (res) => {
-                    const chunks = [];
-                    res.on('data', (chunk) => chunks.push(chunk));
-                    res.on('end', () => {
-                        const buffer = Buffer.concat(chunks);
-                        DataBrowserPanel._log(`[DataBrowser Proxy] Response from ${url.pathname}: Status ${res.statusCode}, Body length: ${buffer.byteLength}`);
-                        if (res.statusCode >= 200 && res.statusCode < 300) {
-                            if (expectBinary) {
-                                resolve(buffer);
-                            } else {
-                                try {
-                                    resolve(JSON.parse(buffer.toString()));
-                                } catch (e) {
-                                    Sentry.captureException(e);
-                                    reject(new Error(`Failed to parse JSON: ${e.message}`));
-                                }
-                            }
-                        } else {
-                            reject(new Error(`API Request Failed (${res.statusCode}): ${buffer.toString()}`));
+                    if (body) {
+                        DataBrowserPanel._log(`[DataBrowser Proxy] Sending ${options.method} request to ${url.toString()} with body length ${Buffer.byteLength(body)}`);
+                        headers['Content-Length'] = Buffer.byteLength(body);
+                        if (!headers['Content-Type']) {
+                            headers['Content-Type'] = 'application/json';
                         }
+                    } else {
+                        DataBrowserPanel._log(`[DataBrowser Proxy] Sending ${options.method} request to ${url.toString()}`);
+                    }
+
+                    const opts = {
+                        method: options.method,
+                        headers: headers
+                    };
+
+                    const req = http.request(url, opts, (res) => {
+                        const chunks = [];
+                        res.on('data', (chunk) => chunks.push(chunk));
+                        res.on('end', () => {
+                            const buffer = Buffer.concat(chunks);
+                            DataBrowserPanel._log(`[DataBrowser Proxy] Response from ${url.pathname}: Status ${res.statusCode}, Body length: ${buffer.byteLength}`);
+                            if (res.statusCode >= 200 && res.statusCode < 300) {
+                                if (expectBinary) {
+                                    resolve(buffer);
+                                } else {
+                                    try {
+                                        resolve(JSON.parse(buffer.toString()));
+                                    } catch (e) {
+                                        Sentry.captureException(e);
+                                        reject(new Error(`Failed to parse JSON: ${e.message}`));
+                                    }
+                                }
+                            } else {
+                                reject(new Error(`API Request Failed (${res.statusCode}): ${buffer.toString()}`));
+                            }
+                        });
                     });
-                });
 
-                req.on('error', (e) => {
-                    Sentry.captureException(e);
-                    reject(e);
-                });
+                    req.on('error', (e) => {
+                        Sentry.captureException(e);
+                        reject(e);
+                    });
 
-                if (body) {
-                    req.write(body);
+                    if (body) {
+                        req.write(body);
+                    }
+                    req.end();
+                } catch (err) {
+                    reject(err);
                 }
-                req.end();
-            } catch (err) {
-                reject(err);
-            }
+            });
         });
     }
 

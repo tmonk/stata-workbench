@@ -305,137 +305,143 @@ class TerminalPanel {
   }
 
   static async handleRun(code, runCommand) {
-    if (!TerminalPanel.currentPanel) return;
-    const trimmed = (code || '').trim();
-    if (!trimmed) return;
+    return Sentry.startSpan({ name: 'terminal.handleRun', op: 'extension.operation' }, async () => {
+      if (!TerminalPanel.currentPanel) return;
+      const trimmed = (code || '').trim();
+      if (!trimmed) return;
 
-    const runId = TerminalPanel._generateRunId();
-    TerminalPanel._activeRunId = runId;
-    TerminalPanel._postMessage({ type: 'busy', value: true });
-    TerminalPanel._postMessage({ type: 'runStarted', runId, code: trimmed });
+      const runId = TerminalPanel._generateRunId();
+      TerminalPanel._activeRunId = runId;
+      TerminalPanel._postMessage({ type: 'busy', value: true });
+      TerminalPanel._postMessage({ type: 'runStarted', runId, code: trimmed });
 
-    try {
-      const cwd = TerminalPanel._activeFilePath ? path.dirname(TerminalPanel._activeFilePath) : null;
-      const hooks = {
-        runId,
-        onLog: (text) => {
-          if (!text) return;
-          TerminalPanel._postMessage({ type: 'runLogAppend', runId, text: formatStreamChunk(text), streamFormat: 'plain' });
-        },
-        onProgress: (progress, total, message) => {
-          TerminalPanel._postMessage({ type: 'runProgress', runId, progress, total, message });
-        },
-        onTaskDone: (payload) => {
-          let stdout = null;
-          if (payload?.logPath) {
-            try {
-              const stats = fs.statSync(payload.logPath);
-              if (stats.size > 0 && stats.size <= 50000) {
-                stdout = fs.readFileSync(payload.logPath, 'utf8');
+      try {
+        const cwd = TerminalPanel._activeFilePath ? path.dirname(TerminalPanel._activeFilePath) : null;
+        const hooks = {
+          runId,
+          onLog: (text) => {
+            if (!text) return;
+            TerminalPanel._postMessage({ type: 'runLogAppend', runId, text: formatStreamChunk(text), streamFormat: 'plain' });
+          },
+          onProgress: (progress, total, message) => {
+            TerminalPanel._postMessage({ type: 'runProgress', runId, progress, total, message });
+          },
+          onTaskDone: (payload) => {
+            let stdout = null;
+            if (payload?.logPath) {
+              try {
+                const stats = fs.statSync(payload.logPath);
+                if (stats.size > 0 && stats.size <= 50000) {
+                  stdout = fs.readFileSync(payload.logPath, 'utf8');
+                }
+              } catch (_err) {
               }
-            } catch (_err) {
             }
+            TerminalPanel.notifyTaskDone(runId, payload?.logPath, payload?.logSize, stdout, payload?.rc);
+          },
+          cwd
+        };
+
+        const result = await runCommand(trimmed, hooks);
+
+        // Parse SMCL stdout + stderr to extract RC and format
+        let finalRC = typeof result?.rc === 'number' ? result.rc : null;
+        let finalStderr = result?.stderr || '';
+
+        const combinedForRC = (result?.stdout || result?.contentText || '') + '\n' + (result?.stderr || '');
+        const parsed = parseSMCL(combinedForRC);
+
+        if (parsed.rc !== null) {
+          finalRC = parsed.rc;
+        }
+
+        if (finalRC === -1 || finalRC === null) {
+          if (combinedForRC.includes('unrecognized command') || combinedForRC.includes('is unrecognized')) {
+            finalRC = 199;
           }
-          TerminalPanel.notifyTaskDone(runId, payload?.logPath, payload?.logSize, stdout, payload?.rc);
-        },
-        cwd
-      };
-
-      const result = await runCommand(trimmed, hooks);
-
-      // Parse SMCL stdout + stderr to extract RC and format
-      let finalRC = typeof result?.rc === 'number' ? result.rc : null;
-      let finalStderr = result?.stderr || '';
-
-      const combinedForRC = (result?.stdout || result?.contentText || '') + '\n' + (result?.stderr || '');
-      const parsed = parseSMCL(combinedForRC);
-
-      if (parsed.rc !== null) {
-        finalRC = parsed.rc;
-      }
-
-      if (finalRC === -1 || finalRC === null) {
-        if (combinedForRC.includes('unrecognized command') || combinedForRC.includes('is unrecognized')) {
-          finalRC = 199;
         }
-      }
 
-      if (parsed.formattedText) {
-        const smclContext = parsed.formattedText
-          .split('\n')
-          .map(line => {
-            if (line.startsWith('In:') || line.startsWith('Command:')) {
+        if (parsed.formattedText) {
+          const smclContext = parsed.formattedText
+            .split('\n')
+            .map(line => {
+              if (line.startsWith('In:') || line.startsWith('Command:')) {
+                return `{txt}${line}`;
+              }
+              if (line.startsWith('Error:')) {
+                return `{err}${line}`;
+              }
               return `{txt}${line}`;
-            }
-            if (line.startsWith('Error:')) {
-              return `{err}${line}`;
-            }
-            return `{txt}${line}`;
-          })
-          .join('\n');
+            })
+            .join('\n');
 
-        if (finalStderr) {
-          finalStderr = `${smclContext}\n{res}{hline}\n${finalStderr}`;
-        } else {
-          finalStderr = smclContext;
+          if (finalStderr) {
+            finalStderr = `${smclContext}\n{res}{hline}\n${finalStderr}`;
+          } else {
+            finalStderr = smclContext;
+          }
         }
+
+        // Determine success using parsed RC
+        const success = determineSuccess(result, finalRC);
+
+        TerminalPanel._postMessage({
+          type: 'runFinished',
+          runId,
+          rc: finalRC,
+          success,
+          hasError: parsed.hasError,
+          durationMs: result?.durationMs ?? null,
+          stdout: success ? (result?.stdout || result?.contentText || '') : '',
+          // fullStdout: always available for the 'Log' tab.
+          fullStdout: (result?.stdout || result?.contentText || ''),
+          stderr: success ? '' : finalStderr,
+          artifacts: normalizeArtifacts(result),
+          baseDir: result?.cwd || ''
+        });
+      } catch (error) {
+        TerminalPanel._postMessage({ type: 'runFailed', runId, message: error?.message || String(error) });
+      } finally {
+        TerminalPanel._activeRunId = null;
+        TerminalPanel._postMessage({ type: 'busy', value: false });
       }
-
-      // Determine success using parsed RC
-      const success = determineSuccess(result, finalRC);
-
-      TerminalPanel._postMessage({
-        type: 'runFinished',
-        runId,
-        rc: finalRC,
-        success,
-        hasError: parsed.hasError,
-        durationMs: result?.durationMs ?? null,
-        stdout: success ? (result?.stdout || result?.contentText || '') : '',
-        // fullStdout: always available for the 'Log' tab.
-        fullStdout: (result?.stdout || result?.contentText || ''),
-        stderr: success ? '' : finalStderr,
-        artifacts: normalizeArtifacts(result),
-        baseDir: result?.cwd || ''
-      });
-    } catch (error) {
-      TerminalPanel._postMessage({ type: 'runFailed', runId, message: error?.message || String(error) });
-    } finally {
-      TerminalPanel._activeRunId = null;
-      TerminalPanel._postMessage({ type: 'busy', value: false });
-    }
+    });
   }
 
   static async _handleDownloadGraphPdf(graphName) {
-    if (typeof TerminalPanel._downloadGraphPdf !== 'function') return;
-    try {
-      await TerminalPanel._downloadGraphPdf(graphName);
-      TerminalPanel._postMessage({ type: 'downloadStatus', success: true, graphName });
-    } catch (error) {
-      console.error('[TerminalPanel] downloadGraphPdf failed:', error);
-      TerminalPanel._postMessage({
-        type: 'downloadStatus',
-        success: false,
-        graphName,
-        message: error?.message || String(error)
-      });
-    }
+    return Sentry.startSpan({ name: 'terminal.downloadGraphPdf', op: 'extension.operation' }, async () => {
+      if (typeof TerminalPanel._downloadGraphPdf !== 'function') return;
+      try {
+        await TerminalPanel._downloadGraphPdf(graphName);
+        TerminalPanel._postMessage({ type: 'downloadStatus', success: true, graphName });
+      } catch (error) {
+        console.error('[TerminalPanel] downloadGraphPdf failed:', error);
+        TerminalPanel._postMessage({
+          type: 'downloadStatus',
+          success: false,
+          graphName,
+          message: error?.message || String(error)
+        });
+      }
+    });
   }
 
   static async _handleCancelRun() {
-    if (typeof TerminalPanel._cancelHandler === 'function') {
-      try {
-        await TerminalPanel._cancelHandler();
-        // Optimistically mark the active run as cancelled in the UI.
-        const runId = TerminalPanel._activeRunId;
-        if (runId) {
-          TerminalPanel._postMessage({ type: 'runCancelled', runId, message: 'Run cancelled by user.' });
-          TerminalPanel._postMessage({ type: 'busy', value: false });
+    return Sentry.startSpan({ name: 'terminal.cancelRun', op: 'extension.operation' }, async () => {
+      if (typeof TerminalPanel._cancelHandler === 'function') {
+        try {
+          await TerminalPanel._cancelHandler();
+          // Optimistically mark the active run as cancelled in the UI.
+          const runId = TerminalPanel._activeRunId;
+          if (runId) {
+            TerminalPanel._postMessage({ type: 'runCancelled', runId, message: 'Run cancelled by user.' });
+            TerminalPanel._postMessage({ type: 'busy', value: false });
+          }
+        } catch (error) {
+          console.error('[TerminalPanel] cancelRun failed:', error);
         }
-      } catch (error) {
-        console.error('[TerminalPanel] cancelRun failed:', error);
       }
-    }
+    });
   }
 
   static startStreamingEntry(code, filePath, runCommand, variableProvider, cancelRun, downloadGraphPdf) {
@@ -580,29 +586,31 @@ class TerminalPanel {
   }
 
   static async _handleFetchLog(runId, path, offset, maxBytes) {
-    console.log(`[TerminalPanel] _handleFetchLog: runId=${runId} path=${path} offset=${offset}`);
-    if (!path) return;
-    if (offset === 0) {
-    }
-    try {
-      // Lazy require to avoid circularity if possible, or assume mcpClient is globally available 
-      if (TerminalPanel._logProvider) {
-        const slice = await TerminalPanel._logProvider(path, offset, maxBytes);
-        const rawData = slice?.data || '';
-
-        TerminalPanel._postMessage({
-          type: 'logChunk',
-          runId,
-          path,
-          offset,
-          data: rawData,
-          nextOffset: slice?.next_offset
-        });
+    return Sentry.startSpan({ name: 'terminal.fetchLog', op: 'extension.operation' }, async () => {
+      console.log(`[TerminalPanel] _handleFetchLog: runId=${runId} path=${path} offset=${offset}`);
+      if (!path) return;
+      if (offset === 0) {
       }
-    } catch (err) {
-      Sentry.captureException(err);
-      console.error('Fetch log failed', err);
-    }
+      try {
+        // Lazy require to avoid circularity if possible, or assume mcpClient is globally available 
+        if (TerminalPanel._logProvider) {
+          const slice = await TerminalPanel._logProvider(path, offset, maxBytes);
+          const rawData = slice?.data || '';
+
+          TerminalPanel._postMessage({
+            type: 'logChunk',
+            runId,
+            path,
+            offset,
+            data: rawData,
+            nextOffset: slice?.next_offset
+          });
+        }
+      } catch (err) {
+        Sentry.captureException(err);
+        console.error('Fetch log failed', err);
+      }
+    });
   }
 
   static setLogProvider(fn) {
@@ -627,66 +635,70 @@ class TerminalPanel {
    * @param {(code: string) => Promise<object>} [runCommand] -command runner if panel needs initialization
    */
   static addEntry(code, result, filePath, runCommand, variableProvider) {
-    if (!TerminalPanel.currentPanel) {
-      // If panel not open, open it with this as initial state
-      if (typeof runCommand === 'function') {
-        TerminalPanel._defaultRunCommand = runCommand;
+    return Sentry.startSpan({ name: 'terminal.addEntry', op: 'extension.ui' }, () => {
+      if (!TerminalPanel.currentPanel) {
+        // If panel not open, open it with this as initial state
+        if (typeof runCommand === 'function') {
+          TerminalPanel._defaultRunCommand = runCommand;
+        }
+        if (typeof variableProvider === 'function') {
+          TerminalPanel.variableProvider = variableProvider;
+        }
+        TerminalPanel.show({
+          filePath,
+          initialCode: code,
+          initialResult: result,
+          runCommand: runCommand || (async () => { throw new Error('Session not fully initialized'); }),
+          variableProvider: variableProvider || TerminalPanel.variableProvider,
+          downloadGraphPdf: TerminalPanel._downloadGraphPdf,
+          cancelRun: TerminalPanel._cancelHandler,
+          clearAll: TerminalPanel._clearHandler
+        });
+        return;
       }
-      if (typeof variableProvider === 'function') {
-        TerminalPanel.variableProvider = variableProvider;
-      }
-      TerminalPanel.show({
-        filePath,
-        initialCode: code,
-        initialResult: result,
-        runCommand: runCommand || (async () => { throw new Error('Session not fully initialized'); }),
-        variableProvider: variableProvider || TerminalPanel.variableProvider,
-        downloadGraphPdf: TerminalPanel._downloadGraphPdf,
-        cancelRun: TerminalPanel._cancelHandler,
-        clearAll: TerminalPanel._clearHandler
+
+      TerminalPanel._activeFilePath = filePath || TerminalPanel._activeFilePath || null;
+
+      // Panel exists, just append
+      TerminalPanel._postMessage({
+        type: 'append',
+        entry: toEntry(code, result)
       });
-      return;
-    }
 
-    TerminalPanel._activeFilePath = filePath || TerminalPanel._activeFilePath || null;
-
-    // Panel exists, just append
-    TerminalPanel._postMessage({
-      type: 'append',
-      entry: toEntry(code, result)
+      // Explicitly reveal it
+      TerminalPanel.currentPanel.reveal(vscode.ViewColumn.Beside);
     });
-
-    // Explicitly reveal it
-    TerminalPanel.currentPanel.reveal(vscode.ViewColumn.Beside);
   }
 
   static async _handleClearAll() {
-    if (typeof TerminalPanel._clearHandler === 'function') {
-      try {
-        // Clear UI first, before running command
-        TerminalPanel._postMessage({ type: 'cleared' });
-        TerminalPanel._postMessage({ type: 'busy', value: true });
-        await TerminalPanel._clearHandler();
-        // Success -UI already cleared, no need to show anything
-      } catch (error) {
-        Sentry.captureException(error);
-        console.error('[TerminalPanel] clearAll failed:', error);
-        TerminalPanel._postMessage({ type: 'error', message: 'Failed to clear: ' + error.message });
-      } finally {
-        TerminalPanel._postMessage({ type: 'busy', value: false });
+    return Sentry.startSpan({ name: 'terminal.clearAll', op: 'extension.operation' }, async () => {
+      if (typeof TerminalPanel._clearHandler === 'function') {
+        try {
+          // Clear UI first, before running command
+          TerminalPanel._postMessage({ type: 'cleared' });
+          TerminalPanel._postMessage({ type: 'busy', value: true });
+          await TerminalPanel._clearHandler();
+          // Success -UI already cleared, no need to show anything
+        } catch (error) {
+          Sentry.captureException(error);
+          console.error('[TerminalPanel] clearAll failed:', error);
+          TerminalPanel._postMessage({ type: 'error', message: 'Failed to clear: ' + error.message });
+        } finally {
+          TerminalPanel._postMessage({ type: 'busy', value: false });
+        }
+        return;
       }
-      return;
-    }
-    // Fallback: clear UI first, then run command silently
-    TerminalPanel._postMessage({ type: 'cleared' });
-    if (typeof TerminalPanel._defaultRunCommand === 'function') {
-      // Run silently in background without showing in terminal
-      try {
-        await TerminalPanel._defaultRunCommand('clear all', {});
-      } catch (error) {
-        TerminalPanel._postMessage({ type: 'error', message: 'Failed to clear: ' + error.message });
+      // Fallback: clear UI first, then run command silently
+      TerminalPanel._postMessage({ type: 'cleared' });
+      if (typeof TerminalPanel._defaultRunCommand === 'function') {
+        // Run silently in background without showing in terminal
+        try {
+          await TerminalPanel._defaultRunCommand('clear all', {});
+        } catch (error) {
+          TerminalPanel._postMessage({ type: 'error', message: 'Failed to clear: ' + error.message });
+        }
       }
-    }
+    });
   }
 
 }

@@ -808,62 +808,74 @@ class StataMcpClient {
     }
 
     async _callTool(client, name, args, callOptions = {}) {
-        const toolArgs = args ?? {};
-        try {
-            let activeClient = client;
-            if (this._availableTools?.size && !this._availableTools.has(name)) {
-                await this._ensureLatestServerForMissingTool(name);
-                activeClient = await this._ensureClient();
+        return Sentry.startSpan({ name: `mcp.tool:${name}`, op: 'mcp.tool_call' }, async () => {
+            const toolArgs = args ?? {};
+            const startMs = Date.now();
+
+            try {
+                let activeClient = client;
                 if (this._availableTools?.size && !this._availableTools.has(name)) {
-                    throw new Error(this._formatMissingToolError(name));
+                    await this._ensureLatestServerForMissingTool(name);
+                    activeClient = await this._ensureClient();
+                    if (this._availableTools?.size && !this._availableTools.has(name)) {
+                        throw new Error(this._formatMissingToolError(name));
+                    }
                 }
-            }
 
-            if (activeClient.type === 'cursor-bridge' && this._cursorCommand) {
-                return vscode.commands.executeCommand(this._cursorCommand, {
-                    server: 'stata',
-                    tool: name,
-                    args: toolArgs
-                });
-            }
+                let result;
+                if (activeClient.type === 'cursor-bridge' && this._cursorCommand) {
+                    result = await vscode.commands.executeCommand(this._cursorCommand, {
+                        server: 'stata',
+                        tool: name,
+                        args: toolArgs
+                    });
+                } else {
+                    const progressToken = callOptions?.progressToken ?? null;
+                    const requestOptions = callOptions?.signal ? { signal: callOptions.signal } : undefined;
+                    const params = {
+                        method: 'tools/call',
+                        params: {
+                            name,
+                            arguments: toolArgs,
+                            ...(progressToken != null ? { _meta: { progressToken } } : {})
+                        }
+                    };
 
-            const progressToken = callOptions?.progressToken ?? null;
-            const requestOptions = callOptions?.signal ? { signal: callOptions.signal } : undefined;
-            const params = {
-                method: 'tools/call',
-                params: {
-                    name,
-                    arguments: toolArgs,
-                    ...(progressToken != null ? { _meta: { progressToken } } : {})
+                    if (typeof activeClient.request === 'function' && CallToolResultSchema) {
+                        result = await activeClient.request(
+                            params,
+                            CallToolResultSchema,
+                            requestOptions
+                        );
+                    } else {
+                        result = await activeClient.callTool({ name, arguments: toolArgs }, undefined, requestOptions);
+                    }
                 }
-            };
 
-            if (typeof activeClient.request === 'function' && CallToolResultSchema) {
-                return activeClient.request(
-                    params,
-                    CallToolResultSchema,
-                    requestOptions
-                );
+                const durationMs = Date.now() - startMs;
+                this._log(`[mcp-stata] tool ${name} completed in ${durationMs}ms`);
+                return result;
+            } catch (error) {
+                const durationMs = Date.now() - startMs;
+                if (this._isCancellationError(error)) {
+                    this._log(`[mcp-stata] tool ${name} cancelled after ${durationMs}ms`);
+                    this._statusEmitter.emit('status', 'connected');
+                    throw new Error('Request cancelled');
+                }
+                this._log(`[mcp-stata] tool ${name} failed after ${durationMs}ms: ${error?.message || error}`);
+                this._captureMcpError(error);
+                this._statusEmitter.emit('status', 'error');
+                const detail = error?.message || String(error);
+                let hint = '';
+                if (detail.includes('-32000') || detail.includes('Connection closed') || detail.includes('ECONNRESET')) {
+                    this._resetClientState();
+                    hint = '\n\nHint: This often happens if the mcp-stata server crashes during initialization or prints logs to its stdout pipe (breaking the MCP protocol).';
+                    const context = this._formatRecentStderr();
+                    if (context) hint += `\n\nRecent logs extension captured:${context}`;
+                }
+                throw new Error(`MCP tool ${name} failed: ${detail}${hint}`);
             }
-
-            return activeClient.callTool({ name, arguments: toolArgs }, undefined, requestOptions);
-        } catch (error) {
-            if (this._isCancellationError(error)) {
-                this._statusEmitter.emit('status', 'connected');
-                throw new Error('Request cancelled');
-            }
-            this._captureMcpError(error);
-            this._statusEmitter.emit('status', 'error');
-            const detail = error?.message || String(error);
-            let hint = '';
-            if (detail.includes('-32000') || detail.includes('Connection closed') || detail.includes('ECONNRESET')) {
-                this._resetClientState();
-                hint = '\n\nHint: This often happens if the mcp-stata server crashes during initialization or prints logs to its stdout pipe (breaking the MCP protocol).';
-                const context = this._formatRecentStderr();
-                if (context) hint += `\n\nRecent logs extension captured:${context}`;
-            }
-            throw new Error(`MCP tool ${name} failed: ${detail}${hint}`);
-        }
+        });
     }
 
     _requiredToolNames() {
@@ -1311,55 +1323,63 @@ class StataMcpClient {
         this._statusEmitter.emit('status', this._active ? 'running' : 'queued');
 
         const work = async () => {
-            const startedAt = Date.now();
-            if (this._cancelSignal || options?.cancellationToken?.isCancellationRequested) {
-                const wasGlobal = this._cancelSignal;
-                this._pending = Math.max(0, this._pending - 1);
-                if (this._pending === 0) {
-                    this._cancelSignal = false;
+            return Sentry.startSpan({ name: `mcp.operation:${label}`, op: 'mcp.operation' }, async () => {
+                const startedAt = Date.now();
+                if (this._cancelSignal || options?.cancellationToken?.isCancellationRequested) {
+                    const wasGlobal = this._cancelSignal;
+                    this._pending = Math.max(0, this._pending - 1);
+                    if (this._pending === 0) {
+                        this._cancelSignal = false;
+                    }
+                    throw new Error('Request cancelled');
                 }
-                throw new Error('Request cancelled');
-            }
 
-            this._active = true;
-            this._statusEmitter.emit('status', 'running');
-            try {
-                const client = await this._ensureClient();
-                const result = await this._withTimeout(task(client), timeoutMs, label, options?.cancellationToken);
-                const endedAt = Date.now();
-                const normalizedMeta = { ...meta, startedAt, endedAt, durationMs: endedAt - startedAt, label };
-                const processed = normalize
-                    ? this._normalizeResponse(result, normalizedMeta)
-                    : (typeof result === 'object' && result !== null ? result : { raw: result, ...normalizedMeta });
-                if (collectArtifacts && !options?.deferArtifacts) {
-                    const artifacts = await this._collectGraphArtifacts(client, meta);
-                    if (artifacts.length) {
-                        processed.artifacts = artifacts;
-                        processed.graphArtifacts = artifacts;
+                this._active = true;
+                this._statusEmitter.emit('status', 'running');
+                try {
+                    const client = await this._ensureClient();
+                    const result = await this._withTimeout(task(client), timeoutMs, label, options?.cancellationToken);
+                    const endedAt = Date.now();
+                    const durationMs = endedAt - startedAt;
+                    const normalizedMeta = { ...meta, startedAt, endedAt, durationMs, label };
+
+                    this._log(`[mcp-stata] operation ${label} completed in ${durationMs}ms`);
+
+                    const processed = normalize
+                        ? this._normalizeResponse(result, normalizedMeta)
+                        : (typeof result === 'object' && result !== null ? result : { raw: result, ...normalizedMeta });
+                    if (collectArtifacts && !options?.deferArtifacts) {
+                        const artifacts = await this._collectGraphArtifacts(client, meta);
+                        if (artifacts.length) {
+                            processed.artifacts = artifacts;
+                            processed.graphArtifacts = artifacts;
+                        }
+                    }
+                    return processed;
+                } catch (error) {
+                    const durationMs = Date.now() - startedAt;
+                    if (this._isCancellationError(error)) {
+                        this._log(`[mcp-stata] operation ${label} cancelled after ${durationMs}ms`);
+                        this._statusEmitter.emit('status', this._pending > 0 ? 'queued' : 'connected');
+                    } else {
+                        this._log(`[mcp-stata] operation ${label} failed after ${durationMs}ms: ${error?.message || error}`);
+                        Sentry.captureException(error);
+                        this._statusEmitter.emit('status', 'error');
+                    }
+                    throw error;
+                } finally {
+                    this._active = false;
+                    this._pending = Math.max(0, this._pending - 1);
+                    if (this._pending === 0) {
+                        this._cancelSignal = false;
+                    }
+                    if (this._pending > 0) {
+                        this._statusEmitter.emit('status', 'queued');
+                    } else {
+                        this._statusEmitter.emit('status', 'connected');
                     }
                 }
-                return processed;
-            } catch (error) {
-                if (this._isCancellationError(error)) {
-                    this._statusEmitter.emit('status', this._pending > 0 ? 'queued' : 'connected');
-                } else {
-                    Sentry.captureException(error);
-                    this._statusEmitter.emit('status', 'error');
-                    this._log(`[mcp-stata error] ${error?.message || error}`);
-                }
-                throw error;
-            } finally {
-                this._active = false;
-                this._pending = Math.max(0, this._pending - 1);
-                if (this._pending === 0) {
-                    this._cancelSignal = false;
-                }
-                if (this._pending > 0) {
-                    this._statusEmitter.emit('status', 'queued');
-                } else {
-                    this._statusEmitter.emit('status', 'connected');
-                }
-            }
+            });
         };
 
         const next = this._queue.then(work, work);

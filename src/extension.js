@@ -415,6 +415,7 @@ function findUvBinary(optionalInstallDir) {
     }
 
     const candidates = [];
+    const defaultDirs = new Set();
     const home = typeof os.homedir === 'function' ? os.homedir() : null;
     if (home) {
         defaultDirs.add(path.join(home, '.local', 'bin'));
@@ -760,143 +761,38 @@ async function refreshDatasetSummary() {
 }
 
 async function runSelection() {
-    const editor = vscode.window.activeTextEditor;
-    if (!editor) {
-        vscode.window.showErrorMessage('No active editor');
-        return;
-    }
-
-    const selection = editor.selection;
-    let text = selection.isEmpty ? editor.document.lineAt(selection.active.line).text : editor.document.getText(selection);
-    if (!text.trim()) {
-        vscode.window.showErrorMessage('No text selected or current line is empty');
-        return;
-    }
-
-    const filePath = editor.document.uri.fsPath;
-    const cwd = filePath ? path.dirname(filePath) : null;
-    const rawLogHandler = getOutputLogHandler();
-
-    await withStataProgress('Running selection', async (token) => {
-        const runId = TerminalPanel.startStreamingEntry(text, filePath, terminalRunCommand, variableListProvider, cancelRequest, downloadGraphAsPdf);
-        try {
-            const result = await mcpClient.runSelection(text, {
-                cancellationToken: token,
-                normalizeResult: true,
-                includeGraphs: true,
-                cwd,
-                onRawLog: rawLogHandler,
-                onLog: (chunk) => {
-                    if (runId) TerminalPanel.appendStreamingLog(runId, chunk);
-                },
-                onGraphReady: (artifact) => {
-                    if (runId) TerminalPanel.appendRunArtifact(runId, artifact);
-                },
-                onProgress: (progress, total, message) => {
-                    if (runId) TerminalPanel.updateStreamingProgress(runId, progress, total, message);
-                }
-            });
-            if (runId) {
-                // Enrich result with logSize if it's missing but we can find it
-                if (result.logPath && (result.logSize === undefined || result.logSize === null)) {
-                    try {
-                        const stats = fs.statSync(result.logPath);
-                        result.logSize = stats.size;
-                    } catch (_err) { }
-                }
-                logRunToOutput(result, text);
-                TerminalPanel.finishStreamingEntry(runId, result);
-            } else {
-                await presentRunResult(text, result, filePath);
-            }
-            // Update summary after run
-            refreshDatasetSummary();
-        } catch (error) {
-            if (runId) {
-                TerminalPanel.failStreamingEntry(runId, error?.message || String(error));
-            }
-            throw error;
+    return Sentry.startSpan({ name: 'extension.runSelection', op: 'extension.operation' }, async () => {
+        const editor = vscode.window.activeTextEditor;
+        if (!editor) {
+            vscode.window.showErrorMessage('No active editor');
+            return;
         }
-    }, text);
-}
 
-async function runFile() {
-    const editor = vscode.window.activeTextEditor;
-    if (!editor) {
-        vscode.window.showErrorMessage('No active editor');
-        return;
-    }
-
-    const filePath = editor.document.uri.fsPath;
-    if (!filePath.toLowerCase().endsWith('.do')) {
-        vscode.window.showErrorMessage('Not a Stata .do file');
-        return;
-    }
-
-    const isDirty = editor.document.isDirty;
-    const config = vscode.workspace.getConfiguration('stataMcp');
-    const behavior = config.get('runFileBehavior', 'runDirtyFile');
-    const originalDir = path.dirname(filePath);
-    const rawLogHandler = getOutputLogHandler();
-    let effectiveFilePath = filePath;
-    let tmpFile = null;
-
-    if (isDirty && behavior === 'runDirtyFile') {
-        try {
-            const tmpDir = os.tmpdir();
-            const fileName = `stata_tmp_${Date.now()}_${path.basename(filePath)}`;
-            tmpFile = path.join(tmpDir, fileName);
-            fs.writeFileSync(tmpFile, editor.document.getText(), 'utf8');
-            effectiveFilePath = tmpFile;
-        } catch (err) {
-            vscode.window.showWarningMessage(`Failed to create temporary file for unsaved changes: ${err.message}. Running version on disk instead.`);
+        const selection = editor.selection;
+        let text = selection.isEmpty ? editor.document.lineAt(selection.active.line).text : editor.document.getText(selection);
+        if (!text.trim()) {
+            vscode.window.showErrorMessage('No text selected or current line is empty');
+            return;
         }
-    }
 
-    try {
-        await withStataProgress(`Running ${path.basename(filePath)}`, async (token) => {
-            const commandText = `do "${path.basename(filePath)}"`;
-            let taskDoneSeen = false;
-            const runStart = Date.now();
-            const runId = TerminalPanel.startStreamingEntry(commandText, filePath, terminalRunCommand, variableListProvider, cancelRequest, downloadGraphAsPdf);
+        const filePath = editor.document.uri.fsPath;
+        const cwd = filePath ? path.dirname(filePath) : null;
+        const rawLogHandler = getOutputLogHandler();
+
+        await withStataProgress('Running selection', async (token) => {
+            const runId = TerminalPanel.startStreamingEntry(text, filePath, terminalRunCommand, variableListProvider, cancelRequest, downloadGraphAsPdf);
             try {
-                const result = await mcpClient.runFile(effectiveFilePath, {
+                const result = await mcpClient.runSelection(text, {
                     cancellationToken: token,
                     normalizeResult: true,
                     includeGraphs: true,
-                    cwd: originalDir,
-                    runId,
+                    cwd,
                     onRawLog: rawLogHandler,
                     onLog: (chunk) => {
-                        if (taskDoneSeen) {
-                        }
                         if (runId) TerminalPanel.appendStreamingLog(runId, chunk);
                     },
                     onGraphReady: (artifact) => {
                         if (runId) TerminalPanel.appendRunArtifact(runId, artifact);
-                    },
-                    onTaskDone: (payload) => {
-                        taskDoneSeen = true;
-                        let logSize = null;
-                        const logPath = payload?.logPath || null;
-                        let taskDoneStdout = null;
-                        let rawLen = null;
-                        let readErr = null;
-                        let convertErr = null;
-                        if (logPath) {
-                            try {
-                                const stats = fs.statSync(logPath);
-                                logSize = stats.size;
-                                if (logSize > 0 && logSize <= 50_000) {
-                                    const raw = fs.readFileSync(logPath, 'utf8');
-                                    rawLen = raw.length;
-                                    taskDoneStdout = raw;
-                                }
-                            } catch (err) {
-                                readErr = err?.message || String(err);
-                            }
-                        }
-                        if (runId) TerminalPanel.notifyTaskDone(runId, logPath, logSize, taskDoneStdout, payload?.rc);
                     },
                     onProgress: (progress, total, message) => {
                         if (runId) TerminalPanel.updateStreamingProgress(runId, progress, total, message);
@@ -910,10 +806,10 @@ async function runFile() {
                             result.logSize = stats.size;
                         } catch (_err) { }
                     }
-                    logRunToOutput(result, commandText);
+                    logRunToOutput(result, text);
                     TerminalPanel.finishStreamingEntry(runId, result);
                 } else {
-                    await presentRunResult(commandText, result, filePath);
+                    await presentRunResult(text, result, filePath);
                 }
                 // Update summary after run
                 refreshDatasetSummary();
@@ -923,23 +819,127 @@ async function runFile() {
                 }
                 throw error;
             }
-        });
-    } finally {
-        if (tmpFile && fs.existsSync(tmpFile)) {
+        }, text);
+    });
+}
+
+async function runFile() {
+    return Sentry.startSpan({ name: 'extension.runFile', op: 'extension.operation' }, async () => {
+        const editor = vscode.window.activeTextEditor;
+        if (!editor) {
+            vscode.window.showErrorMessage('No active editor');
+            return;
+        }
+
+        const filePath = editor.document.uri.fsPath;
+        if (!filePath.toLowerCase().endsWith('.do')) {
+            vscode.window.showErrorMessage('Not a Stata .do file');
+            return;
+        }
+
+        const isDirty = editor.document.isDirty;
+        const config = vscode.workspace.getConfiguration('stataMcp');
+        const behavior = config.get('runFileBehavior', 'runDirtyFile');
+        const originalDir = path.dirname(filePath);
+        const rawLogHandler = getOutputLogHandler();
+        let effectiveFilePath = filePath;
+        let tmpFile = null;
+
+        if (isDirty && behavior === 'runDirtyFile') {
             try {
-                fs.unlinkSync(tmpFile);
-            } catch (_err) {
-                // Ignore cleanup errors
+                const tmpDir = os.tmpdir();
+                const fileName = `stata_tmp_${Date.now()}_${path.basename(filePath)}`;
+                tmpFile = path.join(tmpDir, fileName);
+                fs.writeFileSync(tmpFile, editor.document.getText(), 'utf8');
+                effectiveFilePath = tmpFile;
+            } catch (err) {
+                vscode.window.showWarningMessage(`Failed to create temporary file for unsaved changes: ${err.message}. Running version on disk instead.`);
             }
         }
-    }
+
+        try {
+            await withStataProgress(`Running ${path.basename(filePath)}`, async (token) => {
+                const commandText = `do "${path.basename(filePath)}"`;
+                let taskDoneSeen = false;
+                const runId = TerminalPanel.startStreamingEntry(commandText, filePath, terminalRunCommand, variableListProvider, cancelRequest, downloadGraphAsPdf);
+                try {
+                    const result = await mcpClient.runFile(effectiveFilePath, {
+                        cancellationToken: token,
+                        normalizeResult: true,
+                        includeGraphs: true,
+                        cwd: originalDir,
+                        runId,
+                        onRawLog: rawLogHandler,
+                        onLog: (chunk) => {
+                            if (taskDoneSeen) {
+                            }
+                            if (runId) TerminalPanel.appendStreamingLog(runId, chunk);
+                        },
+                        onGraphReady: (artifact) => {
+                            if (runId) TerminalPanel.appendRunArtifact(runId, artifact);
+                        },
+                        onTaskDone: (payload) => {
+                            taskDoneSeen = true;
+                            let logSize = null;
+                            const logPath = payload?.logPath || null;
+                            let taskDoneStdout = null;
+                            if (logPath) {
+                                try {
+                                    const stats = fs.statSync(logPath);
+                                    logSize = stats.size;
+                                    if (logSize > 0 && logSize <= 50_000) {
+                                        const raw = fs.readFileSync(logPath, 'utf8');
+                                        taskDoneStdout = raw;
+                                    }
+                                } catch (_err) { }
+                            }
+                            if (runId) TerminalPanel.notifyTaskDone(runId, logPath, logSize, taskDoneStdout, payload?.rc);
+                        },
+                        onProgress: (progress, total, message) => {
+                            if (runId) TerminalPanel.updateStreamingProgress(runId, progress, total, message);
+                        }
+                    });
+                    if (runId) {
+                        // Enrich result with logSize if it's missing but we can find it
+                        if (result.logPath && (result.logSize === undefined || result.logSize === null)) {
+                            try {
+                                const stats = fs.statSync(result.logPath);
+                                result.logSize = stats.size;
+                            } catch (_err) { }
+                        }
+                        logRunToOutput(result, commandText);
+                        TerminalPanel.finishStreamingEntry(runId, result);
+                    } else {
+                        await presentRunResult(commandText, result, filePath);
+                    }
+                    // Update summary after run
+                    refreshDatasetSummary();
+                } catch (error) {
+                    if (runId) {
+                        TerminalPanel.failStreamingEntry(runId, error?.message || String(error));
+                    }
+                    throw error;
+                }
+            });
+        } finally {
+            if (tmpFile && fs.existsSync(tmpFile)) {
+                try {
+                    fs.unlinkSync(tmpFile);
+                } catch (_err) {
+                    // Ignore cleanup errors
+                }
+            }
+        }
+    });
 }
 
 async function testConnection() {
-    await withStataProgress('Testing MCP server', async (token) => {
-        const output = await mcpClient.runSelection('di "Hello from mcp-stata!"', { cancellationToken: token });
-        vscode.window.showInformationMessage('mcp-stata responded successfully.');
-        showOutput(output);
+    return Sentry.startSpan({ name: 'extension.testConnection', op: 'extension.operation' }, async () => {
+        await withStataProgress('Testing MCP server', async (token) => {
+            const output = await mcpClient.runSelection('di "Hello from mcp-stata!"', { cancellationToken: token });
+            vscode.window.showInformationMessage('mcp-stata responded successfully.');
+            showOutput(output);
+        });
     });
 }
 
@@ -1061,65 +1061,69 @@ async function showTerminal() {
 }
 
 async function viewData() {
-    DataBrowserPanel.createOrShow(globalExtensionUri);
+    return Sentry.startSpan({ name: 'extension.viewData', op: 'extension.operation' }, async () => {
+        DataBrowserPanel.createOrShow(globalExtensionUri);
+    });
 }
 
 async function downloadGraphAsPdf(graphName) {
-    try {
-        revealOutput();
-        outputChannel.appendLine(`[Download] Starting PDF export for: ${graphName}`);
+    return Sentry.startSpan({ name: 'extension.downloadGraphAsPdf', op: 'extension.operation' }, async () => {
+        try {
+            revealOutput();
+            outputChannel.appendLine(`[Download] Starting PDF export for: ${graphName}`);
 
-        // Request PDF export from MCP server
-        outputChannel.appendLine('[Download] Calling mcpClient.fetchGraph...');
-        const response = await mcpClient.fetchGraph(graphName, { format: 'pdf' });
-        outputChannel.appendLine(`[Download] Response received: ${JSON.stringify(response, null, 2)}`);
+            // Request PDF export from MCP server
+            outputChannel.appendLine('[Download] Calling mcpClient.fetchGraph...');
+            const response = await mcpClient.fetchGraph(graphName, { format: 'pdf' });
+            outputChannel.appendLine(`[Download] Response received: ${JSON.stringify(response, null, 2)}`);
 
-        let pdfPath = null;
-        let savedPath = null;
+            let pdfPath = null;
+            let savedPath = null;
 
-        if (response?.path || response?.file_path) {
-            pdfPath = response.path || response.file_path;
-            outputChannel.appendLine(`[Download] Found file path: ${pdfPath}`);
-        }
-
-        if (pdfPath && fs.existsSync(pdfPath)) {
-            outputChannel.appendLine(`[Download] Reading file from: ${pdfPath}`);
-            // If we have a file path, copy it
-            const defaultUri = vscode.Uri.file(path.join(os.homedir(), 'Downloads', `${graphName}.pdf`));
-
-            const saveUri = await vscode.window.showSaveDialog({
-                defaultUri,
-                filters: { 'PDF Files': ['pdf'] },
-                saveLabel: 'Save Graph'
-            });
-
-            if (saveUri) {
-                outputChannel.appendLine(`[Download] Copying to: ${saveUri.fsPath}`);
-                const buffer = fs.readFileSync(pdfPath);
-                await vscode.workspace.fs.writeFile(saveUri, buffer);
-                outputChannel.appendLine('[Download] Copy complete!');
-                savedPath = saveUri.fsPath;
-            } else {
-                outputChannel.appendLine('[Download] User cancelled save dialog');
-                savedPath = pdfPath;
+            if (response?.path || response?.file_path) {
+                pdfPath = response.path || response.file_path;
+                outputChannel.appendLine(`[Download] Found file path: ${pdfPath}`);
             }
-        } else {
-            outputChannel.appendLine('[Download] ERROR: No PDF data found in response');
-            throw new Error('No PDF data received from server');
-        }
 
-        return {
-            path: savedPath || pdfPath || response?.path || response?.file_path || response?.url || response?.href || null,
-            url: response?.url || response?.href || null,
-            label: response?.label || graphName
-        };
-    } catch (error) {
-        const msg = `Failed to download PDF: ${error.message}`;
-        outputChannel.appendLine(`[Download] ERROR: ${msg}`);
-        outputChannel.appendLine(`[Download] Stack trace: ${error.stack}`);
-        // Avoid toasts; surface via output channel only
-        throw error;
-    }
+            if (pdfPath && fs.existsSync(pdfPath)) {
+                outputChannel.appendLine(`[Download] Reading file from: ${pdfPath}`);
+                // If we have a file path, copy it
+                const defaultUri = vscode.Uri.file(path.join(os.homedir(), 'Downloads', `${graphName}.pdf`));
+
+                const saveUri = await vscode.window.showSaveDialog({
+                    defaultUri,
+                    filters: { 'PDF Files': ['pdf'] },
+                    saveLabel: 'Save Graph'
+                });
+
+                if (saveUri) {
+                    outputChannel.appendLine(`[Download] Copying to: ${saveUri.fsPath}`);
+                    const buffer = fs.readFileSync(pdfPath);
+                    await vscode.workspace.fs.writeFile(saveUri, buffer);
+                    outputChannel.appendLine('[Download] Copy complete!');
+                    savedPath = saveUri.fsPath;
+                } else {
+                    outputChannel.appendLine('[Download] User cancelled save dialog');
+                    savedPath = pdfPath;
+                }
+            } else {
+                outputChannel.appendLine('[Download] ERROR: No PDF data found in response');
+                throw new Error('No PDF data received from server');
+            }
+
+            return {
+                path: savedPath || pdfPath || response?.path || response?.file_path || response?.url || response?.href || null,
+                url: response?.url || response?.href || null,
+                label: response?.label || graphName
+            };
+        } catch (error) {
+            const msg = `Failed to download PDF: ${error.message}`;
+            outputChannel.appendLine(`[Download] ERROR: ${msg}`);
+            outputChannel.appendLine(`[Download] Stack trace: ${error.stack}`);
+            // Avoid toasts; surface via output channel only
+            throw error;
+        }
+    });
 }
 
 function escapeHtml(text) {
