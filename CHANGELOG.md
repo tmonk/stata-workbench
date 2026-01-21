@@ -1,3 +1,10 @@
+# [0.16.0](https://github.com/tmonk/stata-workbench/compare/v0.15.12...v0.16.0) (2026-01-21)
+
+
+### Features
+
+* add telemetry support with Sentry for error and performance tracking ([343d1b4](https://github.com/tmonk/stata-workbench/commit/343d1b4f5de5ebf29ab7a3402402eaaabe4099b4))
+
 ## [0.15.12](https://github.com/tmonk/stata-workbench/compare/v0.15.11...v0.15.12) (2026-01-21)
 
 
