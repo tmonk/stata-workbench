@@ -12,13 +12,16 @@ async function run() {
     console.log('[INTEGRATION] MCP_STATA_INTEGRATION:', process.env.MCP_STATA_INTEGRATION);
 
     try {
-        const result = await runCLI(
-            {
-                config: configPath,
-                runInBand: true, // Required for VS Code integration tests
-            },
-            [projectRootPath]
-        );
+        const testPattern = process.env.TEST_PATTERN;
+        const options = {
+            config: configPath,
+            runInBand: true, // Required for VS Code integration tests
+        };
+        if (testPattern) {
+            options.testNamePattern = testPattern;
+        }
+
+        const result = await runCLI(options, [projectRootPath]);
 
         if (result.results && result.results.numFailedTests > 0) {
             throw new Error(`${result.results.numFailedTests} integration tests failed.`);

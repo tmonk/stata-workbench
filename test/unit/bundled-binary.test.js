@@ -9,12 +9,16 @@ let vscode;
 describe('Bundled Binary Discovery', () => {
     let originalSpawnSync;
     let originalExistsSync;
+    let oldEnv;
 
     beforeEach(() => {
         // Reset cache to reload extension with mocks
         for (const key of Object.keys(require.cache)) {
             delete require.cache[key];
         }
+
+        oldEnv = { ...process.env };
+        delete process.env.MCP_STATA_UVX_CMD;
 
         originalSpawnSync = cp.spawnSync;
         originalExistsSync = fs.existsSync;
@@ -32,6 +36,7 @@ describe('Bundled Binary Discovery', () => {
     afterEach(() => {
         cp.spawnSync = originalSpawnSync;
         fs.existsSync = originalExistsSync;
+        process.env = oldEnv;
         jest.clearAllMocks();
     });
 

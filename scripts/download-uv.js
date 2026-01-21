@@ -88,15 +88,14 @@ async function download(target) {
     const foundPath = findBinary(extractDir, binaryName);
 
     if (foundPath) {
-        // Use uvx name even if it's the uv binary, so we don't have to change extension code
-        // and uv will naturally behave as uvx when named so.
-        const pinnedName = isWindows ? 'uvx.exe' : 'uvx';
-        const finalPath = path.join(binDir, pinnedName);
+        // Keep the original name 'uv' so it's unambiguous for the extension.
+        // The extension will handle adding 'tool run' if needed.
+        const finalPath = path.join(binDir, binaryName);
         fs.renameSync(foundPath, finalPath);
         if (!isWindows) {
             fs.chmodSync(finalPath, 0o755);
         }
-        console.log(`Pinned ${pinnedName} to ${finalPath}`);
+        console.log(`Pinned ${binaryName} to ${finalPath}`);
     } else {
         console.error(`Could not find ${binaryName} in the extracted archive.`);
         process.exit(1);

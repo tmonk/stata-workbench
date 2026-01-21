@@ -20,10 +20,10 @@ describe('Bundled Binary Integration', () => {
 
         const platform = process.platform;
         const arch = process.arch;
-        const binName = platform === 'win32' ? 'uvx.exe' : 'uvx';
+        const binName = platform === 'win32' ? 'uv.exe' : 'uv';
         
         // Use the absolute path to where we expect the bundled binary to be
-        // In the production extension, it's at <extPath>/bin/<platform>-<arch>/uvx
+        // In the production extension, it's at <extPath>/bin/<platform>-<arch>/uv
         // For tests, we'll check common project-relative paths
         const projectRoot = path.resolve(__dirname, '../../../');
         bundledPath = path.join(projectRoot, 'bin', `${platform}-${arch}`, binName);
@@ -61,29 +61,44 @@ describe('Bundled Binary Integration', () => {
 
     const runIfEnabled = enabled ? test : test.skip;
 
-    runIfEnabled('extension uses and successfully executes bundled binary', async () => {
-        // The extension should have picked up MCP_STATA_UVX_CMD
-        // To verify, we can trigger an action that uses it, like testConnection or just refreshMcpPackage
-        
-        // Since we are in an integration test, the extension is already activated.
-        // We might need to manually trigger the find logic or just check if it's working.
-        
-        // We can use the exposed API from activate() if it's there
-        // In extension.js:
-        // if (context.extensionMode === vscode.ExtensionMode.Test) { return { ... } }
-        
+    runIfEnabled('extension uses and successfully executes bundled binary (forced)', async () => {
         const ext = vscode.extensions.getExtension('tmonk.stata-workbench');
         const api = await ext.activate();
         
-        if (!api || !api.refreshMcpPackage) {
-            // If API not exposed exactly as expected, try to verify via command
-            // But refreshMcpPackage is exported in extension.js
-            throw new Error('Extension API not found');
+        if (!api || !api.refreshMcpPackage || !api.getUvCommand || !api.reDiscoverUv) {
+            throw new Error('Extension API missing required test helpers');
         }
+
+        // Force it via env var
+        process.env.MCP_STATA_UVX_CMD = bundledPath;
+        console.log(`[BUNDLED TEST] process.env.MCP_STATA_UVX_CMD is: ${process.env.MCP_STATA_UVX_CMD}`);
+        
+        // Force re-discovery
+        const currentCommand = api.reDiscoverUv();
+        
+        console.log(`[BUNDLED TEST] Extension is using command: ${currentCommand}`);
+        
+        // Ensure it's using the binary we forced
+        expect(currentCommand).toEqual(bundledPath);
 
         const version = api.refreshMcpPackage();
         expect(version).toBeTruthy();
         expect(version).not.toBe('unknown');
-        console.log(`[BUNDLED TEST] Successfully executed bundled binary. Reported version/output: ${version}`);
+    });
+
+    runIfEnabled('extension discovers bundled binary organically', async () => {
+        const ext = vscode.extensions.getExtension('tmonk.stata-workbench');
+        const api = await ext.activate();
+
+        // UNSET the override
+        delete process.env.MCP_STATA_UVX_CMD;
+        
+        // Force re-discovery
+        const currentCommand = api.reDiscoverUv();
+        
+        console.log(`[BUNDLED TEST] Organic discovery found: ${currentCommand}`);
+        
+        // It should match bundledPath because we now prioritize bundled over system PATH
+        expect(currentCommand).toEqual(bundledPath);
     });
 });

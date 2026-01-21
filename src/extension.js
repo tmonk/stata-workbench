@@ -176,7 +176,12 @@ function activate(context) {
             DataBrowserPanel,
             downloadGraphAsPdf,
             mcpClient,
-            refreshMcpPackage
+            refreshMcpPackage,
+            getUvCommand: () => uvCommand,
+            reDiscoverUv: () => {
+                ensureMcpCliAvailable(context);
+                return uvCommand;
+            }
         };
     }
 }
@@ -185,7 +190,12 @@ function ensureMcpCliAvailable(context) {
     const found = findUvBinary();
     if (found) {
         uvCommand = found;
-        process.env.MCP_STATA_UVX_CMD = uvCommand;
+        // Only set the env var if it's not already set to this value
+        // or if we want to ensure it's propagated to children.
+        // For tests, we want to AVOID overwriting a specific path override with "uvx"
+        if (!process.env.MCP_STATA_UVX_CMD || process.env.MCP_STATA_UVX_CMD !== uvCommand) {
+            process.env.MCP_STATA_UVX_CMD = uvCommand;
+        }
         return true;
     }
 
@@ -219,9 +229,13 @@ function getMcpPackageVersion() {
     const cmd = uvCommand;
     if (!cmd) return 'unknown';
 
+    const isUv = cmd.endsWith('uv') || cmd.endsWith('uv.exe');
+    const baseArgs = isUv ? ['tool', 'run'] : [];
+
     // 1) Try reading the installed package metadata via Python (works even if CLI is quiet).
     try {
-        const pyResult = spawnSync(cmd, ['--from', MCP_PACKAGE_SPEC, 'python', '-c', 'import importlib.metadata as im; print(im.version("mcp-stata"))'], {
+        const args = [...baseArgs, '--from', MCP_PACKAGE_SPEC, 'python', '-c', 'import importlib.metadata as im; print(im.version("mcp-stata"))'];
+        const pyResult = spawnSync(cmd, args, {
             encoding: 'utf8',
             timeout: 5000
         });
@@ -243,7 +257,8 @@ function getMcpPackageVersion() {
 
     // 2) Fallback to invoking the CLI with --version (some builds may emit this).
     try {
-        const result = spawnSync(cmd, ['--refresh', '--refresh-package', MCP_PACKAGE_NAME, '--from', MCP_PACKAGE_SPEC, MCP_PACKAGE_NAME, '--version'], {
+        const args = [...baseArgs, '--refresh', '--refresh-package', MCP_PACKAGE_NAME, '--from', MCP_PACKAGE_SPEC, MCP_PACKAGE_NAME, '--version'];
+        const result = spawnSync(cmd, args, {
             encoding: 'utf8',
             timeout: 5000
         });
@@ -268,7 +283,10 @@ function refreshMcpPackage() {
         return null;
     }
 
-    const args = ['--refresh', '--refresh-package', MCP_PACKAGE_NAME, '--from', MCP_PACKAGE_SPEC, MCP_PACKAGE_NAME, '--version'];
+    const isUv = cmd.endsWith('uv') || cmd.endsWith('uv.exe');
+    const baseArgs = isUv ? ['tool', 'run'] : [];
+    const args = [...baseArgs, '--refresh', '--refresh-package', MCP_PACKAGE_NAME, '--from', MCP_PACKAGE_SPEC, MCP_PACKAGE_NAME, '--version'];
+    
     try {
         const result = spawnSync(cmd, args, { encoding: 'utf8', timeout: 10000 });
         const stdout = result?.stdout?.toString?.().trim() || '';
@@ -337,17 +355,12 @@ function promptInstallMcpCli(context, force = false) {
 function findUvBinary(optionalInstallDir) {
     const base = ['uvx', 'uvx.exe', 'uv', 'uv.exe'];
 
-    // 1. Check system PATH first
-    for (const name of base) {
-        const result = spawnSync(name, ['--version'], { encoding: 'utf8' });
-        if (!result.error && result.status === 0) {
-            return name;
-        }
+    // 0. Use environment variable override if specified (e.g. for testing)
+    if (process.env.MCP_STATA_UVX_CMD) {
+        return process.env.MCP_STATA_UVX_CMD;
     }
 
-    const candidates = [];
-
-    // 2. Check for bundled binary as first fallback
+    // 1. Check for bundled binary first (Organic discovery)
     if (globalContext && globalContext.extensionUri && globalContext.extensionUri.fsPath) {
         const platform = process.platform;
         const arch = process.arch;
@@ -368,8 +381,15 @@ function findUvBinary(optionalInstallDir) {
         }
     }
 
-    // On Windows, the installer defaults to %USERPROFILE%\.local\bin when PATH isn't updated.
-    const defaultDirs = new Set();
+    // 2. Check system PATH
+    for (const name of base) {
+        const result = spawnSync(name, ['--version'], { encoding: 'utf8' });
+        if (!result.error && result.status === 0) {
+            return name;
+        }
+    }
+
+    const candidates = [];
     const home = typeof os.homedir === 'function' ? os.homedir() : null;
     if (home) {
         defaultDirs.add(path.join(home, '.local', 'bin'));
@@ -518,7 +538,10 @@ function writeMcpConfig(target) {
         const shouldWriteVscode = !!writeVscode;
 
         const resolvedCommand = uvCommand || 'uvx';
-        const expectedArgs = ['--refresh', '--refresh-package', MCP_PACKAGE_NAME, '--from', MCP_PACKAGE_SPEC, MCP_PACKAGE_NAME];
+        const isRunUv = resolvedCommand.endsWith('uv') || resolvedCommand.endsWith('uv.exe');
+        const expectedArgs = isRunUv 
+            ? ['tool', 'run', '--refresh', '--refresh-package', MCP_PACKAGE_NAME, '--from', MCP_PACKAGE_SPEC, MCP_PACKAGE_NAME]
+            : ['--refresh', '--refresh-package', MCP_PACKAGE_NAME, '--from', MCP_PACKAGE_SPEC, MCP_PACKAGE_NAME];
 
         const existingCursor = json.mcpServers?.[MCP_SERVER_ID];
         const existingVscode = json.servers?.[MCP_SERVER_ID];

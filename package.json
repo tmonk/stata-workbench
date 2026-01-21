@@ -237,7 +237,7 @@
     "test": "bun test --preload ./test/bun-preload.js test/unit",
     "pretest:integration": "bun run compile",
     "test:integration": "bun -e \"process.env.MCP_STATA_INTEGRATION='1'; require('./test/integration/runTest');\"",
-    "test:bundled": "bun -e \"process.env.FORCE_BUNDLED_TEST='1'; require('./test/integration/runTest');\"",
+    "test:bundled": "bun -e \"process.env.FORCE_BUNDLED_TEST='1'; process.env.TEST_PATTERN='Bundled Binary'; require('./test/integration/runTest');\"",
     "vscode:prepublish": "node -e \"const t=process.env.npm_config_target || process.env.BUILD_TARGET; const s=process.env.SENTRY_UPLOAD; if(t) require('child_process').execSync('bun run download-uv ' + t, {stdio:'inherit'}); require('child_process').execSync('bun run bundle' + (t ? ' -- --target=' + t : ''), {stdio:'inherit', env: {...process.env, SENTRY_UPLOAD: s}});\"",
     "package": "bun run bundle && node ./scripts/verify-build.js && bunx vsce package",
     "package:target": "bun run download-uv $npm_config_target && BUILD_TARGET=$npm_config_target bunx vsce package --target $npm_config_target",
