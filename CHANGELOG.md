@@ -1,3 +1,10 @@
+## [0.15.10](https://github.com/tmonk/stata-workbench/compare/v0.15.9...v0.15.10) (2026-01-21)
+
+
+### Bug Fixes
+
+* add timeout configuration for Stata execution commands and metadata requests ([07ecb30](https://github.com/tmonk/stata-workbench/commit/07ecb3076ade446ea689e96757c3e4c221154557))
+
 ## [0.15.9](https://github.com/tmonk/stata-workbench/compare/v0.15.8...v0.15.9) (2026-01-21)
 
 
