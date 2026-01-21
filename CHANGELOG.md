@@ -1,3 +1,10 @@
+## [0.15.12](https://github.com/tmonk/stata-workbench/compare/v0.15.11...v0.15.12) (2026-01-21)
+
+
+### Bug Fixes
+
+* log the path of the uv binary when found or automatically installed ([fa5de46](https://github.com/tmonk/stata-workbench/commit/fa5de46e1f8467a54b001a46a06297a9ea9f2c4b))
+
 ## [0.15.11](https://github.com/tmonk/stata-workbench/compare/v0.15.10...v0.15.11) (2026-01-21)
 
 
