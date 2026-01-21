@@ -117,7 +117,12 @@
         "stataMcp.requestTimeoutMs": {
           "type": "number",
           "default": 100000,
-          "description": "Timeout (ms) for MCP requests before showing an error."
+          "description": "Timeout (ms) for Stata metadata/UI requests (e.g., getting variable lists). To enable timeout for long-running execution commands (Run File, Run Selection), use stataMcp.enableExecuteTimeout."
+        },
+        "stataMcp.enableExecuteTimeout": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable timeout for Stata execution commands (Run File, Run Selection). If disabled, these commands will run indefinitely unless manually cancelled."
         },
         "stataMcp.autoRevealOutput": {
           "type": "boolean",

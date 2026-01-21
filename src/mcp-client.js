@@ -1289,7 +1289,23 @@ class StataMcpClient {
 
     async _enqueue(label, options = {}, task, meta = {}, normalize = false, collectArtifacts = false) {
         const config = vscode.workspace.getConfiguration('stataMcp');
-        const timeoutMs = options.timeoutMs ?? config.get('requestTimeoutMs', 45000);
+        let timeoutMs = options.timeoutMs ?? config.get('requestTimeoutMs', 10000);
+
+        // Metadata/UI commands are expected to be fast and should always have a timeout.
+        // All other commands (assumed to be Stata execution) have no timeout by default (opt-in via config).
+        const isMetadata = [
+            'view_data',
+            'get_ui_channel',
+            'get_variable_list',
+            'list_graphs',
+            'fetch_graph',
+            'export_all_graphs',
+            'read_log'
+        ].includes(label);
+
+        if (!isMetadata && !config.get('enableExecuteTimeout', false)) {
+            timeoutMs = 0;
+        }
 
         this._pending += 1;
         this._statusEmitter.emit('status', this._active ? 'running' : 'queued');
