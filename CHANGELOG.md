@@ -1,3 +1,10 @@
+## [0.15.9](https://github.com/tmonk/stata-workbench/compare/v0.15.8...v0.15.9) (2026-01-21)
+
+
+### Bug Fixes
+
+* enhance VS Code Marketplace publishing with retry logic and limit parallel execution ([7e13933](https://github.com/tmonk/stata-workbench/commit/7e139333d4a7c3758d08ff841012df9aeef61a37))
+
 ## [0.15.8](https://github.com/tmonk/stata-workbench/compare/v0.15.7...v0.15.8) (2026-01-21)
 
 
