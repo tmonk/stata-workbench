@@ -1,3 +1,10 @@
+## [0.15.8](https://github.com/tmonk/stata-workbench/compare/v0.15.7...v0.15.8) (2026-01-21)
+
+
+### Bug Fixes
+
+* update Sentry integration from electron to browser and bump version dependencies ([fdd2291](https://github.com/tmonk/stata-workbench/commit/fdd2291ba0c2dff2794d255fca7dec42548310a8))
+
 ## [0.15.7](https://github.com/tmonk/stata-workbench/compare/v0.15.6...v0.15.7) (2026-01-20)
 
 
