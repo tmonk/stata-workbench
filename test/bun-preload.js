@@ -27,7 +27,7 @@ mock.module('@sentry/profiling-node', () => ({
   nodeProfilingIntegration: jest.fn()
 }));
 
-mock.module('@sentry/electron/renderer', () => ({
+mock.module('@sentry/browser', () => ({
   init: jest.fn(),
   replayIntegration: jest.fn(() => ({ name: 'Replay' }))
 }));

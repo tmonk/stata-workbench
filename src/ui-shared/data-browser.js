@@ -38,7 +38,7 @@ window.onerror = function (msg, url, line, col, error) {
 };
 
 // --- Sentry Initialization ---
-const Sentry = typeof require !== 'undefined' ? require("@sentry/electron/renderer") : null;
+const Sentry = typeof require !== 'undefined' ? require("@sentry/browser") : null;
 
 if (Sentry && Sentry.init) {
     Sentry.init({

@@ -1,6 +1,6 @@
 // Shared UI Logic for Stata Extension
 
-const Sentry = typeof require !== 'undefined' ? require("@sentry/electron/renderer") : null;
+const Sentry = typeof require !== 'undefined' ? require("@sentry/browser") : null;
 
 if (Sentry && Sentry.init) {
     Sentry.init({
