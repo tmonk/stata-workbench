@@ -154,17 +154,16 @@ if (telemetryEnabled) {
         integrations: isBun ? [] : [
             ...(nodeProfilingIntegration ? [nodeProfilingIntegration()] : []),
             Sentry.httpIntegration({
-                // Ignore internal loopback requests from VS Code core (like PDF viewers)
-                // to reduce noise, while keeping our own backend/MCP traffic and external checks.
+                // Broadly ignore all HTTP noise that is not related to our Data Browser API,
+                // essential PyPI version checks, or our specific namespaces.
                 shouldCreateSpanForRequest: (url) => {
-                    if (url.includes('pypi.org')) return true; // Keep PyPI version checks to ensure valid
-
-                    const isLocal = url.includes('127.0.0.1') || url.includes('localhost');
-                    if (isLocal) {
-                        // Keep spans for our own API interactions (Data Browser / MCP)
-                        return url.includes('/v1/') || url.includes('/mcp/');
-                    }
-                    return true;
+                    const u = url.toLowerCase();
+                    return u.includes('/v1/') || 
+                           u.includes('pypi.org') || 
+                           u.includes('tmonk') || 
+                           u.includes('tdmonk') || 
+                           u.includes('stata') || 
+                           u.includes('mcp-stata');
                 }
             })
         ],
@@ -173,10 +172,26 @@ if (telemetryEnabled) {
         // Release Health / Session Tracking
         autoSessionTracking: true,
 
-        // Enable internal logs for debugging telemetry transitions
-        enableLogs: true,
+        // Disable internal logs for debugging telemetry transitions (per user request to reduce noise)
+        enableLogs: false,
         // Tracing
-        tracesSampleRate: 1.0, //  Capture 100% of the transactions
+        tracesSampler: (samplingContext) => {
+            const name = (samplingContext.name || '').toLowerCase();
+            
+            // 1. Always keep our explicit extension operations
+            if (name.startsWith('extension.') || name.startsWith('mcp.')) {
+                return 1.0;
+            }
+
+            // 2. Filter all other traffic to only include our namespaces or Data Browser /v1/ API
+            const keep = name.includes('/v1/') || 
+                         name.includes('tmonk') || 
+                         name.includes('tdmonk') || 
+                         name.includes('stata') || 
+                         name.includes('mcp-stata');
+
+            return keep ? 1.0 : 0;
+        },
         // Set sampling rate for profiling - this is evaluated only once per SDK.init call
         profileSessionSampleRate: 1.0,
         // Trace lifecycle automatically enables profiling during active traces
