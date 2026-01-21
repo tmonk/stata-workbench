@@ -175,7 +175,8 @@ function activate(context) {
             TerminalPanel,
             DataBrowserPanel,
             downloadGraphAsPdf,
-            mcpClient
+            mcpClient,
+            refreshMcpPackage
         };
     }
 }
