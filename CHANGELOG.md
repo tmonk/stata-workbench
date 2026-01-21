@@ -1,3 +1,10 @@
+## [0.16.3](https://github.com/tmonk/stata-workbench/compare/v0.16.2...v0.16.3) (2026-01-21)
+
+
+### Bug Fixes
+
+* allow PyPI version checks for debugging ([7085cce](https://github.com/tmonk/stata-workbench/commit/7085cce4db6f76609c12e91f2d8814de993c2b07))
+
 ## [0.16.2](https://github.com/tmonk/stata-workbench/compare/v0.16.1...v0.16.2) (2026-01-21)
 
 
