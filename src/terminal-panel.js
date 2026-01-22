@@ -5,6 +5,7 @@ const os = require('os');
 const vscode = require('vscode');
 const fs = require('fs');
 const { filterMcpLogs } = require('./log-utils');
+const { getTmpDir } = require('./fs-utils');
 /**
  * Parse SMCL text and extract formatted error information
  * @param {string} smclText -Raw SMCL text
@@ -154,7 +155,7 @@ class TerminalPanel {
           localResourceRoots: [
             vscode.Uri.joinPath(TerminalPanel.extensionUri, 'src', 'ui-shared'),
             vscode.Uri.joinPath(TerminalPanel.extensionUri, 'dist', 'ui-shared'),
-            vscode.Uri.file(os.tmpdir())
+            vscode.Uri.file(getTmpDir())
           ]
         }
       );

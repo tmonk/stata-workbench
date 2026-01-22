@@ -12,6 +12,7 @@ const { client: mcpClient } = require('./mcp-client');
 const { TerminalPanel } = require('./terminal-panel');
 const { DataBrowserPanel } = require('./data-browser-panel');
 const { openArtifact } = require('./artifact-utils');
+const { getTmpFilePath, getTmpDir } = require('./fs-utils');
 
 let outputChannel;
 let statusBarItem;
@@ -847,9 +848,7 @@ async function runFile() {
 
         if (isDirty && behavior === 'runDirtyFile') {
             try {
-                const tmpDir = os.tmpdir();
-                const fileName = `stata_tmp_${Date.now()}_${path.basename(filePath)}`;
-                tmpFile = path.join(tmpDir, fileName);
+                tmpFile = getTmpFilePath(filePath, globalContext);
                 fs.writeFileSync(tmpFile, editor.document.getText(), 'utf8');
                 effectiveFilePath = tmpFile;
             } catch (err) {
