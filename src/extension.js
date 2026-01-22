@@ -118,7 +118,7 @@ function activate(context) {
     const version = pkg?.version || 'unknown';
     appendLine(`Stata Workbench ready (extension v${version})`);
     missingCliPrompted = !!context.globalState?.get?.(MISSING_CLI_PROMPT_KEY);
-    if (!missingCliPrompted && hasExistingMcpConfig(context)) {
+    if (!missingCliPrompted && mcpClient.hasConfig()) {
         missingCliPrompted = true;
         context.globalState?.update?.(MISSING_CLI_PROMPT_KEY, true).catch?.(() => { });
     }
@@ -182,16 +182,44 @@ function activate(context) {
         }
         return null;
     });
-    missingCli = !ensureMcpCliAvailable(context);
+
+    // Resolve 'uv' binary (system -> bundled fallback)
+    uvCommand = findUvBinary();
+    if (uvCommand && (!process.env.MCP_STATA_UVX_CMD || process.env.MCP_STATA_UVX_CMD !== uvCommand)) {
+        process.env.MCP_STATA_UVX_CMD = uvCommand;
+    }
+
+    // Load existing config and validate
+    const existingServerConfig = mcpClient.getServerConfig();
+    const isWorking = isMcpConfigWorking(existingServerConfig);
+
+    if (isWorking) {
+        missingCli = false;
+        outputChannel?.appendLine?.('Using existing, functional MCP configuration');
+    } else {
+        if (existingServerConfig?.configPath) {
+            outputChannel?.appendLine?.(`Existing MCP config at ${existingServerConfig.configPath} appears broken or missing.`);
+        }
+        missingCli = !ensureMcpCliAvailable(context);
+    }
+
     if (!missingCli) {
+        // Refresh package first so we know if we're "current"
+        const refreshed = refreshMcpPackage();
+        mcpPackageVersion = refreshed || getMcpPackageVersion();
+
         const autoConfigureMcp = settings.get('autoConfigureMcp', true);
         if (autoConfigureMcp) {
-            ensureMcpConfigs(context);
+            // Even if it was "working" before, check if it's still "current" after refresh.
+            // If not current, we update the config file to point to the new version/path.
+            const isCurrent = isWorking && isMcpConfigCurrent(existingServerConfig, uvCommand, mcpPackageVersion);
+            if (!isCurrent) {
+                ensureMcpConfigs(context);
+            }
         } else {
             outputChannel?.appendLine?.('Skipping MCP config update: stataMcp.autoConfigureMcp is disabled');
         }
-        const refreshed = refreshMcpPackage();
-        mcpPackageVersion = refreshed || getMcpPackageVersion();
+        
         appendLine(`mcp-stata version: ${mcpPackageVersion}`);
         try {
             Sentry.setTag("mcp.version", mcpPackageVersion);
@@ -211,7 +239,9 @@ function activate(context) {
             reDiscoverUv: () => {
                 ensureMcpCliAvailable(context);
                 return uvCommand;
-            }
+            },
+            isMcpConfigWorking,
+            isMcpConfigCurrent
         };
     }
 }
@@ -386,7 +416,16 @@ function findUvBinary(optionalInstallDir) {
         return process.env.MCP_STATA_UVX_CMD;
     }
 
-    // 1. Check for bundled binary first (Organic discovery)
+    // 1. Check system PATH first to respect user-managed installations
+    for (const name of base) {
+        // Simple test to see if it's on the PATH and executable
+        const result = spawnSync(name, ['--version'], { encoding: 'utf8', shell: process.platform === 'win32' });
+        if (!result.error && result.status === 0) {
+            return name;
+        }
+    }
+
+    // 2. Check for bundled binary as fallback
     if (globalContext && globalContext.extensionUri && globalContext.extensionUri.fsPath) {
         const platform = process.platform;
         const arch = process.arch;
@@ -407,14 +446,7 @@ function findUvBinary(optionalInstallDir) {
         }
     }
 
-    // 2. Check system PATH
-    for (const name of base) {
-        const result = spawnSync(name, ['--version'], { encoding: 'utf8' });
-        if (!result.error && result.status === 0) {
-            return name;
-        }
-    }
-
+    // 3. Check common installation directories
     const candidates = [];
     const defaultDirs = new Set();
     const home = typeof os.homedir === 'function' ? os.homedir() : null;
@@ -437,12 +469,48 @@ function findUvBinary(optionalInstallDir) {
     }
 
     for (const candidate of candidates) {
-        const result = spawnSync(candidate, ['--version'], { encoding: 'utf8' });
+        const result = spawnSync(candidate, ['--version'], { encoding: 'utf8', shell: process.platform === 'win32' });
         if (!result.error && result.status === 0) {
             return candidate;
         }
     }
     return null;
+}
+
+function isMcpConfigWorking(config) {
+    if (!config || !config.command) return false;
+    try {
+        const result = spawnSync(config.command, ['--version'], { encoding: 'utf8', shell: process.platform === 'win32', timeout: 3000 });
+        return !result.error && result.status === 0;
+    } catch (_err) {
+        return false;
+    }
+}
+
+/**
+ * Checks if the existing MCP config matches what we expect to be "current".
+ * If mcp-stata has released a new version, the config might be "working" but not "current".
+ */
+function isMcpConfigCurrent(config, expectedUv, expectedVersion) {
+    if (!config || !config.command || !config.args) return false;
+    
+    // Check if the command matches our resolved uv command (or is a valid equivalent)
+    if (config.command !== expectedUv) {
+        // If we expect 'uvx' and they have an absolute path to it, that's fine.
+        // But if they have some other command, it's not our "current" preferred setup.
+        if (!config.command.includes('uv')) return false;
+    }
+
+    // Check args for at least the package and version.
+    const argsStr = config.args.join(' ');
+    if (!argsStr.includes(MCP_PACKAGE_NAME)) return false;
+    
+    // If we have a specific version we expect, check for it.
+    if (expectedVersion && expectedVersion !== 'unknown') {
+        if (!argsStr.includes(expectedVersion) && !argsStr.includes('@latest')) return false;
+    }
+
+    return true;
 }
 
 function ensureMcpConfigs(context) {
@@ -578,15 +646,21 @@ function writeMcpConfig(target) {
         const resolvedCommand = uvCommand || 'uvx';
 
         // Safeguard: never write a path that looks like a mock to the user's config.
-        if (resolvedCommand.includes('/mock/')) {
+        const isTest = globalContext?.extensionMode === vscode.ExtensionMode.Test;
+        if (resolvedCommand.includes('/mock/') && !isTest) {
             outputChannel?.appendLine?.('Skipping MCP config write: resolved command appears to be a mock path');
             return;
         }
 
+        // Use the most current version we've resolved, or fallback to @latest
+        const activeSpec = (mcpPackageVersion && mcpPackageVersion !== 'unknown')
+            ? `${MCP_PACKAGE_NAME}==${mcpPackageVersion}`
+            : MCP_PACKAGE_SPEC;
+
         const isRunUv = resolvedCommand.endsWith('uv') || resolvedCommand.endsWith('uv.exe');
         const expectedArgs = isRunUv 
-            ? ['tool', 'run', '--refresh', '--refresh-package', MCP_PACKAGE_NAME, '--from', MCP_PACKAGE_SPEC, MCP_PACKAGE_NAME]
-            : ['--refresh', '--refresh-package', MCP_PACKAGE_NAME, '--from', MCP_PACKAGE_SPEC, MCP_PACKAGE_NAME];
+            ? ['tool', 'run', '--refresh', '--refresh-package', MCP_PACKAGE_NAME, '--from', activeSpec, MCP_PACKAGE_NAME]
+            : ['--refresh', '--refresh-package', MCP_PACKAGE_NAME, '--from', activeSpec, MCP_PACKAGE_NAME];
 
         const existingCursor = json.mcpServers?.[MCP_SERVER_ID];
         const existingVscode = json.servers?.[MCP_SERVER_ID];
@@ -1591,5 +1665,7 @@ module.exports = {
     getMcpConfigTarget,
     downloadGraphAsPdf,
     mcpClient,
-    DataBrowserPanel
+    DataBrowserPanel,
+    isMcpConfigWorking,
+    isMcpConfigCurrent
 };

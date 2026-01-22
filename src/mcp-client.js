@@ -99,6 +99,14 @@ class StataMcpClient {
         this._onTaskDone = typeof handler === 'function' ? handler : null;
     }
 
+    /**
+     * Returns true if a server configuration for mcp-stata exists in any candidate mcp.json.
+     */
+    hasConfig() {
+        const config = this._loadServerConfig();
+        return !!config.configPath;
+    }
+
     onStatusChanged(listener) {
         this._statusEmitter.on('status', listener);
         return { dispose: () => this._statusEmitter.off('status', listener) };
@@ -2011,6 +2019,10 @@ class StataMcpClient {
             }
         }
         return env;
+    }
+
+    getServerConfig(options = {}) {
+        return this._loadServerConfig(options);
     }
 
     _loadServerConfig({ ignoreCommandArgs = false } = {}) {
