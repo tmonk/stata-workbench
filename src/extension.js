@@ -474,7 +474,18 @@ function hasExistingMcpConfig(context) {
 function getMcpConfigTarget(context) {
     const appName = (context?.mcpAppNameOverride || vscode.env?.appName || '').toLowerCase();
     const hasHomeOverride = context && Object.prototype.hasOwnProperty.call(context, 'mcpHomeOverride');
-    const home = hasHomeOverride ? context.mcpHomeOverride : os.homedir();
+    
+    // In tests, we must not default to the real home directory unless explicitly requested.
+    // This prevents unit tests from accidentally writing to the user's real mcp.json.
+    let home;
+    if (hasHomeOverride) {
+        home = context.mcpHomeOverride;
+    } else if (context && context.extensionMode === vscode.ExtensionMode.Test) {
+        home = null;
+    } else {
+        home = os.homedir();
+    }
+
     const overridePath = context?.mcpConfigPath;
     const platform = context?.mcpPlatformOverride || process.platform;
     const resolved = resolveHostMcpPath(appName, home, overridePath, platform, hasHomeOverride);
@@ -565,6 +576,13 @@ function writeMcpConfig(target) {
         const shouldWriteVscode = !!writeVscode;
 
         const resolvedCommand = uvCommand || 'uvx';
+
+        // Safeguard: never write a path that looks like a mock to the user's config.
+        if (resolvedCommand.includes('/mock/')) {
+            outputChannel?.appendLine?.('Skipping MCP config write: resolved command appears to be a mock path');
+            return;
+        }
+
         const isRunUv = resolvedCommand.endsWith('uv') || resolvedCommand.endsWith('uv.exe');
         const expectedArgs = isRunUv 
             ? ['tool', 'run', '--refresh', '--refresh-package', MCP_PACKAGE_NAME, '--from', MCP_PACKAGE_SPEC, MCP_PACKAGE_NAME]

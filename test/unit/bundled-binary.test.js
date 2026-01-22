@@ -9,6 +9,8 @@ let vscode;
 describe('Bundled Binary Discovery', () => {
     let originalSpawnSync;
     let originalExistsSync;
+    let originalWriteFileSync;
+    let originalMkdirSync;
     let oldEnv;
 
     beforeEach(() => {
@@ -22,9 +24,13 @@ describe('Bundled Binary Discovery', () => {
 
         originalSpawnSync = cp.spawnSync;
         originalExistsSync = fs.existsSync;
+        originalWriteFileSync = fs.writeFileSync;
+        originalMkdirSync = fs.mkdirSync;
 
         cp.spawnSync = jest.fn();
         fs.existsSync = jest.fn();
+        fs.writeFileSync = jest.fn();
+        fs.mkdirSync = jest.fn();
 
         // Basic VS Code mock
         vscode = require('vscode');
@@ -36,6 +42,8 @@ describe('Bundled Binary Discovery', () => {
     afterEach(() => {
         cp.spawnSync = originalSpawnSync;
         fs.existsSync = originalExistsSync;
+        fs.writeFileSync = originalWriteFileSync;
+        fs.mkdirSync = originalMkdirSync;
         process.env = oldEnv;
         jest.clearAllMocks();
     });
@@ -70,7 +78,8 @@ describe('Bundled Binary Discovery', () => {
             extensionUri: { fsPath: '/mock/extension' },
             globalStoragePath: '/mock/storage',
             globalState: { get: jest.fn(), update: jest.fn().mockResolvedValue() },
-            subscriptions: []
+            subscriptions: [],
+            extensionMode: vscode.ExtensionMode.Test
         };
 
         // Re-inject globalContext which is set in activate

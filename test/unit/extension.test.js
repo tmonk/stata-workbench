@@ -134,7 +134,8 @@ describe('extension unit tests', () => {
                 globalState: { get: jest.fn().mockReturnValue(true), update: jest.fn().mockResolvedValue() },
                 globalStoragePath: '/tmp/globalStorage',
                 extensionUri: {},
-                extensionPath: '/workspace'
+                extensionPath: '/workspace',
+                extensionMode: vscode.ExtensionMode.Test
             };
 
             await extension.activate(context);
@@ -415,7 +416,8 @@ describe('extension unit tests', () => {
                 globalState,
                 globalStoragePath: '/tmp/globalStorage',
                 extensionUri: {},
-                extensionPath: '/workspace'
+                extensionPath: '/workspace',
+                extensionMode: vscode.ExtensionMode.Test
             };
 
             await extension.activate(context);
@@ -456,7 +458,8 @@ describe('extension unit tests', () => {
                 mcpConfigPath: '/tmp/global/mcp.json',
                 globalStoragePath: '/tmp/globalStorage',
                 extensionUri: {},
-                extensionPath: '/workspace'
+                extensionPath: '/workspace',
+                extensionMode: vscode.ExtensionMode.Test
             };
 
             await extension.activate(context);
