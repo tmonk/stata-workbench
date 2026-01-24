@@ -1,3 +1,10 @@
+## [0.16.7](https://github.com/tmonk/stata-workbench/compare/v0.16.6...v0.16.7) (2026-01-24)
+
+
+### Bug Fixes
+
+* MCP client logging and configuration handling ([6ce7f1e](https://github.com/tmonk/stata-workbench/commit/6ce7f1e558df9340546e450ae30d825933cc6015))
+
 ## [0.16.6](https://github.com/tmonk/stata-workbench/compare/v0.16.5...v0.16.6) (2026-01-24)
 
 
