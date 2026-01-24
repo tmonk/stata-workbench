@@ -1,3 +1,10 @@
+## [0.16.11](https://github.com/tmonk/stata-workbench/compare/v0.16.10...v0.16.11) (2026-01-24)
+
+
+### Bug Fixes
+
+* move to local file reads for log streaming ([116eaa1](https://github.com/tmonk/stata-workbench/commit/116eaa160a3f7eaaeb919bec5b5c164407e54509))
+
 ## [0.16.10](https://github.com/tmonk/stata-workbench/compare/v0.16.9...v0.16.10) (2026-01-24)
 
 
