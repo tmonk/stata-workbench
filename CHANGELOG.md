@@ -1,3 +1,10 @@
+## [0.16.8](https://github.com/tmonk/stata-workbench/compare/v0.16.7...v0.16.8) (2026-01-24)
+
+
+### Bug Fixes
+
+* improve log tailing logic and enhance notification handling in StataMcpClient ([6b7824e](https://github.com/tmonk/stata-workbench/commit/6b7824e319394c6d13c963214f98470386415a1f))
+
 ## [0.16.7](https://github.com/tmonk/stata-workbench/compare/v0.16.6...v0.16.7) (2026-01-24)
 
 
