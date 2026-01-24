@@ -1,3 +1,10 @@
+## [0.16.6](https://github.com/tmonk/stata-workbench/compare/v0.16.5...v0.16.6) (2026-01-24)
+
+
+### Bug Fixes
+
+* uv command validation and error handling in MCP client and extension ([b188d15](https://github.com/tmonk/stata-workbench/commit/b188d15d6b7f69af7ed000d445a7ca454183566a))
+
 ## [0.16.5](https://github.com/tmonk/stata-workbench/compare/v0.16.4...v0.16.5) (2026-01-24)
 
 
