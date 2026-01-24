@@ -1,3 +1,13 @@
+## [0.16.5](https://github.com/tmonk/stata-workbench/compare/v0.16.4...v0.16.5) (2026-01-24)
+
+
+### Bug Fixes
+
+* add fs-utils for temporary file and directory management ([bdf8c55](https://github.com/tmonk/stata-workbench/commit/bdf8c55b9fcef4a6612017ba853d0f19b8f953d0))
+* harden MCP configuration handling and validation logic ([0bc8332](https://github.com/tmonk/stata-workbench/commit/0bc8332408607cfd80299d51d18505df1d241622))
+* prevent accidental writes to real home directory in tests ([ec85db8](https://github.com/tmonk/stata-workbench/commit/ec85db8db31bcdce6e29ac044b01df3f9833cbcd))
+* update logging command and reorganize MCP configuration path priorities ([6084d2e](https://github.com/tmonk/stata-workbench/commit/6084d2eadb3bf941e61f159798f08aa062e5f69b))
+
 ## [0.16.4](https://github.com/tmonk/stata-workbench/compare/v0.16.3...v0.16.4) (2026-01-21)
 
 
