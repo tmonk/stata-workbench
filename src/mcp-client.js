@@ -502,10 +502,25 @@ class StataMcpClient {
         this._statusEmitter.emit('status', 'connecting');
         this._recentStderr = [];
 
+        // Determine if we are using uvx or a local command
+        const config = vscode.workspace.getConfiguration('stataMcp');
+        const uvCommand = process.env.MCP_STATA_UVX_CMD || 'uvx';
+        const serverConfig = this._loadServerConfig({ ignoreCommandArgs: this._forceLatestServer });
+
+        const fallbackSpec = MCP_PACKAGE_NAME;
+        const resolvedSpec = this._pypiVersion ? `${MCP_PACKAGE_NAME}==${this._pypiVersion}` : fallbackSpec;
+        const currentSpec = process.env.MCP_STATA_PACKAGE_SPEC || (this._forceLatestServer ? `${MCP_PACKAGE_NAME}@latest` : resolvedSpec);
+
+        let finalCommand = serverConfig.command || uvCommand;
+        let finalArgs = serverConfig.args || ['--refresh', '--refresh-package', MCP_PACKAGE_NAME, '--from', currentSpec, MCP_PACKAGE_NAME];
+
+        this._log(`Starting mcp-stata via ${finalCommand} ${finalArgs.join(' ')} (ext v${this._clientVersion})`);
+
         // Cursor: try a built-in bridge if present
         const commands = await vscode.commands.getCommands(true);
         const cursorBridge = commands.find(cmd => cmd.toLowerCase().includes('cursor') && cmd.toLowerCase().includes('mcp') && cmd.toLowerCase().includes('invoke'));
         if (cursorBridge) {
+            this._log(`[mcp-stata] Found Cursor MCP bridge: ${cursorBridge}`);
             this._cursorCommand = cursorBridge;
             this._statusEmitter.emit('status', 'connected');
             this._availableTools = new Set();
@@ -518,24 +533,12 @@ class StataMcpClient {
             throw new Error(`MCP SDK not found. Please run \`bun install\` to fetch @modelcontextprotocol/sdk.${detail}`);
         }
 
-        const config = vscode.workspace.getConfiguration('stataMcp');
         const setupTimeoutSeconds = (() => {
             if (process.env.STATA_SETUP_TIMEOUT) return process.env.STATA_SETUP_TIMEOUT;
             const val = Number(config.get('setupTimeoutSeconds', 60));
             if (Number.isFinite(val) && val > 0) return String(Math.round(val));
             return '60';
         })();
-
-        const uvCommand = process.env.MCP_STATA_UVX_CMD || 'uvx';
-        const serverConfig = this._loadServerConfig({ ignoreCommandArgs: this._forceLatestServer });
-
-        // Use command/args from config if available, otherwise fall back to uvx with our determined version
-        const fallbackSpec = `${MCP_PACKAGE_NAME}>=1.18.7`;
-        const resolvedSpec = this._pypiVersion ? `${MCP_PACKAGE_NAME}==${this._pypiVersion}` : fallbackSpec;
-        const currentSpec = process.env.MCP_STATA_PACKAGE_SPEC || (this._forceLatestServer ? `${MCP_PACKAGE_NAME}@latest` : resolvedSpec);
-
-        let finalCommand = serverConfig.command || uvCommand;
-        let finalArgs = serverConfig.args || ['--refresh', '--refresh-package', MCP_PACKAGE_NAME, '--from', currentSpec, MCP_PACKAGE_NAME];
 
         // Perform a pre-flight check to avoid ENOENT crashes in the transport layer.
         // On Windows, spawnSync handles .cmd/.exe suffixing when shell is not used if the command is on PATH.
@@ -643,7 +646,6 @@ class StataMcpClient {
             this._log(`[mcp-stata] WARNING: transport.stderr not available for capture`);
         }
 
-        this._log(`Starting mcp-stata via ${finalCommand} ${finalArgs.join(' ')} (ext v${this._clientVersion})`);
         const client = new Client({ name: 'stata-vscode', version: this._clientVersion });
         if (typeof client.on === 'function') {
             client.on('error', (err) => {
@@ -659,122 +661,7 @@ class StataMcpClient {
         if (typeof client.setNotificationHandler === 'function') {
             if (LoggingMessageNotificationSchema) {
                 client.setNotificationHandler(LoggingMessageNotificationSchema, (notification) => {
-                    const text = String(notification?.params?.data ?? '');
-                    if (!text) return;
-                    const timestamp = new Date().toLocaleTimeString();
-                    const parsed = this._tryParseJson(text);
-                    const event = parsed?.event;
-                    this._log(`[${timestamp}] Notification received: ${event || 'logMessage'}`);
-                    const taskId = parsed?.task_id || parsed?.taskId;
-                    let run = this._activeRun;
-                    if (!run && taskId) {
-                        run = this._runsByTaskId.get(String(taskId)) || null;
-                    } else if (run && taskId && run.taskId && String(run.taskId) !== String(taskId)) {
-                        run = this._runsByTaskId.get(String(taskId)) || null;
-                    }
-                    if (!run) return;
-                    if (event === 'log_path' && parsed?.path) {
-                        this._ensureLogTail(client, run, String(parsed.path)).catch(() => { });
-                        return;
-                    }
-
-                    if (event === 'graph_ready') {
-                        const graph = parsed?.graph;
-                        if (graph) {
-                            const artifact = this._graphToArtifact(graph, run.baseDir, parsed);
-                            if (artifact) {
-                                run._graphArtifacts.push(artifact);
-                                if (typeof run.onGraphReady === 'function') {
-                                    try {
-                                        run.onGraphReady(artifact);
-                                    } catch (_err) {
-                                        Sentry.captureException(_err);
-                                    }
-                                }
-                            }
-                        }
-                        return;
-                    }
-
-                    if (event === 'task_done') {
-                        if (taskId) {
-                            run._taskDonePayload = parsed;
-                            run._taskDoneTaskId = String(taskId);
-                            const hasOnTaskDone = typeof run.onTaskDone === 'function';
-                            const taskPayload = {
-                                taskId: String(taskId),
-                                runId: run?._runId || null,
-                                logPath: parsed?.log_path || parsed?.logPath || null,
-                                status: parsed?.status || null,
-                                rc: typeof parsed?.rc === 'number' ? parsed.rc : null
-                            };
-                            if (hasOnTaskDone) {
-                                try {
-                                    run.onTaskDone(taskPayload);
-                                } catch (_err) {
-                                    Sentry.captureException(_err);
-                                }
-                            } else if (typeof this._onTaskDone === 'function') {
-                                try {
-                                    this._onTaskDone(taskPayload);
-                                } catch (_err) {
-                                    Sentry.captureException(_err);
-                                }
-                            }
-                            run._tailCancelled = true;
-                            run._fastDrain = true;
-                            if (typeof run._taskDoneResolve === 'function') {
-                                run._taskDoneResolve(parsed);
-                            }
-                        }
-                        return;
-                    }
-
-                    // Stream exclusively from the log file once available; ignore logMessage output
-                    // to avoid duplicate streaming and reduce latency variance.
-                    if (run.logPath || run._logOnly) return;
-
-                    // LINE BUFFERING: 
-                    // To ensure syntax highlighting and SMCL parsing are consistent, we must
-                    // only process full lines. Chunks cutting through lines lead to "leaked" 
-                    // unhighlighted text or broken tags in the webview.
-                    run._lineBuffer = (run._lineBuffer || '') + text;
-                    const lines = run._lineBuffer.split(/\r?\n/);
-
-                    // The last element is either an empty string (if chunk ended in \n)
-                    // or a partial line (if it didn't). We keep it in the buffer.
-                    run._lineBuffer = lines.pop();
-
-                    // SPECIAL: If the last complete line is just a prompt, move it back into buffer
-                    // to allow it to be collapsed with the next chunk in smclToHtml
-                    if (lines.length > 0) {
-                        const lastLine = lines[lines.length - 1];
-                        if (lastLine.trim() === '.') {
-                            run._lineBuffer = lines.pop() + '\n' + (run._lineBuffer || '');
-                        }
-                    }
-
-                    if (lines.length > 0) {
-                        // Join back the completed lines with newlines
-                        const completedText = lines.join('\n') + '\n';
-                        if (typeof run.onRawLog === 'function') {
-                            try {
-                                run.onRawLog(completedText);
-                            } catch (_err) {
-                                Sentry.captureException(_err);
-                            }
-                        }
-                        const filtered = this._filterLogChunk(completedText);
-                        if (!filtered) return;
-                        run._appendLog?.(filtered);
-                        if (typeof run.onLog === 'function') {
-                            try {
-                                run.onLog(filtered);
-                            } catch (_err) {
-                                Sentry.captureException(_err);
-                            }
-                        }
-                    }
+                    this._onLoggingMessage(client, notification);
                 });
             }
 
@@ -1091,9 +978,10 @@ class StataMcpClient {
     }
 
     async _tailLogLoop(client, run) {
-        while (run && !run._tailCancelled) {
+        while (run && (!run._tailCancelled || run._fastDrain)) {
             const slice = await this._readLogSlice(client, run.logPath, run.logOffset, 65536);
             if (!slice) {
+                if (run._tailCancelled) break;
                 await this._delay(50);
                 continue;
             }
@@ -1143,12 +1031,33 @@ class StataMcpClient {
                     await this._delay(25);
                 }
             } else {
+                if (run._tailCancelled) break;
                 const lastAt = run._lastLogAt || 0;
                 if (!run._idleLogged && lastAt && Date.now() - lastAt > 500) {
                     run._idleLogged = true;
                 }
                 // No data at all, wait longer
                 await this._delay(50);
+            }
+        }
+
+        // FINAL FLUSH: Handle any remaining buffer
+        if (run && run._lineBuffer) {
+            const text = run._lineBuffer;
+            run._lineBuffer = '';
+            if (typeof run.onRawLog === 'function') {
+                try {
+                    run.onRawLog(text);
+                } catch (_err) { }
+            }
+            const filtered = this._filterLogChunk(text);
+            if (filtered) {
+                run._appendLog?.(filtered);
+                if (typeof run.onLog === 'function') {
+                    try {
+                        run.onLog(filtered);
+                    } catch (_err) { }
+                }
             }
         }
     }
@@ -1189,11 +1098,13 @@ class StataMcpClient {
 
     _extractLogPathFromResponse(response) {
         if (!response) return null;
-        const direct = response?.log_path || response?.logPath || response?.structuredContent?.log_path;
+        // Strictly prioritize 'path' for log_path events as requested by user.
+        // Avoid 'smcl_path'.
+        const direct = response?.path || response?.log_path || response?.logPath || response?.structuredContent?.path || response?.structuredContent?.log_path;
         if (typeof direct === 'string' && direct.trim()) return direct;
         const text = this._extractText(response);
         const parsed = this._tryParseJson(text);
-        const lp = parsed?.log_path || parsed?.logPath || parsed?.error?.log_path || parsed?.error?.logPath;
+        const lp = parsed?.path || parsed?.log_path || parsed?.logPath || parsed?.error?.path || parsed?.error?.log_path || parsed?.error?.logPath;
         if (typeof lp === 'string' && lp.trim()) return lp;
         return null;
     }
@@ -1247,6 +1158,7 @@ class StataMcpClient {
         runState._fastDrain = true;
         if (runState?._tailPromise) {
             runState._tailCancelled = true;
+            await runState._tailPromise.catch(() => {});
         }
         const taskPayload = taskDone?.result ?? taskDone;
         const parsedTask = this._parseToolJson(taskPayload);
@@ -1488,7 +1400,7 @@ class StataMcpClient {
             cwd: meta.cwd || (meta.filePath ? path.dirname(meta.filePath) : null),
             filePath: meta.filePath,
             contentText: safeContentText || parsed.stdout || '',
-            logPath: meta.logPath || parsed.log_path || payload.log_path || payload?.error?.log_path || parsed?.error?.log_path || null,
+            logPath: meta.logPath || parsed.path || parsed.log_path || payload.path || payload.log_path || payload?.error?.path || payload?.error?.log_path || parsed?.error?.path || parsed?.error?.log_path || null,
             logSize: parsed.log_size || payload.log_size || parsed.logSize || payload.logSize || null,
             raw: response
         };
@@ -2236,6 +2148,144 @@ class StataMcpClient {
                 return JSON.parse(stripped);
             } catch (__err) {
                 return {};
+            }
+        }
+    }
+
+    _onLoggingMessage(client, notification) {
+        const data = notification?.params?.data;
+        if (!data) return;
+
+        const timestamp = new Date().toLocaleTimeString();
+        let parsed = null;
+        let text = '';
+
+        if (typeof data === 'object') {
+            parsed = data;
+            text = JSON.stringify(data);
+        } else {
+            text = String(data);
+            parsed = this._tryParseJson(text);
+        }
+
+        const event = parsed?.event;
+        this._log(`[${timestamp}] Notification received: ${event || 'logMessage'}`);
+        const taskId = parsed?.task_id || parsed?.taskId;
+        let run = this._activeRun;
+        if (!run && taskId) {
+            run = this._runsByTaskId.get(String(taskId)) || null;
+        } else if (run && taskId && run.taskId && String(run.taskId) !== String(taskId)) {
+            run = this._runsByTaskId.get(String(taskId)) || null;
+        }
+        if (!run) return;
+
+        // Strictly prioritize 'path' for log_path events as requested by user.
+        // Avoid 'smcl_path'.
+        const lp = parsed?.path || parsed?.log_path || parsed?.logPath;
+        if (event === 'log_path' && lp) {
+            this._ensureLogTail(client, run, String(lp)).catch(() => { });
+            return;
+        }
+
+        if (event === 'graph_ready') {
+            const graph = parsed?.graph;
+            if (graph) {
+                const artifact = this._graphToArtifact(graph, run.baseDir, parsed);
+                if (artifact) {
+                    run._graphArtifacts.push(artifact);
+                    if (typeof run.onGraphReady === 'function') {
+                        try {
+                            run.onGraphReady(artifact);
+                        } catch (_err) {
+                            Sentry.captureException(_err);
+                        }
+                    }
+                }
+            }
+            return;
+        }
+
+        if (event === 'task_done') {
+            if (taskId) {
+                run._taskDonePayload = parsed;
+                run._taskDoneTaskId = String(taskId);
+                const hasOnTaskDone = typeof run.onTaskDone === 'function';
+                const taskPayload = {
+                    taskId: String(taskId),
+                    runId: run?._runId || null,
+                    logPath: parsed?.path || parsed?.log_path || parsed?.logPath || null,
+                    status: parsed?.status || null,
+                    rc: typeof parsed?.rc === 'number' ? parsed.rc : null
+                };
+                if (hasOnTaskDone) {
+                    try {
+                        run.onTaskDone(taskPayload);
+                    } catch (_err) {
+                        Sentry.captureException(_err);
+                    }
+                } else if (typeof this._onTaskDone === 'function') {
+                    try {
+                        this._onTaskDone(taskPayload);
+                    } catch (_err) {
+                        Sentry.captureException(_err);
+                    }
+                }
+                run._tailCancelled = true;
+                run._fastDrain = true;
+                if (typeof run._taskDoneResolve === 'function') {
+                    run._taskDoneResolve(parsed);
+                }
+            }
+            return;
+        }
+
+        // Stream exclusively from the log file once available; ignore logMessage output
+        // to avoid duplicate streaming and reduce latency variance.
+        if (run.logPath) return;
+
+        // Relaxed suppression: if we were told it's log only but don't have a path yet,
+        // keep streaming via notifications so user sees something while disk tail builds up.
+        // if (run._logOnly) return; 
+
+        // LINE BUFFERING: 
+        // To ensure syntax highlighting and SMCL parsing are consistent, we must
+        // only process full lines. Chunks cutting through lines lead to "leaked" 
+        // unhighlighted text or broken tags in the webview.
+        run._lineBuffer = (run._lineBuffer || '') + text;
+        const lines = run._lineBuffer.split(/\r?\n/);
+
+        // The last element is either an empty string (if chunk ended in \n)
+        // or a partial line (if it didn't). We keep it in the buffer.
+        run._lineBuffer = lines.pop();
+
+        // SPECIAL: If the last complete line is just a prompt, move it back into buffer
+        // to allow it to be collapsed with the next chunk in smclToHtml
+        if (lines.length > 0) {
+            const lastLine = lines[lines.length - 1];
+            if (lastLine.trim() === '.') {
+                run._lineBuffer = lines.pop() + '\n' + (run._lineBuffer || '');
+            }
+        }
+
+        if (lines.length > 0) {
+            // Join back the completed lines with newlines
+            const completedText = lines.join('\n') + '\n';
+            if (typeof run.onRawLog === 'function') {
+                try {
+                    run.onRawLog(completedText);
+                } catch (_err) {
+                    Sentry.captureException(_err);
+                }
+            }
+            const filtered = this._filterLogChunk(completedText);
+            if (!filtered) return;
+            run._appendLog?.(filtered);
+            if (typeof run.onLog === 'function') {
+                try {
+                    run.onLog(filtered);
+                } catch (_err) {
+                    Sentry.captureException(_err);
+                }
             }
         }
     }

@@ -680,6 +680,87 @@ describe('McpClient', () => {
                 log_path: '/tmp/background.log'
             });
         });
+
+        it('_extractLogPathFromResponse should strictly prioritize path over smcl_path', () => {
+            const response = {
+                path: '/tmp/real.log',
+                smcl_path: '/tmp/wrong.smcl',
+                log_path: '/tmp/legacy.log'
+            };
+            expect(client._extractLogPathFromResponse(response)).toEqual('/tmp/real.log');
+
+            const structuredResponse = {
+                structuredContent: {
+                    path: '/tmp/struct.log',
+                    smcl_path: '/tmp/struct.smcl'
+                }
+            };
+            expect(client._extractLogPathFromResponse(structuredResponse)).toEqual('/tmp/struct.log');
+
+            const jsonResponse = {
+                content: [{ type: 'text', text: JSON.stringify({ path: '/tmp/json.log', smcl_path: '/tmp/json.smcl' }) }]
+            };
+            expect(client._extractLogPathFromResponse(jsonResponse)).toEqual('/tmp/json.log');
+        });
+
+        it('_onLoggingMessage should handle object payload and strictly prioritize path', async () => {
+            const run = { _lineBuffer: '', _appendLog: sinon.stub(), logPath: null };
+            client._activeRun = run;
+            client._ensureLogTail = sinon.stub().resolves();
+
+            const notification = {
+                params: {
+                    data: {
+                        event: 'log_path',
+                        path: '/tmp/real-path.log',
+                        smcl_path: '/tmp/shadow.smcl'
+                    }
+                }
+            };
+
+            await client._onLoggingMessage({}, notification);
+
+            expect(client._ensureLogTail.calledOnce).toBe(true);
+            expect(client._ensureLogTail.firstCall.args[2]).toEqual('/tmp/real-path.log');
+        });
+
+        it('_onLoggingMessage should allow logs to flow if logPath is not yet set', async () => {
+            const onLog = sinon.stub();
+            const run = { _lineBuffer: '', _appendLog: sinon.stub(), logPath: null, onLog };
+            client._activeRun = run;
+
+            const notification = {
+                params: {
+                    data: 'Some log line\n'
+                }
+            };
+
+            client._onLoggingMessage({}, notification);
+
+            expect(onLog.calledOnce).toBe(true);
+            expect(onLog.firstCall.args[0]).toContain('Some log line');
+        });
+
+        it('_onLoggingMessage should strictly prioritize path over smcl_path in object payload', async () => {
+            const run = { _lineBuffer: '', _appendLog: sinon.stub(), logPath: null };
+            client._activeRun = run;
+            client._ensureLogTail = sinon.stub().resolves();
+
+            const notification = {
+                params: {
+                    data: {
+                        event: 'log_path',
+                        path: '/tmp/priority.log',
+                        smcl_path: '/tmp/ignore.smcl'
+                    }
+                }
+            };
+
+            await client._onLoggingMessage({}, notification);
+
+            expect(client._ensureLogTail.calledOnce).toBe(true);
+            expect(client._ensureLogTail.firstCall.args[2]).toEqual('/tmp/priority.log');
+        });
     });
 
     describe('_resolveRunFileCwd', () => {

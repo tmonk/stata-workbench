@@ -35,6 +35,8 @@ describe('McpClient PyPI Versioning Integration', () => {
 
         // Mock workspace root to avoid picking up .vscode/mcp.json
         client._resolveWorkspaceRoot = () => null;
+        // Mock config paths to avoid picking up system mcp.json
+        client._candidateMcpConfigPaths = () => [];
 
         try {
             await client.run('display 1');
@@ -65,6 +67,8 @@ describe('McpClient PyPI Versioning Integration', () => {
         });
 
         client._resolveWorkspaceRoot = () => null;
+        // Mock config paths to avoid picking up system mcp.json
+        client._candidateMcpConfigPaths = () => [];
 
         try {
             await client.run('display 1');
