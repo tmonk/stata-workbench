@@ -16,7 +16,7 @@ const sentryUploadEnv = process.env.SENTRY_UPLOAD ?? sentryUploadDefault;
 const sentryUpload = sentryUploadEnv.toLowerCase() === 'true';
 const enableSentry = production && sentryUpload;
 
-/**
+/***
  * @type {import('esbuild').Plugin}
  */
 const esbuildProblemMatcherPlugin = {
