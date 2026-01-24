@@ -99,6 +99,14 @@ class StataMcpClient {
         this._onTaskDone = typeof handler === 'function' ? handler : null;
     }
 
+    /**
+     * Returns true if a server configuration for mcp-stata exists in any candidate mcp.json.
+     */
+    hasConfig() {
+        const config = this._loadServerConfig();
+        return !!config.configPath;
+    }
+
     onStatusChanged(listener) {
         this._statusEmitter.on('status', listener);
         return { dispose: () => this._statusEmitter.off('status', listener) };
@@ -603,7 +611,7 @@ class StataMcpClient {
             this._log(`[mcp-stata] WARNING: transport.stderr not available for capture`);
         }
 
-        this._log(`Starting mcp-stata via ${uvCommand} --refresh --refresh-package ${MCP_PACKAGE_NAME} --from ${currentSpec} ${MCP_PACKAGE_NAME} (ext v${this._clientVersion})`);
+        this._log(`Starting mcp-stata via ${finalCommand} ${finalArgs.join(' ')} (ext v${this._clientVersion})`);
         const client = new Client({ name: 'stata-vscode', version: this._clientVersion });
         if (typeof client.on === 'function') {
             client.on('error', (err) => {
@@ -2013,6 +2021,10 @@ class StataMcpClient {
         return env;
     }
 
+    getServerConfig(options = {}) {
+        return this._loadServerConfig(options);
+    }
+
     _loadServerConfig({ ignoreCommandArgs = false } = {}) {
         // Load full server configuration (command, args, env) from MCP config files
         for (const configPath of this._candidateMcpConfigPaths()) {
@@ -2087,12 +2099,18 @@ class StataMcpClient {
         const home = os.homedir();
         const platform = process.platform;
 
-        // 1. Workspace
+        // 1. Host-determined path (PRIORITY: always check the current IDE's config first)
+        const hostConfig = this._resolveHostMcpPath();
+        if (hostConfig) {
+            paths.add(hostConfig);
+        }
+
+        // 2. Workspace
         if (workspaceRoot) {
             paths.add(path.join(workspaceRoot, '.vscode', 'mcp.json'));
         }
 
-        // 2. Claude Desktop (Very common source of MCP servers)
+        // 3. Claude Desktop (Very common source of MCP servers)
         if (home) {
             if (platform === 'darwin') {
                 paths.add(path.join(home, 'Library', 'Application Support', 'Claude', 'claude_desktop_config.json'));
@@ -2104,7 +2122,7 @@ class StataMcpClient {
             }
         }
 
-        // 3. Known AI IDEs (Cursor, Windsurf, etc.)
+        // 4. Known AI IDEs (Cursor, Windsurf, etc.)
         if (home) {
             paths.add(path.join(home, '.cursor', 'mcp.json'));
             paths.add(path.join(home, '.codeium', 'windsurf', 'mcp_config.json'));
@@ -2112,7 +2130,7 @@ class StataMcpClient {
             paths.add(path.join(home, '.antigravity', 'mcp.json'));
         }
 
-        // 4. VS Code (Stable and Insiders) - User Application Support
+        // 5. VS Code (Stable and Insiders) - User Application Support
         const codePath = (codeDir) => {
             if (!home) return null;
             if (platform === 'darwin') return path.join(home, 'Library', 'Application Support', codeDir, 'User', 'mcp.json');
@@ -2124,12 +2142,6 @@ class StataMcpClient {
         };
         paths.add(codePath('Code'));
         paths.add(codePath('Code - Insiders'));
-
-        // 5. Host-determined path (Legacy/Dynamic)
-        const hostConfig = this._resolveHostMcpPath();
-        if (hostConfig) {
-            paths.add(hostConfig);
-        }
 
         return Array.from(paths).filter(Boolean);
     }
