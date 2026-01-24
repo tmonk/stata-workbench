@@ -72,6 +72,9 @@ jobs:
             echo "No VSIX found to publish"
             exit 1
           fi
+
+          echo "Verifying VSIX integrity: $VSIX_PATH"
+          node scripts/verify-vsix.js "$VSIX_PATH"
           
           for i in {1..3}; do
             echo "Attempt $i: Publishing $VSIX_PATH to VS Code Marketplace..."
@@ -98,6 +101,8 @@ jobs:
           VSIX_PATH=$(find . -maxdepth 2 -name "*.vsix" | head -n 1)
           
           if [ -n "$VSIX_PATH" ] && [ -f "$VSIX_PATH" ]; then
+            echo "Verifying VSIX integrity: $VSIX_PATH"
+            node scripts/verify-vsix.js "$VSIX_PATH"
             echo "Publishing $VSIX_PATH to Open VSX..."
             bunx ovsx publish "$VSIX_PATH" -p ${{ secrets.OVSX_TOKEN }}
           else
@@ -147,6 +152,9 @@ jobs:
         run: |
           mkdir -p dist
           mv *.vsix dist/stata-workbench-${{ matrix.target }}.vsix || true
+
+      - name: Verify VSIX
+        run: node scripts/verify-vsix.js dist/stata-workbench-${{ matrix.target }}.vsix
 
       - name: Publish to VS Code Marketplace
         run: |
