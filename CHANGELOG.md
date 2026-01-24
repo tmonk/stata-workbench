@@ -1,3 +1,10 @@
+## [0.16.10](https://github.com/tmonk/stata-workbench/compare/v0.16.9...v0.16.10) (2026-01-24)
+
+
+### Bug Fixes
+
+* vsix to be verified on release ([98f6697](https://github.com/tmonk/stata-workbench/commit/98f6697669b9faee39c508b2dbf29b19062b4876))
+
 ## [0.16.9](https://github.com/tmonk/stata-workbench/compare/v0.16.8...v0.16.9) (2026-01-24)
 
 
