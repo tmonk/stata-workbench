@@ -63,7 +63,6 @@ describe('McpClient Auto-Refresh', () => {
             tools: [
                 { name: 'run_command_background' },
                 { name: 'run_do_file_background' },
-                { name: 'read_log' },
                 { name: 'get_ui_channel' }
             ]
         });

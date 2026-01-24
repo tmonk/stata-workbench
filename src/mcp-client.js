@@ -735,6 +735,10 @@ class StataMcpClient {
     }
 
     async _callTool(client, name, args, callOptions = {}) {
+        if (name === 'read_log') {
+            this._log('[mcp-stata] read_log tool call blocked: local file access only');
+            throw new Error('read_log tool call disabled; local file access only');
+        }
         return Sentry.startSpan({ name: `mcp.tool:${name}`, op: 'mcp.tool_call' }, async () => {
             const toolArgs = args ?? {};
             const startMs = Date.now();
@@ -809,7 +813,6 @@ class StataMcpClient {
         return new Set([
             'run_command_background',
             'run_do_file_background',
-            'read_log',
             'get_ui_channel'
         ]);
     }
@@ -1282,8 +1285,7 @@ class StataMcpClient {
             'get_variable_list',
             'list_graphs',
             'fetch_graph',
-            'export_all_graphs',
-            'read_log'
+            'export_all_graphs'
         ].includes(label);
 
         if (!isMetadata && !config.get('enableExecuteTimeout', false)) {
