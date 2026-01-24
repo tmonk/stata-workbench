@@ -1,3 +1,10 @@
+## [0.16.9](https://github.com/tmonk/stata-workbench/compare/v0.16.8...v0.16.9) (2026-01-24)
+
+
+### Bug Fixes
+
+* enhance logging for log path handling in MCP client and extension ([57834ea](https://github.com/tmonk/stata-workbench/commit/57834eac1a4e165e9aa65dfd79167721096dd32d))
+
 ## [0.16.8](https://github.com/tmonk/stata-workbench/compare/v0.16.7...v0.16.8) (2026-01-24)
 
 
