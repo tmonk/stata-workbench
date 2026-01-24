@@ -1059,22 +1059,45 @@ class StataMcpClient {
     }
 
     async readLog(path, offset, maxBytes) {
-        return this._enqueue('read_log', { timeoutMs: 10000 }, async (client) => {
-            return this._readLogSlice(client, path, offset, maxBytes);
+        return this._enqueue('read_log', { timeoutMs: 10000 }, async (_client) => {
+            return this._readLogSlice(null, path, offset, maxBytes);
         });
     }
 
     async _readLogSlice(client, path, offset, maxBytes) {
         try {
-            const resp = await this._callTool(client, 'read_log', { path, offset, max_bytes: maxBytes });
-            const parsed = this._parseToolJson(resp);
-            if (parsed && typeof parsed === 'object' && (parsed.data !== undefined || parsed.next_offset !== undefined)) {
-                return parsed;
+            const logPath = typeof path === 'string' ? path : '';
+            if (!logPath) {
+                this._log('[mcp-stata] read_log skipped: empty path');
+                return null;
             }
-            this._log(`[mcp-stata] read_log returned unexpected format or failed to parse. resp type: ${typeof resp}`);
-            return null;
+            const exists = fs.existsSync(logPath);
+            if (!exists) {
+                this._log(`[mcp-stata] read_log skipped: missing local file at ${logPath}`);
+                return null;
+            }
+            const stats = fs.statSync(logPath);
+            const size = stats.size;
+            const safeOffset = Math.max(0, Number.isFinite(offset) ? offset : 0);
+            const effectiveOffset = Math.min(safeOffset, size);
+            const maxRead = Math.max(0, Number.isFinite(maxBytes) ? maxBytes : 0);
+            const bytesToRead = Math.min(maxRead, size - effectiveOffset);
+            
+            if (bytesToRead <= 0) {
+                return { data: '', next_offset: effectiveOffset };
+            }
+
+            const fd = fs.openSync(logPath, 'r');
+            try {
+                const buffer = Buffer.allocUnsafe(bytesToRead);
+                const bytesRead = fs.readSync(fd, buffer, 0, bytesToRead, effectiveOffset);
+                const data = buffer.slice(0, bytesRead).toString('utf8');
+                return { data, next_offset: effectiveOffset + bytesRead };
+            } finally {
+                fs.closeSync(fd);
+            }
         } catch (err) {
-            this._log(`[mcp-stata] read_log failed: ${err?.message || err}`);
+            this._log(`[mcp-stata] read_log local file failed: ${err?.message || err}`);
             return null;
         }
     }

@@ -17,23 +17,37 @@ const StdioClientTransportMock = class {
 };
 
 // Load McpClient with mocks (force fresh module instance per file)
-const { StataMcpClient: McpClient } = proxyquire.noCallThru().noPreserveCache().load('../../src/mcp-client', {
-    'vscode': vscodeMock,
-    'fs': {
-        existsSync: sinon.stub().returns(true),
-        readFileSync: sinon.stub().returns(Buffer.from('fake_image_data'))
+const fsMock = {
+    existsSync: (p) => true,
+    statSync: () => ({ size: 4 }),
+    openSync: () => 1,
+    readSync: (fd, buffer, offset, length, position) => {
+        if (position >= 4) return 0;
+        const data = Buffer.from('abc\n');
+        data.copy(buffer, offset);
+        return data.length;
     },
-    '@modelcontextprotocol/sdk/client/stdio.js': { StdioClientTransport: StdioClientTransportMock },
-    '@modelcontextprotocol/sdk/client/index.js': { Client: ClientMock },
-    'child_process': {
-        spawn: sinon.stub().returns({
-            stdout: { on: sinon.stub() },
-            stderr: { on: sinon.stub() },
-            on: sinon.stub(),
-            kill: sinon.stub()
-        })
-    }
-});
+    closeSync: () => {},
+    readFileSync: () => Buffer.from('fake_image_data'),
+    unlinkSync: () => {}
+};
+
+const { mock: bunMock } = require('bun:test');
+bunMock.module('fs', () => fsMock);
+bunMock.module('node:fs', () => fsMock);
+bunMock.module('vscode', () => vscodeMock);
+bunMock.module('@modelcontextprotocol/sdk/client/stdio.js', () => ({ StdioClientTransport: StdioClientTransportMock }));
+bunMock.module('@modelcontextprotocol/sdk/client/index.js', () => ({ Client: ClientMock }));
+bunMock.module('child_process', () => ({
+    spawn: sinon.stub().returns({
+        stdout: { on: sinon.stub() },
+        stderr: { on: sinon.stub() },
+        on: sinon.stub(),
+        kill: sinon.stub()
+    })
+}));
+
+const { StataMcpClient: McpClient } = require('../../src/mcp-client');
 
 const getVscodeModule = () => {
     try {
@@ -562,6 +576,9 @@ describe('McpClient', () => {
         it('runSelection should drain read_log when log_path is only present in tool response', async () => {
             client._delay = sinon.stub().resolves();
             client._awaitTaskDone = sinon.stub().resolves();
+            client._readLogSlice = sinon.stub();
+            client._readLogSlice.onCall(0).resolves({ data: 'abc\n', next_offset: 4 });
+            client._readLogSlice.resolves({ data: '', next_offset: 4 });
 
             // Let the real _enqueue run (so normalization happens).
             // Ensure the MCP client exists.
