@@ -663,11 +663,17 @@ describe('extension unit tests', () => {
         });
 
         it('findUvBinary falls back to bundled binary if system PATH fails', () => {
-            // 1. Mock ALL system path checks fail
-            spawnSync.mockReturnValue({ status: 1, error: new Error('not found') });
+            const bundledPath = path.join('/mock/extension', 'bin', `${process.platform}-${process.arch}`, 'uvx');
+
+            // 1. Mock ALL system path checks fail, but bundled check succeeds
+            spawnSync.mockImplementation((cmd) => {
+                if (cmd === bundledPath) {
+                    return { status: 0, stdout: 'uv 0.5.0', stderr: '' };
+                }
+                return { status: 1, error: new Error('not found'), stderr: '' };
+            });
 
             // 2. Mock bundled binary is PRESENT
-            const bundledPath = path.join('/mock/extension', 'bin', `${process.platform}-${process.arch}`, 'uvx');
             fs.existsSync.mockImplementation((p) => p === bundledPath);
             
             const api = extension.activate({ 

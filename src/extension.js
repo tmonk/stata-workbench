@@ -420,7 +420,8 @@ function findUvBinary(optionalInstallDir) {
     for (const name of base) {
         // Simple test to see if it's on the PATH and executable
         const result = spawnSync(name, ['--version'], { encoding: 'utf8', shell: process.platform === 'win32' });
-        if (!result.error && result.status === 0) {
+        const stderr = (result.stderr || '').toString();
+        if (!result.error && result.status === 0 && !stderr.includes('command not found')) {
             return name;
         }
     }
@@ -435,13 +436,21 @@ function findUvBinary(optionalInstallDir) {
             // Try platform-specific subdirectory first
             const platformSpecific = path.join(globalContext.extensionUri.fsPath, 'bin', `${platform}-${arch}`, binName);
             if (fs.existsSync(platformSpecific)) {
-                return platformSpecific;
+                const result = spawnSync(platformSpecific, ['--version'], { encoding: 'utf8', shell: process.platform === 'win32' });
+                const stderr = (result.stderr || '').toString();
+                if (!result.error && result.status === 0 && !stderr.includes('command not found')) {
+                    return platformSpecific;
+                }
             }
 
             // Fallback to generic bin directory
             const genericBundled = path.join(globalContext.extensionUri.fsPath, 'bin', binName);
             if (fs.existsSync(genericBundled)) {
-                return genericBundled;
+                const result = spawnSync(genericBundled, ['--version'], { encoding: 'utf8', shell: process.platform === 'win32' });
+                const stderr = (result.stderr || '').toString();
+                if (!result.error && result.status === 0 && !stderr.includes('command not found')) {
+                    return genericBundled;
+                }
             }
         }
     }
@@ -470,7 +479,8 @@ function findUvBinary(optionalInstallDir) {
 
     for (const candidate of candidates) {
         const result = spawnSync(candidate, ['--version'], { encoding: 'utf8', shell: process.platform === 'win32' });
-        if (!result.error && result.status === 0) {
+        const stderr = (result.stderr || '').toString();
+        if (!result.error && result.status === 0 && !stderr.includes('command not found')) {
             return candidate;
         }
     }
@@ -481,7 +491,8 @@ function isMcpConfigWorking(config) {
     if (!config || !config.command) return false;
     try {
         const result = spawnSync(config.command, ['--version'], { encoding: 'utf8', shell: process.platform === 'win32', timeout: 3000 });
-        return !result.error && result.status === 0;
+        const stderr = (result.stderr || '').toString();
+        return !result.error && result.status === 0 && !stderr.includes('command not found');
     } catch (_err) {
         return false;
     }
@@ -1666,6 +1677,7 @@ module.exports = {
     downloadGraphAsPdf,
     mcpClient,
     DataBrowserPanel,
+    findUvBinary,
     isMcpConfigWorking,
     isMcpConfigCurrent
 };

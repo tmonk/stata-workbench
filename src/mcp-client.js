@@ -1,4 +1,5 @@
 const { EventEmitter } = require('events');
+const { spawnSync } = require('child_process');
 const Sentry = require("@sentry/node");
 const path = require('path');
 const fs = require('fs');
@@ -533,26 +534,57 @@ class StataMcpClient {
         const resolvedSpec = this._pypiVersion ? `${MCP_PACKAGE_NAME}==${this._pypiVersion}` : fallbackSpec;
         const currentSpec = process.env.MCP_STATA_PACKAGE_SPEC || (this._forceLatestServer ? `${MCP_PACKAGE_NAME}@latest` : resolvedSpec);
 
-        const finalCommand = serverConfig.command || uvCommand;
+        let finalCommand = serverConfig.command || uvCommand;
+        let finalArgs = serverConfig.args || ['--refresh', '--refresh-package', MCP_PACKAGE_NAME, '--from', currentSpec, MCP_PACKAGE_NAME];
 
         // Perform a pre-flight check to avoid ENOENT crashes in the transport layer.
         // On Windows, spawnSync handles .cmd/.exe suffixing when shell is not used if the command is on PATH.
         try {
-            const { spawnSync } = require('child_process');
-            const check = spawnSync(finalCommand, ['--version'], { encoding: 'utf8', shell: process.platform === 'win32' });
-            if (check.error && check.error.code === 'ENOENT') {
-                throw new Error(`Command not found: ${finalCommand}. Ensure 'uv' (which provides 'uvx') is installed and on your PATH.`);
+            let check = spawnSync(finalCommand, ['--version'], { encoding: 'utf8', shell: process.platform === 'win32' });
+            
+            // Check if the initial command choice is broken
+            let stderr = (check.stderr || '').toString();
+            const isBroken = !!(check.error || check.status !== 0 || stderr.includes('command not found'));
+
+            if (isBroken && serverConfig.command && serverConfig.command !== uvCommand) {
+                 // The user's configured command is broken. Try falling back to the extension's detected uvCommand.
+                 this._log(`[mcp-stata] Configured command failed pre-flight: ${serverConfig.command}. Falling back to extension-detected command: ${uvCommand}`);
+                 finalCommand = uvCommand;
+                 finalArgs = ['--refresh', '--refresh-package', MCP_PACKAGE_NAME, '--from', currentSpec, MCP_PACKAGE_NAME];
+                 // Re-run pre-flight for the fallback
+                 check = spawnSync(finalCommand, ['--version'], { encoding: 'utf8', shell: process.platform === 'win32' });
+                 stderr = (check.stderr || '').toString();
             }
+
+            if (check.error) {
+                if (check.error.code === 'ENOENT') {
+                    throw new Error(`Command not found: ${finalCommand}. Ensure 'uv' (which provides 'uvx') is installed and on your PATH.`);
+                }
+                throw check.error;
+            }
+
+            // Handle broken shims that might exit 0 but fail on stderr (e.g. missing realpath on Mac)
+            if (check.status !== 0 || stderr.includes('command not found')) {
+                let message = `Command failed to execute: ${finalCommand}`;
+                if (check.status !== 0) message += ` (exit ${check.status})`;
+                
+                if (stderr.includes('realpath: command not found')) {
+                    message += ". It appears your 'uv' installation is broken or missing 'realpath' (common on some macOS setups). Try installing 'uv' via Homebrew ('brew install uv').";
+                } else if (stderr) {
+                    message += `: ${stderr.trim().split('\n')[0]}`;
+                }
+                throw new Error(message);
+            }
+
             // On Windows with shell:true, the process might start but the command fails
-            if (process.platform === 'win32' && check.status !== 0 && (check.stderr || '').includes('is not recognized')) {
+            if (process.platform === 'win32' && check.status !== 0 && stderr.includes('is not recognized')) {
                 throw new Error(`Command not found: ${finalCommand}. Ensure 'uv' (which provides 'uvx') is installed and on your PATH.`);
             }
         } catch (err) {
-            if (err.message.includes('Command not found')) throw err;
-            // Ignore other pre-flight errors to let the transport try anyway.
+            if (err.message.includes('Command not found') || err.message.includes('failed to execute')) throw err;
+            // Ignore other pre-flight errors to let the transport try anyway (it might succeed if we misdetected something)
         }
 
-        const finalArgs = serverConfig.args || ['--refresh', '--refresh-package', MCP_PACKAGE_NAME, '--from', currentSpec, MCP_PACKAGE_NAME];
         const configuredEnv = serverConfig.env || {};
 
         // Log that we're creating the transport
