@@ -1,3 +1,10 @@
+## [0.16.13](https://github.com/tmonk/stata-workbench/compare/v0.16.12...v0.16.13) (2026-01-24)
+
+
+### Bug Fixes
+
+* include main.js in build ([8f642ba](https://github.com/tmonk/stata-workbench/commit/8f642ba4a0c6957822154ac1847f1992d24c0d0d))
+
 ## [0.16.12](https://github.com/tmonk/stata-workbench/compare/v0.16.11...v0.16.12) (2026-01-24)
 
 
