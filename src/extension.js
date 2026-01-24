@@ -154,7 +154,9 @@ function activate(context) {
     TerminalPanel.setExtensionUri(context.extensionUri);
     TerminalPanel.setLogProvider(async (logPath, offset, maxBytes) => {
         try {
-            if (logPath && fs.existsSync(logPath)) {
+            const exists = !!logPath && fs.existsSync(logPath);
+            outputChannel?.appendLine(`[LogProvider] request path=${logPath || 'null'} offset=${offset} maxBytes=${maxBytes} exists=${exists}`);
+            if (exists) {
                 const stats = fs.statSync(logPath);
                 const size = stats.size;
                 const effectiveOffset = Math.min(offset, size);
@@ -169,6 +171,7 @@ function activate(context) {
                     const buffer = Buffer.allocUnsafe(bytesToRead);
                     const bytesRead = fs.readSync(fd, buffer, 0, bytesToRead, effectiveOffset);
                     const data = buffer.slice(0, bytesRead).toString('utf8');
+                    outputChannel?.appendLine(`[LogProvider] read bytes=${bytesRead} next_offset=${effectiveOffset + bytesRead} size=${size}`);
                     return {
                         data,
                         next_offset: effectiveOffset + bytesRead
@@ -906,8 +909,11 @@ async function runSelection() {
                     // Enrich result with logSize if it's missing but we can find it
                     if (result.logPath && (result.logSize === undefined || result.logSize === null)) {
                         try {
+                            const exists = fs.existsSync(result.logPath);
+                            outputChannel?.appendLine(`[RunSelection] logPath=${result.logPath} exists=${exists}`);
                             const stats = fs.statSync(result.logPath);
                             result.logSize = stats.size;
+                            outputChannel?.appendLine(`[RunSelection] logSize=${result.logSize}`);
                         } catch (_err) { }
                     }
                     logRunToOutput(result, text);
@@ -987,12 +993,15 @@ async function runFile() {
                             let taskDoneStdout = null;
                             if (logPath) {
                                 try {
+                                    const exists = fs.existsSync(logPath);
+                                    outputChannel?.appendLine(`[RunFile] task_done logPath=${logPath} exists=${exists}`);
                                     const stats = fs.statSync(logPath);
                                     logSize = stats.size;
                                     if (logSize > 0 && logSize <= 50_000) {
                                         const raw = fs.readFileSync(logPath, 'utf8');
                                         taskDoneStdout = raw;
                                     }
+                                    outputChannel?.appendLine(`[RunFile] task_done logSize=${logSize}`);
                                 } catch (_err) { }
                             }
                             if (runId) TerminalPanel.notifyTaskDone(runId, logPath, logSize, taskDoneStdout, payload?.rc);
@@ -1005,8 +1014,11 @@ async function runFile() {
                         // Enrich result with logSize if it's missing but we can find it
                         if (result.logPath && (result.logSize === undefined || result.logSize === null)) {
                             try {
+                                const exists = fs.existsSync(result.logPath);
+                                outputChannel?.appendLine(`[RunFile] logPath=${result.logPath} exists=${exists}`);
                                 const stats = fs.statSync(result.logPath);
                                 result.logSize = stats.size;
+                                outputChannel?.appendLine(`[RunFile] logSize=${result.logSize}`);
                             } catch (_err) { }
                         }
                         logRunToOutput(result, commandText);
@@ -1610,6 +1622,7 @@ function logRunToOutput(result, contextTitle) {
     if (result.command) outputChannel.appendLine(`cmd: ${result.command}`);
     if (typeof result.rc === 'number') outputChannel.appendLine(`rc: ${result.rc}`);
     if (typeof result.durationMs === 'number') outputChannel.appendLine(`duration: ${formatDuration(result.durationMs)}`);
+    if (result.logPath) outputChannel.appendLine(`logPath: ${result.logPath}`);
     if (Array.isArray(result.graphArtifacts) && result.graphArtifacts.length) {
         outputChannel.appendLine(`graphs: ${result.graphArtifacts.map(g => g.label || g.path || '').join(', ')}`);
     }

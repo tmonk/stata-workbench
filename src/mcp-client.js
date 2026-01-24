@@ -2177,6 +2177,7 @@ class StataMcpClient {
 
         const lp = parsed?.path || parsed?.log_path || parsed?.logPath;
         if (run && event === 'log_path' && lp) {
+            this._log(`[mcp-stata] log_path payload=${text}`);
             this._log(`[mcp-stata] log_path event matched for run ${run._runId || 'unknown'}, path=${lp}`);
             this._ensureLogTail(client, run, String(lp)).catch((err) => {
                 this._log(`[mcp-stata] failed to ensure log tail: ${err?.message || err}`);
