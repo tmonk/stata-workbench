@@ -77,17 +77,20 @@ async function main() {
   });
 
   // Build Webview Scripts
-  const webviewEntry = path.join(rootDir, 'src', 'ui-shared', 'data-browser.js');
-  const webviewOut = path.join(rootDir, 'dist', 'ui-shared', 'data-browser.js');
+  const webviewEntries = {
+    'data-browser': path.join(rootDir, 'src', 'ui-shared', 'data-browser.js'),
+    'main': path.join(rootDir, 'src', 'ui-shared', 'main.js')
+  };
+  const webviewOutDir = path.join(rootDir, 'dist', 'ui-shared');
   const webviewCtx = await esbuild.context({
-    entryPoints: [webviewEntry],
+    entryPoints: webviewEntries,
     bundle: true,
     format: 'iife',
     minify: production,
     sourcemap: true,
     sourcesContent: false,
     platform: 'browser',
-    outfile: webviewOut,
+    outdir: webviewOutDir,
     define: {
       'process.env.SENTRY_RELEASE': JSON.stringify(release),
     },
