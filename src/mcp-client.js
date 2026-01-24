@@ -978,13 +978,19 @@ class StataMcpClient {
     }
 
     async _tailLogLoop(client, run) {
-        while (run && (!run._tailCancelled || run._fastDrain)) {
+        let emptyCycles = 0;
+        while (run && (!run._tailCancelled || (run._fastDrain && emptyCycles < 5))) {
             const slice = await this._readLogSlice(client, run.logPath, run.logOffset, 65536);
-            if (!slice) {
-                if (run._tailCancelled) break;
-                await this._delay(50);
+            if (!slice || !slice.data) {
+                if (run._tailCancelled) {
+                    emptyCycles++;
+                    if (!run._fastDrain || emptyCycles >= 5) break;
+                }
+                const delay = run._fastDrain ? 20 : 100;
+                await this._delay(delay);
                 continue;
             }
+            emptyCycles = 0;
 
             if (typeof slice.next_offset === 'number') {
                 run.logOffset = slice.next_offset;
@@ -993,17 +999,10 @@ class StataMcpClient {
             if (data) {
                 run._lastLogAt = Date.now();
                 run._idleLogged = false;
-                // LINE BUFFERING: Apply same logic to tailing
+                // LINE BUFFERING: Apply logic to tailing to avoid splitting SMCL tags.
                 run._lineBuffer = (run._lineBuffer || '') + data;
                 const lines = run._lineBuffer.split(/\r?\n/);
-                run._lineBuffer = lines.pop();
-
-                if (lines.length > 0) {
-                    const lastLine = lines[lines.length - 1];
-                    if (lastLine.trim() === '.') {
-                        run._lineBuffer = lines.pop() + '\n' + (run._lineBuffer || '');
-                    }
-                }
+                run._lineBuffer = lines.pop(); // Keep partial line in buffer
 
                 if (lines.length > 0) {
                     const completedText = lines.join('\n') + '\n';
@@ -1022,22 +1021,19 @@ class StataMcpClient {
                             } catch (_err) {
                             }
                         }
-                    } else {
-                        // All lines were filtered out
-                        await this._delay(50);
                     }
                 } else {
                     // No full lines yet, need to wait for more data
-                    await this._delay(25);
+                    await this._delay(run._fastDrain ? 10 : 25);
                 }
             } else {
-                if (run._tailCancelled) break;
+                if (run._tailCancelled && !run._fastDrain) break;
                 const lastAt = run._lastLogAt || 0;
                 if (!run._idleLogged && lastAt && Date.now() - lastAt > 500) {
                     run._idleLogged = true;
                 }
                 // No data at all, wait longer
-                await this._delay(50);
+                await this._delay(run._fastDrain ? 20 : 100);
             }
         }
 
@@ -2170,20 +2166,28 @@ class StataMcpClient {
 
         const event = parsed?.event;
         this._log(`[${timestamp}] Notification received: ${event || 'logMessage'}`);
-        const taskId = parsed?.task_id || parsed?.taskId;
+        const taskId = parsed?.task_id || parsed?.taskId || parsed?.request_id || parsed?.requestId || parsed?.run_id || parsed?.runId;
         let run = this._activeRun;
         if (!run && taskId) {
             run = this._runsByTaskId.get(String(taskId)) || null;
         } else if (run && taskId && run.taskId && String(run.taskId) !== String(taskId)) {
-            run = this._runsByTaskId.get(String(taskId)) || null;
+            const byId = this._runsByTaskId.get(String(taskId));
+            if (byId) run = byId;
         }
-        if (!run) return;
 
-        // Strictly prioritize 'path' for log_path events as requested by user.
-        // Avoid 'smcl_path'.
         const lp = parsed?.path || parsed?.log_path || parsed?.logPath;
-        if (event === 'log_path' && lp) {
-            this._ensureLogTail(client, run, String(lp)).catch(() => { });
+        if (run && event === 'log_path' && lp) {
+            this._log(`[mcp-stata] log_path event matched for run ${run._runId || 'unknown'}, path=${lp}`);
+            this._ensureLogTail(client, run, String(lp)).catch((err) => {
+                this._log(`[mcp-stata] failed to ensure log tail: ${err?.message || err}`);
+            });
+            return;
+        }
+
+        if (!run) {
+            if (event !== 'progress' && event !== 'log_path') {
+                this._log(`[mcp-stata] Warning: received notification ${event} but no active run found and no taskId in payload.`);
+            }
             return;
         }
 
