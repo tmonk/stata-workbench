@@ -1,3 +1,10 @@
+## [0.16.12](https://github.com/tmonk/stata-workbench/compare/v0.16.11...v0.16.12) (2026-01-24)
+
+
+### Bug Fixes
+
+* disable read_log tool call and update tests accordingly ([c162eb2](https://github.com/tmonk/stata-workbench/commit/c162eb2455f24648d737ac7fa9d15a3a10e633b2))
+
 ## [0.16.11](https://github.com/tmonk/stata-workbench/compare/v0.16.10...v0.16.11) (2026-01-24)
 
 
