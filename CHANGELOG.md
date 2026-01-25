@@ -1,3 +1,11 @@
+## [0.16.15](https://github.com/tmonk/stata-workbench/compare/v0.16.14...v0.16.15) (2026-01-25)
+
+
+### Bug Fixes
+
+* add noise filters to Sentry event reporting for better error handling ([edd4c4b](https://github.com/tmonk/stata-workbench/commit/edd4c4beba3b0eb597de68492a5ed34a48140571))
+* ignore specific error messages during VS Code shutdown ([0b3ddb4](https://github.com/tmonk/stata-workbench/commit/0b3ddb44f7f71ea3334da7e05543bce91fef41aa))
+
 ## [0.16.14](https://github.com/tmonk/stata-workbench/compare/v0.16.13...v0.16.14) (2026-01-24)
 
 
