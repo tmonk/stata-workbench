@@ -305,6 +305,7 @@ function activate(context) {
             mcpClient,
             refreshMcpPackage,
             getUvCommand: () => uvCommand,
+            getMcpPackageVersion,
             reDiscoverUv: () => {
                 ensureMcpCliAvailable(context);
                 return uvCommand;
@@ -364,48 +365,80 @@ function getMcpPackageVersion() {
     const isUv = cmd.endsWith('uv') || cmd.endsWith('uv.exe');
     const baseArgs = isUv ? ['tool', 'run'] : [];
 
-    // 1) Try reading the installed package metadata via Python (works even if CLI is quiet).
+    // 1) Try invoking the CLI with --version (primary method).
     try {
-        const args = [...baseArgs, '--from', MCP_PACKAGE_SPEC, 'python', '-c', 'import importlib.metadata as im; print(im.version("mcp-stata"))'];
-        const pyResult = spawnSync(cmd, args, {
+        const args = [...baseArgs, '--from', MCP_PACKAGE_SPEC, MCP_PACKAGE_NAME, '--version'];
+        const result = spawnSync(cmd, args, {
             encoding: 'utf8',
-            timeout: 5000
+            timeout: 5000,
+            stdio: ['ignore', 'pipe', 'pipe']
         });
-        const pyOut = (pyResult?.stdout || '').toString().trim();
-        if (pyOut) {
-            // Filter out any potential log pollution if the backend printed anything to stdout
-            const lines = pyOut.split(/\r?\n/).map(l => l.trim()).filter(l => {
-                if (!l) return false;
-                // Version strings should not start with [ (log format) and should not contain ERROR/INFO
-                if (l.startsWith('[') && l.includes(']')) return false;
-                if (l.includes('INFO:') || l.includes('ERROR:') || l.includes('DEBUG:')) return false;
-                return true;
-            });
-            if (lines.length > 0) return lines[lines.length - 1];
-        }
+        const stdout = result?.stdout?.toString?.() || '';
+        const stderr = result?.stderr?.toString?.() || '';
+        const sanitized = sanitizeVersion(stdout) || sanitizeVersion(stderr);
+        if (sanitized) return sanitized;
     } catch (_err) {
         // ignore and fall back
     }
 
-    // 2) Fallback to invoking the CLI with --version (some builds may emit this).
+    // 2) Fallback to reading metadata via Python (useful if CLI --version fails or is slow).
     try {
-        const args = [...baseArgs, '--refresh', '--refresh-package', MCP_PACKAGE_NAME, '--from', MCP_PACKAGE_SPEC, MCP_PACKAGE_NAME, '--version'];
-        const result = spawnSync(cmd, args, {
+        // Use -I (isolated mode) to avoid environment pollution and clear markers to identify the output.
+        // We use a marker to pull the exact version out of a potentially polluted stdout.
+        const pyCode = "import importlib.metadata; ver = importlib.metadata.version('mcp-stata'); print(f'VERSION_MATCH:{ver}:VERSION_MATCH')";
+        const args = [...baseArgs, '--from', MCP_PACKAGE_SPEC, 'python', '-I', '-c', pyCode];
+        const pyResult = spawnSync(cmd, args, {
             encoding: 'utf8',
-            timeout: 5000
+            timeout: 5000,
+            stdio: ['ignore', 'pipe', 'pipe']
         });
-        const stdout = result?.stdout?.toString?.() || '';
-        const stderr = result?.stderr?.toString?.() || '';
-        const text = (stdout.trim() || stderr.trim()).split(/\r?\n/).map(l => l.trim()).filter(l => {
-            if (!l) return false;
-            if (l.startsWith('[') && l.includes(']')) return false;
-            if (l.includes('INFO:') || l.includes('ERROR:') || l.includes('DEBUG:')) return false;
-            return true;
-        });
-        return text.length > 0 ? text[text.length - 1] : 'unknown';
+        const stdout = pyResult?.stdout?.toString?.() || '';
+        const sanitized = sanitizeVersion(stdout);
+        if (sanitized) return sanitized;
     } catch (_err) {
-        return 'unknown';
+        // ignore
     }
+
+    return 'unknown';
+}
+
+/**
+ * Safely extracts a meaningful version string from noisy tool output.
+ * Should ignore download progress, logs, and other distractions.
+ */
+function sanitizeVersion(text) {
+    if (!text) return null;
+
+    // 1. Check for explicit markers first if they exist (highest confidence)
+    const markerMatch = text.match(/VERSION_MATCH:([vV]?\d+(\.\d+)*([-a-zA-Z0-9.]+)?):VERSION_MATCH/);
+    if (markerMatch && markerMatch[1]) {
+        return markerMatch[1];
+    }
+
+    // 2. Fallback to line-by-line heuristic parsing
+    const lines = text.split(/\r?\n/).map(l => l.trim()).filter(l => {
+        if (!l) return false;
+        // Skip common log/progress prefixes
+        if (l.startsWith('[') && l.includes(']')) return false;
+        if (l.startsWith('Download')) return false;
+        if (l.includes('INFO:') || l.includes('ERROR:') || l.includes('DEBUG:')) return false;
+
+        // A version should at least start with a digit (simple heuristic for "Downloading..." etc)
+        return /^[vV]?\d/.test(l);
+    });
+
+    if (lines.length === 0) return null;
+
+    // Take the last line that matches the pattern (often tools print logs then the result)
+    const candidate = lines[lines.length - 1];
+
+    // Further validate that it looks like a version (X.Y.Z...)
+    // Allow basic semver or simple numbers, but NOT long sentences
+    if (candidate.length < 50 && /^[vV]?\d+(\.\d+)*([-a-zA-Z0-9.]+)?$/.test(candidate)) {
+        return candidate;
+    }
+
+    return null;
 }
 
 function refreshMcpPackage() {
@@ -423,17 +456,19 @@ function refreshMcpPackage() {
         const result = spawnSync(cmd, args, { encoding: 'utf8', timeout: 10000 });
         const stdout = result?.stdout?.toString?.().trim() || '';
         const stderr = result?.stderr?.toString?.().trim() || '';
-        const text = stdout || stderr;
+        
+        const sanitized = sanitizeVersion(stdout) || sanitizeVersion(stderr);
 
         if (result.status === 0) {
-            if (text) {
-                mcpPackageVersion = text;
+            if (sanitized) {
+                mcpPackageVersion = sanitized;
             }
-            appendLine(`Ensured latest mcp-stata via uvx --refresh --refresh-package mcp-stata (${text || 'version not reported'})`);
-            return mcpPackageVersion;
+            appendLine(`Ensured latest mcp-stata via uvx --refresh --refresh-package mcp-stata (${sanitized || 'version not reported'})`);
+            return mcpPackageVersion === 'unknown' ? null : mcpPackageVersion;
         }
 
-        appendLine(`Failed to refresh mcp-stata (exit ${result.status}): ${text}`);
+        const errText = stdout || stderr;
+        appendLine(`Failed to refresh mcp-stata (exit ${result.status}): ${errText}`);
         appendLine('If you are behind a proxy or corporate network, set HTTPS_PROXY/HTTP_PROXY and retry.');
         appendLine('You can also run: uvx --refresh --refresh-package mcp-stata --from mcp-stata@latest mcp-stata --version');
         revealOutput();
