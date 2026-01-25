@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites name="bun test" tests="5" assertions="8" failures="1" skipped="0" time="3.835983">
+  <testsuite name="test/unit/logging.test.js" file="test/unit/logging.test.js" tests="5" assertions="8" failures="1" skipped="0" time="0" hostname="tombook.local">
+    <testsuite name="Logging behaviour tests" file="test/unit/logging.test.js" line="31" tests="5" assertions="8" failures="1" skipped="0" time="3.795" hostname="tombook.local">
+      <testcase name="suppresses raw stderr logs by default but sends to Sentry" classname="Logging behaviour tests" time="0.854511" file="test/unit/logging.test.js" line="79" assertions="4" />
+      <testcase name="shows code logs when logStataCode is true" classname="Logging behaviour tests" time="0.72484" file="test/unit/logging.test.js" line="109" assertions="1" />
+      <testcase name="shows everything when showAllLogsInOutput is true" classname="Logging behaviour tests" time="1.088699" file="test/unit/logging.test.js" line="132" assertions="1" />
+      <testcase name="correctly routes high-level connection events by default" classname="Logging behaviour tests" time="1.005755" file="test/unit/logging.test.js" line="154" assertions="2" />
+      <testcase name="updates mcpClient config when VS Code settings change" classname="Logging behaviour tests" time="0.124284" file="test/unit/logging.test.js" line="179" assertions="0">
+        <failure type="AssertionError" />
+      </testcase>
+    </testsuite>
+  </testsuite>
+</testsuites>

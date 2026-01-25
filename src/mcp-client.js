@@ -102,6 +102,14 @@ class StataMcpClient {
         this._onTaskDone = typeof handler === 'function' ? handler : null;
     }
 
+    updateConfig(opts) {
+        if (!opts) return;
+        if (typeof opts.logStataCode === 'boolean') {
+            // We read from vscode directly in _enqueue so this is mostly for non-vscode callers 
+            // or explicit state tracking if we move away from direct vscode usage in deeper logic.
+        }
+    }
+
     /**
      * Returns true if a server configuration for mcp-stata exists in any candidate mcp.json.
      */
@@ -1477,6 +1485,9 @@ class StataMcpClient {
 
                 this._statusEmitter.emit('status', 'running');
                 this._log(`[mcp-stata] starting operation: ${label} (pending: ${this._pending})`);
+                if (config.get('logStataCode', false) && meta.command) {
+                    this._log(`[mcp-stata code] ${meta.command}`);
+                }
                 
                 try {
                     const client = await this._ensureClient();

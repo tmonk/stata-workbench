@@ -1,0 +1,1 @@
+error: unsupported reporter format 'json'. Available options: 'junit' (for XML test results), 'dots'

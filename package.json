@@ -139,6 +139,11 @@
           "default": false,
           "description": "Stream all raw mcp-stata logs to the Stata Workbench Output channel."
         },
+        "stataMcp.logStataCode": {
+          "type": "boolean",
+          "default": false,
+          "description": "Log the Stata code sent to the server in the Output channel (useful for debugging agentic commands)."
+        },
         "stataMcp.autoConfigureMcp": {
           "type": "boolean",
           "default": true,

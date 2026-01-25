@@ -51,6 +51,19 @@ function appendLine(msg) {
 }
 
 /**
+ * Log a line to the Output channel ONLY if showAllLogsInOutput is enabled.
+ * Otherwise, send to Sentry buffer only.
+ */
+function debugLog(msg) {
+    const config = vscode.workspace.getConfiguration('stataMcp');
+    if (config.get('showAllLogsInOutput', false)) {
+        appendLine(msg);
+    } else if (typeof global.addLogToSentryBuffer === 'function') {
+        global.addLogToSentryBuffer(msg + '\n');
+    }
+}
+
+/**
  * Log a string to the Output channel and Sentry log buffer (no newline).
  */
 function append(msg) {
@@ -123,7 +136,39 @@ function activate(context) {
         context.globalState?.update?.(MISSING_CLI_PROMPT_KEY, true).catch?.(() => { });
     }
     if (typeof mcpClient.setLogger === 'function') {
-        mcpClient.setLogger((msg) => appendLine(msg));
+        mcpClient.setLogger((msg) => {
+            const config = vscode.workspace.getConfiguration('stataMcp');
+            const showAll = config.get('showAllLogsInOutput', false);
+            const logCode = config.get('logStataCode', false);
+            
+            // Always show our explicit code logs if they are enabled via the opt-in setting
+            if (msg.includes('[mcp-stata code]')) {
+                if (logCode) {
+                    appendLine(msg);
+                } else if (typeof global.addLogToSentryBuffer === 'function') {
+                    global.addLogToSentryBuffer(msg + '\n');
+                }
+                return;
+            }
+
+            if (showAll) {
+                appendLine(msg);
+            } else {
+                // By default, we suppress the raw mcp-stata stderr logs (which can be very noisy/verbose)
+                // but keep them in the Sentry buffer for troubleshooting.
+                if (typeof global.addLogToSentryBuffer === 'function') {
+                    global.addLogToSentryBuffer(msg + '\n');
+                }
+                
+                // We show connection/starting events and mcp-stata diagnostic logs by default.
+                // But we suppress 'stderr' noise from the server process unless showAll is on.
+                if (msg.startsWith('[mcp-stata]') && !msg.includes('stderr')) {
+                    appendLine(msg);
+                } else if (msg.startsWith('Starting mcp-stata') || msg.startsWith('mcp-stata connected')) {
+                    appendLine(msg);
+                }
+            }
+        });
     }
     if (typeof mcpClient.setTaskDoneHandler === 'function') {
         mcpClient.setTaskDoneHandler((payload) => {
@@ -155,7 +200,7 @@ function activate(context) {
     TerminalPanel.setLogProvider(async (logPath, offset, maxBytes) => {
         try {
             const exists = !!logPath && fs.existsSync(logPath);
-            outputChannel?.appendLine(`[LogProvider] request path=${logPath || 'null'} offset=${offset} maxBytes=${maxBytes} exists=${exists}`);
+            debugLog(`[LogProvider] request path=${logPath || 'null'} offset=${offset} maxBytes=${maxBytes} exists=${exists}`);
             if (exists) {
                 const stats = fs.statSync(logPath);
                 const size = stats.size;
@@ -171,7 +216,7 @@ function activate(context) {
                     const buffer = Buffer.allocUnsafe(bytesToRead);
                     const bytesRead = fs.readSync(fd, buffer, 0, bytesToRead, effectiveOffset);
                     const data = buffer.slice(0, bytesRead).toString('utf8');
-                    outputChannel?.appendLine(`[LogProvider] read bytes=${bytesRead} next_offset=${effectiveOffset + bytesRead} size=${size}`);
+                    debugLog(`[LogProvider] read bytes=${bytesRead} next_offset=${effectiveOffset + bytesRead} size=${size}`);
                     return {
                         data,
                         next_offset: effectiveOffset + bytesRead
@@ -181,7 +226,7 @@ function activate(context) {
                 }
             }
         } catch (err) {
-            outputChannel?.appendLine(`[LogProvider] Local read failed for ${logPath}: ${err.message || err}`);
+            debugLog(`[LogProvider] Local read failed for ${logPath}: ${err.message || err}`);
         }
         return null;
     });
@@ -198,10 +243,10 @@ function activate(context) {
 
     if (isWorking) {
         missingCli = false;
-        outputChannel?.appendLine?.('Using existing, functional MCP configuration');
+        appendLine('Using existing, functional MCP configuration');
     } else {
         if (existingServerConfig?.configPath) {
-            outputChannel?.appendLine?.(`Existing MCP config at ${existingServerConfig.configPath} appears broken or missing.`);
+            appendLine(`Existing MCP config at ${existingServerConfig.configPath} appears broken or missing.`);
         }
         missingCli = !ensureMcpCliAvailable(context);
     }
@@ -220,7 +265,7 @@ function activate(context) {
                 ensureMcpConfigs(context);
             }
         } else {
-            outputChannel?.appendLine?.('Skipping MCP config update: stataMcp.autoConfigureMcp is disabled');
+            appendLine('Skipping MCP config update: stataMcp.autoConfigureMcp is disabled');
         }
         
         appendLine(`mcp-stata version: ${mcpPackageVersion}`);
@@ -239,6 +284,18 @@ function activate(context) {
         });
     }
 
+    context.subscriptions.push(
+        vscode.workspace.onDidChangeConfiguration(e => {
+            if (e.affectsConfiguration('stataMcp')) {
+                debugLog('[Extension] Config changed, updating MCP client config');
+                const config = vscode.workspace.getConfiguration('stataMcp');
+                mcpClient.updateConfig({
+                    logStataCode: config.get('logStataCode', false)
+                });
+            }
+        })
+    );
+
     // Expose API for testing
     if (context.extensionMode === vscode.ExtensionMode.Test) {
         return {
@@ -253,7 +310,8 @@ function activate(context) {
                 return uvCommand;
             },
             isMcpConfigWorking,
-            isMcpConfigCurrent
+            isMcpConfigCurrent,
+            logRunToOutput
         };
     }
 }
@@ -262,7 +320,7 @@ function ensureMcpCliAvailable(context) {
     const found = findUvBinary();
     if (found) {
         uvCommand = found;
-        outputChannel?.appendLine(`Using uv binary at: ${uvCommand}`);
+        debugLog(`Using uv binary at: ${uvCommand}`);
         // Only set the env var if it's not already set to this value
         // or if we want to ensure it's propagated to children.
         // For tests, we want to AVOID overwriting a specific path override with "uvx"
@@ -280,7 +338,7 @@ function ensureMcpCliAvailable(context) {
     }
 
     const installCmd = getUvInstallCommand();
-    outputChannel?.appendLine?.('uvx not found on PATH; attempting automatic installation via uv installer.');
+    debugLog('uvx not found on PATH; attempting automatic installation via uv installer.');
     revealOutput();
     const env = { ...process.env, UV_INSTALL_DIR: installDir };
     const result = spawnSync(installCmd.command, installCmd.args, { env, encoding: 'utf8' });
@@ -288,12 +346,12 @@ function ensureMcpCliAvailable(context) {
     const installed = findUvBinary(installDir);
     if (result.status === 0 && installed) {
         uvCommand = installed;
-        outputChannel?.appendLine(`Using uv binary at: ${uvCommand} (automatically installed)`);
+        debugLog(`Using uv binary at: ${uvCommand} (automatically installed)`);
         process.env.MCP_STATA_UVX_CMD = uvCommand;
         return true;
     }
 
-    outputChannel?.appendLine?.('Automatic uv install failed or uvx still missing. You can copy the install command from the prompt.');
+    debugLog('Automatic uv install failed or uvx still missing. You can copy the install command from the prompt.');
     revealOutput();
     promptInstallMcpCli();
     return false;
@@ -923,10 +981,10 @@ async function runSelection() {
                     if (result.logPath && (result.logSize === undefined || result.logSize === null)) {
                         try {
                             const exists = fs.existsSync(result.logPath);
-                            outputChannel?.appendLine(`[RunSelection] logPath=${result.logPath} exists=${exists}`);
+                            debugLog(`[RunSelection] logPath=${result.logPath} exists=${exists}`);
                             const stats = fs.statSync(result.logPath);
                             result.logSize = stats.size;
-                            outputChannel?.appendLine(`[RunSelection] logSize=${result.logSize}`);
+                            debugLog(`[RunSelection] logSize=${result.logSize}`);
                         } catch (_err) { }
                     }
                     logRunToOutput(result, text);
@@ -1010,14 +1068,14 @@ async function runFile() {
                             if (logPath) {
                                 try {
                                     const exists = fs.existsSync(logPath);
-                                    outputChannel?.appendLine(`[RunFile] task_done logPath=${logPath} exists=${exists}`);
+                                    debugLog(`[RunFile] task_done logPath=${logPath} exists=${exists}`);
                                     const stats = fs.statSync(logPath);
                                     logSize = stats.size;
                                     if (logSize > 0 && logSize <= 50_000) {
                                         const raw = fs.readFileSync(logPath, 'utf8');
                                         taskDoneStdout = raw;
                                     }
-                                    outputChannel?.appendLine(`[RunFile] task_done logSize=${logSize}`);
+                                    debugLog(`[RunFile] task_done logSize=${logSize}`);
                                 } catch (_err) { }
                             }
                             if (runId) TerminalPanel.notifyTaskDone(runId, logPath, logSize, taskDoneStdout, payload?.rc);
@@ -1031,10 +1089,10 @@ async function runFile() {
                         if (result.logPath && (result.logSize === undefined || result.logSize === null)) {
                             try {
                                 const exists = fs.existsSync(result.logPath);
-                                outputChannel?.appendLine(`[RunFile] logPath=${result.logPath} exists=${exists}`);
+                                debugLog(`[RunFile] logPath=${result.logPath} exists=${exists}`);
                                 const stats = fs.statSync(result.logPath);
                                 result.logSize = stats.size;
-                                outputChannel?.appendLine(`[RunFile] logSize=${result.logSize}`);
+                                debugLog(`[RunFile] logSize=${result.logSize}`);
                             } catch (_err) { }
                         }
                         logRunToOutput(result, commandText);
@@ -1144,7 +1202,7 @@ const variableListProvider = async () => {
         const list = await mcpClient.getVariableList();
         return Array.isArray(list) ? list : [];
     } catch (error) {
-        outputChannel?.appendLine(`Failed to fetch variable list: ${error?.message || error}`);
+        debugLog(`Failed to fetch variable list: ${error?.message || error}`);
         return [];
     }
 };
@@ -1203,24 +1261,23 @@ async function viewData() {
 async function downloadGraphAsPdf(graphName) {
     return Sentry.startSpan({ name: 'extension.downloadGraphAsPdf', op: 'extension.operation' }, async () => {
         try {
-            revealOutput();
-            outputChannel.appendLine(`[Download] Starting PDF export for: ${graphName}`);
+            debugLog(`[Download] Starting PDF export for: ${graphName}`);
 
             // Request PDF export from MCP server
-            outputChannel.appendLine('[Download] Calling mcpClient.fetchGraph...');
+            debugLog('[Download] Calling mcpClient.fetchGraph...');
             const response = await mcpClient.fetchGraph(graphName, { format: 'pdf' });
-            outputChannel.appendLine(`[Download] Response received: ${JSON.stringify(response, null, 2)}`);
+            debugLog(`[Download] Response received: ${JSON.stringify(response, null, 2)}`);
 
             let pdfPath = null;
             let savedPath = null;
 
             if (response?.path || response?.file_path) {
                 pdfPath = response.path || response.file_path;
-                outputChannel.appendLine(`[Download] Found file path: ${pdfPath}`);
+                debugLog(`[Download] Found file path: ${pdfPath}`);
             }
 
             if (pdfPath && fs.existsSync(pdfPath)) {
-                outputChannel.appendLine(`[Download] Reading file from: ${pdfPath}`);
+                debugLog(`[Download] Reading file from: ${pdfPath}`);
                 // If we have a file path, copy it
                 const defaultUri = vscode.Uri.file(path.join(os.homedir(), 'Downloads', `${graphName}.pdf`));
 
@@ -1231,17 +1288,17 @@ async function downloadGraphAsPdf(graphName) {
                 });
 
                 if (saveUri) {
-                    outputChannel.appendLine(`[Download] Copying to: ${saveUri.fsPath}`);
+                    debugLog(`[Download] Copying to: ${saveUri.fsPath}`);
                     const buffer = fs.readFileSync(pdfPath);
                     await vscode.workspace.fs.writeFile(saveUri, buffer);
-                    outputChannel.appendLine('[Download] Copy complete!');
+                    debugLog('[Download] Copy complete!');
                     savedPath = saveUri.fsPath;
                 } else {
-                    outputChannel.appendLine('[Download] User cancelled save dialog');
+                    debugLog('[Download] User cancelled save dialog');
                     savedPath = pdfPath;
                 }
             } else {
-                outputChannel.appendLine('[Download] ERROR: No PDF data found in response');
+                debugLog('[Download] ERROR: No PDF data found in response');
                 throw new Error('No PDF data received from server');
             }
 
@@ -1252,8 +1309,8 @@ async function downloadGraphAsPdf(graphName) {
             };
         } catch (error) {
             const msg = `Failed to download PDF: ${error.message}`;
-            outputChannel.appendLine(`[Download] ERROR: ${msg}`);
-            outputChannel.appendLine(`[Download] Stack trace: ${error.stack}`);
+            debugLog(`[Download] ERROR: ${msg}`);
+            debugLog(`[Download] Stack trace: ${error.stack}`);
             // Avoid toasts; surface via output channel only
             throw error;
         }
@@ -1293,28 +1350,28 @@ function openGraphPanel(graphDetails) {
                     if (message.level === 'error' || message.severity === 'error') {
                         Sentry.captureException(new Error(`Graph Webview Error: ${message.message}`));
                     }
-                    outputChannel.appendLine(`[Graph Webview] ${message.message}`);
+                    debugLog(`[Graph Webview] ${message.message}`);
                     return;
                 }
 
-                outputChannel.appendLine(`[Graph Panel] Received message: ${JSON.stringify(message)}`);
+                debugLog(`[Graph Panel] Received message: ${JSON.stringify(message)}`);
 
                 if (!message || typeof message !== 'object') {
-                    outputChannel.appendLine('[Graph Panel] Invalid message format');
+                    debugLog('[Graph Panel] Invalid message format');
                     return;
                 }
 
                 if (message.command === 'download-graph-pdf' && message.graphName) {
-                    outputChannel.appendLine(`[Graph Panel] Processing PDF download for: ${message.graphName}`);
+                    debugLog(`[Graph Panel] Processing PDF download for: ${message.graphName}`);
                     await downloadGraphAsPdf(message.graphName);
                 } else if (message.type === 'openArtifact' && message.path) {
-                    outputChannel.appendLine(`[Graph Panel] Opening artifact: ${message.path}`);
+                    debugLog(`[Graph Panel] Opening artifact: ${message.path}`);
                     openArtifact(message.path, message.baseDir);
                 } else {
-                    outputChannel.appendLine(`[Graph Panel] Unknown message type: ${message.command || message.type}`);
+                    debugLog(`[Graph Panel] Unknown message type: ${message.command || message.type}`);
                 }
             } catch (err) {
-                outputChannel.appendLine(`[Graph Panel] Message handler error: ${err.message}`);
+                debugLog(`[Graph Panel] Message handler error: ${err.message}`);
                 vscode.window.showErrorMessage(`Message handler failed: ${err.message}`);
             }
         });
@@ -1632,6 +1689,17 @@ async function presentRunResult(commandText, result, filePath) {
 }
 
 function logRunToOutput(result, contextTitle) {
+    const config = vscode.workspace.getConfiguration('stataMcp');
+    const logCode = !!config.get('logStataCode', false);
+    const showAll = !!config.get('showAllLogsInOutput', false);
+
+    // If successful and logging is off, we suppress the verbose summary in Output
+    // (since it's already in the Terminal Panel). Failures are always shown.
+    const isSuccess = isRunSuccess(result);
+    if (isSuccess && !logCode && !showAll) {
+        return;
+    }
+
     const now = new Date().toISOString();
     outputChannel.appendLine(`\n=== ${now} — ${contextTitle} ===`);
     if (!result) {

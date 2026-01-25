@@ -11,8 +11,20 @@ const configuration = {
 
 const vscode = {
     workspace: {
+        _configListeners: [],
         getConfiguration: jest.fn().mockReturnValue(configuration),
-        workspaceFolders: [{ uri: { fsPath: '/mock/workspace' } }]
+        onDidChangeConfiguration: jest.fn().mockImplementation((listener) => {
+            vscode.workspace._configListeners.push(listener);
+            return { dispose: () => { vscode.workspace._configListeners = vscode.workspace._configListeners.filter(l => l !== listener); } };
+        }),
+        _fireConfigChange: (event) => vscode.workspace._configListeners.forEach(l => l(event)),
+        workspaceFolders: [{ uri: { fsPath: '/mock/workspace' } }],
+        fs: {
+            writeFile: jest.fn().mockResolvedValue(),
+            readFile: jest.fn().mockResolvedValue(Buffer.from('')),
+            stat: jest.fn().mockResolvedValue({ size: 100 })
+        },
+        openTextDocument: jest.fn().mockResolvedValue({ getText: () => '', isDirty: false, fileName: '/tmp/test.do', save: jest.fn() })
     },
     window: {
         createWebviewPanel: jest.fn().mockReturnValue({
