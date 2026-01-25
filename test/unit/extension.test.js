@@ -826,4 +826,48 @@ describe('extension unit tests', () => {
             expect(mcpWrite[1]).toContain('mcp-stata==1.2.0');
         });
     });
+
+    describe('Stata Startup Loading', () => {
+        it('calls connect() on activation when loadStataOnStartup is true', async () => {
+            const config = vscode.workspace.getConfiguration();
+            config.get.mockImplementation((key, def) => {
+                if (key === 'loadStataOnStartup') return true;
+                return def;
+            });
+
+            const context = {
+                subscriptions: [],
+                globalState: { get: jest.fn().mockReturnValue(true), update: jest.fn().mockResolvedValue() },
+                globalStoragePath: '/tmp/globalStorage',
+                extensionUri: { fsPath: '/test/path' },
+                extensionPath: '/test/path',
+                extensionMode: vscode.ExtensionMode.Test
+            };
+
+            await extension.activate(context);
+
+            expect(mcpClientMock.connect).toHaveBeenCalled();
+        });
+
+        it('does NOT call connect() on activation when loadStataOnStartup is false', async () => {
+            const config = vscode.workspace.getConfiguration();
+            config.get.mockImplementation((key, def) => {
+                if (key === 'loadStataOnStartup') return false;
+                return def;
+            });
+
+            const context = {
+                subscriptions: [],
+                globalState: { get: jest.fn().mockReturnValue(true), update: jest.fn().mockResolvedValue() },
+                globalStoragePath: '/tmp/globalStorage',
+                extensionUri: { fsPath: '/test/path' },
+                extensionPath: '/test/path',
+                extensionMode: vscode.ExtensionMode.Test
+            };
+
+            await extension.activate(context);
+
+            expect(mcpClientMock.connect).not.toHaveBeenCalled();
+        });
+    });
 });

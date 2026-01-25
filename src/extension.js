@@ -128,7 +128,7 @@ function activate(context) {
     if (typeof mcpClient.setTaskDoneHandler === 'function') {
         mcpClient.setTaskDoneHandler((payload) => {
             if (payload?.runId) {
-                TerminalPanel.notifyTaskDone(payload.runId);
+                TerminalPanel.notifyTaskDone(payload.runId, payload.logPath, payload.logSize, null, payload.rc);
             }
         });
     }
@@ -896,9 +896,13 @@ async function runSelection() {
         const rawLogHandler = getOutputLogHandler();
 
         await withStataProgress('Running selection', async (token) => {
-            const runId = TerminalPanel.startStreamingEntry(text, filePath, terminalRunCommand, variableListProvider, cancelRequest, downloadGraphAsPdf);
+            const runId = TerminalPanel.startStreamingEntry(text, filePath, terminalRunCommand, variableListProvider, cancelRequest, cancelTask, downloadGraphAsPdf);
             try {
                 const result = await mcpClient.runSelection(text, {
+                    runId,
+                    onStarted: () => {
+                        TerminalPanel.updateStreamingStatus(runId, 'running');
+                    },
                     cancellationToken: token,
                     normalizeResult: true,
                     includeGraphs: true,
@@ -978,7 +982,7 @@ async function runFile() {
             await withStataProgress(`Running ${path.basename(filePath)}`, async (token) => {
                 const commandText = `do "${path.basename(filePath)}"`;
                 let taskDoneSeen = false;
-                const runId = TerminalPanel.startStreamingEntry(commandText, filePath, terminalRunCommand, variableListProvider, cancelRequest, downloadGraphAsPdf);
+                const runId = TerminalPanel.startStreamingEntry(commandText, filePath, terminalRunCommand, variableListProvider, cancelRequest, cancelTask, downloadGraphAsPdf);
                 try {
                     const result = await mcpClient.runFile(effectiveFilePath, {
                         cancellationToken: token,
@@ -986,6 +990,9 @@ async function runFile() {
                         includeGraphs: true,
                         cwd: originalDir,
                         runId,
+                        onStarted: () => {
+                            TerminalPanel.updateStreamingStatus(runId, 'running');
+                        },
                         onRawLog: rawLogHandler,
                         onLog: (chunk) => {
                             if (taskDoneSeen) {
@@ -1086,6 +1093,9 @@ const terminalRunCommand = async (code, hooks) => {
             includeGraphs: true,
             cwd: hooks?.cwd,
             runId: hooks?.runId,
+            onStarted: () => {
+                if (hooks?.runId) TerminalPanel.updateStreamingStatus(hooks.runId, 'running');
+            },
             onRawLog: rawLogHandler,
             onLog: hooks?.onLog,
             onGraphReady: (artifact) => {
@@ -1178,6 +1188,7 @@ async function showTerminal() {
         variableProvider: variableListProvider,
         downloadGraphPdf: downloadGraphAsPdf,
         cancelRun: cancelRequest,
+        cancelTask: cancelTask,
         clearAll: clearAllCommand
     });
     refreshDatasetSummary();
@@ -1684,6 +1695,15 @@ async function cancelRequest() {
         console.error('[Extension] Cancel failed:', error);
         // Keep error visible to aid debugging, but avoid duplicate info toasts.
         vscode.window.showErrorMessage('Failed to cancel: ' + error.message);
+    }
+}
+
+async function cancelTask(runId) {
+    console.log('[Extension] cancelTask called:', runId);
+    try {
+        await mcpClient.cancelRun(runId);
+    } catch (error) {
+        console.warn('[Extension] cancelTask failed:', error);
     }
 }
 

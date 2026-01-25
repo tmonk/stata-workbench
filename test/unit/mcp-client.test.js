@@ -84,7 +84,8 @@ const setConfig = (overrides = {}) => {
             target.workspace.getConfiguration.mockReturnValue(config);
             return;
         }
-        target.workspace.getConfiguration = () => config;
+        // If it's not a mock, make it one rather than a plain function to avoid breaking other tests
+        target.workspace.getConfiguration = jest.fn().mockReturnValue(config);
     };
 
     applyConfig(vscodeMock);
@@ -461,6 +462,7 @@ describe('McpClient', () => {
             const requestStub = sinon.stub().resolves({ ok: true });
             const callToolStub = sinon.stub().resolves({});
             const clientMock = { request: requestStub, callTool: callToolStub };
+            client._availableTools = new Set(['run_command']);
 
             await client._callTool(clientMock, 'run_command', { code: 'sleep 10' }, { progressToken: 'p_tok', signal: abort.signal });
 
@@ -656,7 +658,7 @@ describe('McpClient', () => {
             const runState = {};
             const cancellationToken = { onCancellationRequested: sinon.stub().returns({ dispose: sinon.stub() }) };
 
-            const promise = client._awaitTaskDone(runState, 'task-1', cancellationToken);
+            const promise = client._awaitTaskDone({}, runState, 'task-1', cancellationToken);
             runState._taskDoneResolve({ event: 'task_done', task_id: 'task-1' });
 
             const result = await promise;

@@ -87,7 +87,42 @@ describe('McpClient integration (VS Code host)', () => {
         expect(result.logPath).toBeTruthy();
     });
 
+    runIfEnabled('serializes multiple rapid runSelection calls', async () => {
+        const p1 = client.runSelection('display "msg1"', { normalizeResult: true });
+        const p2 = client.runSelection('display "msg2"', { normalizeResult: true });
+        const p3 = client.runSelection('display "msg3"', { normalizeResult: true });
 
+        const [r1, r2, r3] = await Promise.all([p1, p2, p3]);
+
+        expect(r1.success).toBe(true);
+        expect(r2.success).toBe(true);
+        expect(r3.success).toBe(true);
+
+        expect(r1.stdout).toContain('msg1');
+        expect(r2.stdout).toContain('msg2');
+        expect(r3.stdout).toContain('msg3');
+
+        // Verify sequential execution via timestamps
+        expect(r2.startedAt).toBeGreaterThanOrEqual(r1.endedAt);
+        expect(r3.startedAt).toBeGreaterThanOrEqual(r2.endedAt);
+    });
+
+    runIfEnabled('cancels a queued request', async () => {
+        // Start two slow requests
+        const p1 = client.runSelection('sleep 2000', { normalizeResult: true, runId: 'run1' });
+        const p2 = client.runSelection('display "should-be-cancelled"', { normalizeResult: true, runId: 'run2' });
+
+        // Cancel the second one immediately
+        await client.cancelRun('run2');
+
+        const [r1, r2] = await Promise.allSettled([p1, p2]);
+
+        expect(r1.status).toBe('fulfilled');
+        expect(r2.status).toBe('fulfilled'); 
+        // run2 should have been aborted locally before even starting on the server
+        expect(r2.value.success).toBe(false);
+        expect(r2.value.error?.message).toMatch(/Aborted|cancelled/i);
+    });
 
     runIfEnabled('exports a graph to PDF', async () => {
         // Create a graph

@@ -57,11 +57,13 @@ class StataMcpClient {
         this._activeRun = null;
         this._runsByTaskId = new Map();
         this._runCleanupTimers = new Map();
+        this._cancellationSourcesByRunId = new Map();
         // Allow larger captured logs so long .do files and errors are preserved.
         this._maxLogBufferChars = 500_000_000; // 500 MB
         this._clientVersion = pkg?.version || 'dev';
         this._onTaskDone = null;
         this._availableTools = new Set();
+        this._toolMapping = new Map();
         this._missingRequiredTools = [];
         this._forceLatestServer = false;
         this._forceLatestAttempted = false;
@@ -123,9 +125,8 @@ class StataMcpClient {
         const meta = { command: selection, cwd };
 
         const cts = this._createCancellationSource(externalCancellationToken);
-        this._activeCancellation = cts;
 
-        const result = await this._enqueue('run_selection', { ...rest, cancellationToken: cts.token, deferArtifacts: true }, async (client) => {
+        const result = await this._enqueue('run_selection', { ...rest, runId, cancellationToken: cts.token, cancellationSource: cts, deferArtifacts: true }, async (client) => {
             const args = { code: selection };
             if (maxOutputLines && maxOutputLines > 0) {
                 args.max_output_lines = maxOutputLines;
@@ -143,6 +144,12 @@ class StataMcpClient {
                 ? onTaskDone
                 : (typeof this._onTaskDone === 'function' ? this._onTaskDone : null);
             const runState = { onLog, onRawLog, onProgress, onGraphReady, onTaskDone: resolvedOnTaskDone, progressToken, baseDir: cwd, _startMs: nowMs, _createdAt: nowMs, _runId: runId || null };
+            
+            // Mark the run as started in the UI if we have a callback
+            if (typeof options.onStarted === 'function') {
+                options.onStarted();
+            }
+
             const result = await this._withActiveRun(runState, async () => {
                 const kickoff = await this._callTool(client, 'run_command_background', args, { progressToken, signal: cts.abortController.signal });
                 return this._awaitBackgroundResult(client, runState, kickoff, cts);
@@ -164,7 +171,6 @@ class StataMcpClient {
             runState._cancelSubscription?.dispose?.();
             return result;
         }, meta, normalizeResult === true, includeGraphs === true);
-        this._activeCancellation = null;
         return result;
     }
 
@@ -184,9 +190,8 @@ class StataMcpClient {
         const meta = { command: `do "${filePath}"`, filePath, cwd };
 
         const cts = this._createCancellationSource(externalCancellationToken);
-        this._activeCancellation = cts;
 
-        const result = await this._enqueue('run_file', { ...rest, cancellationToken: cts.token, deferArtifacts: true }, async (client) => {
+        const result = await this._enqueue('run_file', { ...rest, runId, cancellationToken: cts.token, cancellationSource: cts, deferArtifacts: true }, async (client) => {
             const args = {
                 // Use absolute path so the server can locate the file, but also
                 // pass cwd so any relative includes resolve.
@@ -206,6 +211,12 @@ class StataMcpClient {
                 ? onTaskDone
                 : (typeof this._onTaskDone === 'function' ? this._onTaskDone : null);
             const runState = { onLog, onRawLog, onProgress, onGraphReady, onTaskDone: resolvedOnTaskDone, progressToken, baseDir: cwd, _startMs: nowMs, _createdAt: nowMs, _runId: runId || null };
+            
+            // Mark the run as started in the UI if we have a callback
+            if (typeof options.onStarted === 'function') {
+                options.onStarted();
+            }
+
             const result = await this._withActiveRun(runState, async () => {
                 const kickoff = await this._callTool(client, 'run_do_file_background', args, { progressToken, signal: cts.abortController.signal });
                 return this._awaitBackgroundResult(client, runState, kickoff, cts);
@@ -227,7 +238,6 @@ class StataMcpClient {
             runState._cancelSubscription?.dispose?.();
             return result;
         }, meta, normalizeResult === true, includeGraphs === true);
-        this._activeCancellation = null;
         return result;
     }
 
@@ -239,6 +249,8 @@ class StataMcpClient {
 
         const cwd = typeof rest.cwd === 'string' ? rest.cwd : null;
         const meta = { command: code, cwd };
+        const cts = this._createCancellationSource(externalCancellationToken);
+
         const task = async (client) => {
             const args = { code };
             if (maxOutputLines && maxOutputLines > 0) {
@@ -253,6 +265,11 @@ class StataMcpClient {
                 : null;
 
             const runState = { onLog, onRawLog, onProgress, onGraphReady, progressToken, baseDir: cwd };
+            
+            if (typeof options.onStarted === 'function') {
+                options.onStarted();
+            }
+
             const result = await this._withActiveRun(runState, async () => {
                 const kickoff = await this._callTool(client, 'run_command_background', args, { progressToken, signal: cts.abortController.signal });
                 return this._awaitBackgroundResult(client, runState, kickoff, cts);
@@ -274,11 +291,8 @@ class StataMcpClient {
             runState._cancelSubscription?.dispose?.();
             return result;
         };
-        const cts = this._createCancellationSource(externalCancellationToken);
-        this._activeCancellation = cts;
 
-        const result = await this._enqueue('run_command', { ...rest, cancellationToken: cts.token, deferArtifacts: true }, task, meta, true, true);
-        this._activeCancellation = null;
+        const result = await this._enqueue('run_command', { ...rest, cancellationToken: cts.token, cancellationSource: cts, deferArtifacts: true }, task, meta, true, true);
         return result;
     }
 
@@ -317,7 +331,9 @@ class StataMcpClient {
      * Useful for startup loading.
      */
     async connect() {
-        return this._ensureClient();
+        return this._enqueue('connect', { timeoutMs: 30000 }, async (client) => {
+            return client;
+        });
     }
 
     async fetchGraph(name, options = {}) {
@@ -367,9 +383,18 @@ class StataMcpClient {
             return false;
         }
         this._cancelSignal = true;
+
         if (this._activeCancellation) {
             this._activeCancellation.cancel('user cancelled');
         }
+
+        // Also cancel any queued tasks by cancelling all known sources
+        for (const source of this._cancellationSourcesByRunId.values()) {
+            try {
+                source.cancel('user cancelled all');
+            } catch (_err) { }
+        }
+
         // Stop log tailing on any active run
         if (this._activeRun) {
             this._activeRun._tailCancelled = true;
@@ -387,6 +412,30 @@ class StataMcpClient {
         return true;
     }
 
+    async cancelRun(runId) {
+        if (!runId) return false;
+        const source = this._cancellationSourcesByRunId.get(String(runId));
+        if (source) {
+            source.cancel('user cancelled specific run');
+            // If it's already the active run, also mark it as cancelled for log suppression
+            if (this._activeRun && String(this._activeRun._runId) === String(runId)) {
+                this._activeRun._cancelled = true;
+            }
+            return true;
+        }
+        
+        // If it's already the active run, cancel it via the active source
+        if (this._activeRun && String(this._activeRun._runId) === String(runId)) {
+            this._activeRun._cancelled = true;
+            if (this._activeCancellation) {
+                this._activeCancellation.cancel('user cancelled active run');
+                return true;
+            }
+        }
+        
+        return false;
+    }
+
     _createCancellationSource(externalCancellationToken) {
         const abortController = new AbortController();
         const listeners = new Set();
@@ -394,6 +443,10 @@ class StataMcpClient {
             isCancellationRequested: false,
             onCancellationRequested: (cb) => {
                 if (typeof cb !== 'function') return { dispose: () => { } };
+                if (token.isCancellationRequested) {
+                    setTimeout(cb, 0);
+                    return { dispose: () => { } };
+                }
                 listeners.add(cb);
                 return { dispose: () => listeners.delete(cb) };
             }
@@ -412,10 +465,6 @@ class StataMcpClient {
                     cb(reason);
                 } catch (_err) {
                 }
-            }
-            if (this._activeRun) {
-                this._activeRun._tailCancelled = true;
-                this._activeRun._cancelled = true;
             }
             return true;
         };
@@ -718,15 +767,32 @@ class StataMcpClient {
     async _refreshToolList(client) {
         if (!client || typeof client.listTools !== 'function') {
             this._availableTools = new Set();
+            this._toolMapping = new Map();
             return;
         }
 
         try {
             const res = await client.listTools();
-            const names = Array.isArray(res?.tools)
-                ? res.tools.map(t => t?.name).filter(Boolean)
-                : [];
+            const tools = Array.isArray(res?.tools) ? res.tools : [];
+            const names = tools.map(t => t?.name).filter(Boolean);
             this._availableTools = new Set(names);
+            this._toolMapping = new Map();
+
+            // Populate mapping for common tools
+            for (const fullName of names) {
+                // Handle prefixes like mcp_mcp_stata_run_command -> run_command
+                const shortName = fullName.split('_').filter(part => !['mcp', 'stata'].includes(part.toLowerCase())).join('_');
+                if (shortName && !this._toolMapping.has(shortName)) {
+                    this._toolMapping.set(shortName, fullName);
+                }
+                // Also handle direct suffix matches
+                const suffixMatch = ['run_command_background', 'run_do_file_background', 'get_ui_channel', 'cancel_task', 'stop_session', 'describe', 'codebook', 'get_data', 'get_variable_list', 'list_graphs', 'fetch_graph', 'export_all_graphs']
+                    .find(s => fullName.endsWith(s));
+                if (suffixMatch && !this._toolMapping.has(suffixMatch)) {
+                    this._toolMapping.set(suffixMatch, fullName);
+                }
+            }
+
             if (names.length) {
                 this._log(`[mcp-stata] available tools: ${names.join(', ')}`);
             }
@@ -738,26 +804,35 @@ class StataMcpClient {
         } catch (err) {
             this._captureMcpError(err);
             this._availableTools = new Set();
+            this._toolMapping = new Map();
             this._log(`[mcp-stata] listTools failed: ${err?.message || err}`);
         }
     }
 
+    _resolveToolName(name) {
+        if (this._availableTools?.has(name)) return name;
+        if (this._toolMapping?.has(name)) return this._toolMapping.get(name);
+        return name;
+    }
+
     async _callTool(client, name, args, callOptions = {}) {
-        if (name === 'read_log') {
+        const toolName = name;
+        const resolvedName = this._resolveToolName(toolName);
+        if (resolvedName === 'read_log') {
             this._log('[mcp-stata] read_log tool call blocked: local file access only');
             throw new Error('read_log tool call disabled; local file access only');
         }
-        return Sentry.startSpan({ name: `mcp.tool:${name}`, op: 'mcp.tool_call' }, async () => {
+        return Sentry.startSpan({ name: `mcp.tool:${toolName}`, op: 'mcp.tool_call' }, async () => {
             const toolArgs = args ?? {};
             const startMs = Date.now();
 
             try {
                 let activeClient = client;
-                if (this._availableTools?.size && !this._availableTools.has(name)) {
-                    await this._ensureLatestServerForMissingTool(name);
+                if (!this._availableTools?.has(resolvedName)) {
+                    await this._ensureLatestServerForMissingTool(toolName);
                     activeClient = await this._ensureClient();
-                    if (this._availableTools?.size && !this._availableTools.has(name)) {
-                        throw new Error(this._formatMissingToolError(name));
+                    if (!this._availableTools?.has(resolvedName)) {
+                        throw new Error(this._formatMissingToolError(toolName));
                     }
                 }
 
@@ -765,7 +840,7 @@ class StataMcpClient {
                 if (activeClient.type === 'cursor-bridge' && this._cursorCommand) {
                     result = await vscode.commands.executeCommand(this._cursorCommand, {
                         server: 'stata',
-                        tool: name,
+                        tool: resolvedName,
                         args: toolArgs
                     });
                 } else {
@@ -774,7 +849,7 @@ class StataMcpClient {
                     const params = {
                         method: 'tools/call',
                         params: {
-                            name,
+                            name: resolvedName,
                             arguments: toolArgs,
                             ...(progressToken != null ? { _meta: { progressToken } } : {})
                         }
@@ -787,7 +862,7 @@ class StataMcpClient {
                             requestOptions
                         );
                     } else {
-                        result = await activeClient.callTool({ name, arguments: toolArgs }, undefined, requestOptions);
+                        result = await activeClient.callTool({ name: resolvedName, arguments: toolArgs }, undefined, requestOptions);
                     }
                 }
 
@@ -821,7 +896,8 @@ class StataMcpClient {
         return new Set([
             'run_command_background',
             'run_do_file_background',
-            'get_ui_channel'
+            'get_ui_channel',
+            'cancel_task'
         ]);
     }
 
@@ -905,6 +981,7 @@ class StataMcpClient {
 
     async _drainActiveRunLog(client, run) {
         if (!run || !run.logPath) return;
+        if (run._cancelled) return;
         run._tailCancelled = true;
         if (run._tailPromise) {
             try {
@@ -967,7 +1044,7 @@ class StataMcpClient {
                 }
             }
             const filtered = this._filterLogChunk(run._lineBuffer);
-            if (filtered) {
+            if (filtered && !run._cancelled) {
                 run._appendLog?.(filtered);
                 if (typeof run.onLog === 'function') {
                     run.onLog(filtered);
@@ -991,6 +1068,7 @@ class StataMcpClient {
     async _tailLogLoop(client, run) {
         let emptyCycles = 0;
         while (run && (!run._tailCancelled || (run._fastDrain && emptyCycles < 5))) {
+            if (run._cancelled) break;
             const slice = await this._readLogSlice(client, run.logPath, run.logOffset, 65536);
             if (!slice || !slice.data) {
                 if (run._tailCancelled) {
@@ -1024,7 +1102,7 @@ class StataMcpClient {
                         }
                     }
                     const filtered = this._filterLogChunk(completedText);
-                    if (filtered) {
+                    if (filtered && !run._cancelled) {
                         run._appendLog?.(filtered);
                         if (typeof run.onLog === 'function') {
                             try {
@@ -1058,7 +1136,7 @@ class StataMcpClient {
                 } catch (_err) { }
             }
             const filtered = this._filterLogChunk(text);
-            if (filtered) {
+            if (filtered && !run._cancelled) {
                 run._appendLog?.(filtered);
                 if (typeof run.onLog === 'function') {
                     try {
@@ -1070,9 +1148,7 @@ class StataMcpClient {
     }
 
     async readLog(path, offset, maxBytes) {
-        return this._enqueue('read_log', { timeoutMs: 10000 }, async (_client) => {
-            return this._readLogSlice(null, path, offset, maxBytes);
-        });
+        return this._readLogSlice(null, path, offset, maxBytes);
     }
 
     async _readLogSlice(client, path, offset, maxBytes) {
@@ -1184,7 +1260,7 @@ class StataMcpClient {
         }
         this._attachTaskCancellation(client, runState, cts);
         if (!taskId) return kickoff;
-        const taskDone = await this._awaitTaskDone(runState, taskId, cts?.token);
+        const taskDone = await this._awaitTaskDone(client, runState, taskId, cts?.token);
         runState._fastDrain = true;
         if (runState?._tailPromise) {
             runState._tailCancelled = true;
@@ -1227,6 +1303,7 @@ class StataMcpClient {
         if (!runState.taskId || runState._cancelSubscription) return;
         runState._cancelSubscription = cts.token.onCancellationRequested(async () => {
             runState._cancelled = true;
+            runState._tailCancelled = true;
             if (!runState.taskId) return;
             try {
                 await this._cancelTask(client, runState.taskId);
@@ -1245,7 +1322,7 @@ class StataMcpClient {
         }
     }
 
-    async _awaitTaskDone(runState, taskId, cancellationToken) {
+    async _awaitTaskDone(client, runState, taskId, cancellationToken) {
         if (!runState || !taskId) return null;
         const taskIdText = String(taskId);
         if (runState._taskDonePayload && (!runState._taskDoneTaskId || runState._taskDoneTaskId === taskIdText)) {
@@ -1254,8 +1331,14 @@ class StataMcpClient {
 
         return new Promise((resolve, reject) => {
             let cancelSub = null;
+            let pollInterval = null;
+            let isFinished = false;
+
             const finish = (payload) => {
+                if (isFinished) return;
+                isFinished = true;
                 if (cancelSub?.dispose) cancelSub.dispose();
+                if (pollInterval) clearInterval(pollInterval);
                 resolve(payload);
             };
 
@@ -1267,9 +1350,32 @@ class StataMcpClient {
 
             if (cancellationToken?.onCancellationRequested) {
                 cancelSub = cancellationToken.onCancellationRequested(() => {
+                    if (isFinished) return;
+                    isFinished = true;
+                    if (pollInterval) clearInterval(pollInterval);
                     reject(new Error('Request cancelled'));
                 });
             }
+
+            // Polling fallback: if notifications are missed or delayed, poll every 2.5s
+            pollInterval = setInterval(async () => {
+                if (isFinished) return;
+                if (runState._taskDonePayload) {
+                    return finish(runState._taskDonePayload);
+                }
+                
+                try {
+                    // Call get_task_status tool for this specific task
+                    const res = await this._callTool(client, 'get_task_status', { task_id: taskIdText });
+                    const status = this._parseToolJson(res);
+                    if (this._isTaskDone(status)) {
+                        const resultRes = await this._callTool(client, 'get_task_result', { task_id: taskIdText });
+                        finish(this._parseToolJson(resultRes) || status);
+                    }
+                } catch (_err) {
+                    // Ignore polling errors to let it try again or wait for notification
+                }
+            }, 2500);
         });
     }
 
@@ -1288,35 +1394,90 @@ class StataMcpClient {
         // Metadata/UI commands are expected to be fast and should always have a timeout.
         // All other commands (assumed to be Stata execution) have no timeout by default (opt-in via config).
         const isMetadata = [
+            'connect',
             'view_data',
             'get_ui_channel',
             'get_variable_list',
+            'get_data',
+            'describe',
+            'codebook',
             'list_graphs',
-            'fetch_graph',
-            'export_all_graphs'
+            'export_graph',
+            'export_all_graphs',
+            'export_graphs_all',
+            'get_task_status',
+            'get_task_result',
+            'get_help',
+            'get_stored_results',
+            'read_log',
+            'find_in_log',
+            'cancel_task',
+            'stop_session'
         ].includes(label);
 
         if (!isMetadata && !config.get('enableExecuteTimeout', false)) {
             timeoutMs = 0;
         }
 
+        const bypassQueue = !!(options.bypassQueue || isMetadata);
+
         this._pending += 1;
-        this._statusEmitter.emit('status', this._active ? 'running' : 'queued');
+        // Improve status: if we have more than 1 pending, we are definitely queued.
+        this._statusEmitter.emit('status', this._pending > 1 ? 'queued' : (this._active ? 'running' : 'idle'));
+
+        if (options.runId && options.cancellationSource) {
+            this._cancellationSourcesByRunId.set(String(options.runId), options.cancellationSource);
+        }
+
+        let cancelReject;
+        const cancelPromise = new Promise((_, reject) => {
+            cancelReject = reject;
+        });
+
+        const onCancel = (reason) => {
+            if (cancelReject) {
+                const r = cancelReject;
+                cancelReject = null;
+                // Reject on next tick to avoid unhandled promise rejection errors in some environments
+                // when the caller hasn't yet attached a .catch handler.
+                Promise.resolve().then(() => {
+                    r(new Error(reason || 'Request cancelled'));
+                });
+            }
+        };
+
+        let sub;
+        if (options.cancellationToken) {
+            sub = options.cancellationToken.onCancellationRequested(() => onCancel('Request cancelled'));
+            if (options.cancellationToken.isCancellationRequested) {
+                onCancel('Request cancelled');
+            }
+        }
 
         const work = async () => {
             return Sentry.startSpan({ name: `mcp.operation:${label}`, op: 'mcp.operation' }, async () => {
                 const startedAt = Date.now();
                 if (this._cancelSignal || options?.cancellationToken?.isCancellationRequested) {
-                    const wasGlobal = this._cancelSignal;
                     this._pending = Math.max(0, this._pending - 1);
                     if (this._pending === 0) {
                         this._cancelSignal = false;
                     }
+                    if (options.runId) {
+                        this._cancellationSourcesByRunId.delete(String(options.runId));
+                    }
+                    this._statusEmitter.emit('status', this._pending > 0 ? 'queued' : 'connected');
                     throw new Error('Request cancelled');
                 }
 
                 this._active = true;
+                // Update active cancellation to the one currently running
+                if (options?.cancellationSource) {
+                    this._activeCancellation = options.cancellationSource;
+                }
+
                 this._statusEmitter.emit('status', 'running');
+                this._log(`[mcp-stata] starting operation: ${label} (pending: ${this._pending})`);
+                
                 try {
                     const client = await this._ensureClient();
                     const result = await this._withTimeout(task(client), timeoutMs, label, options?.cancellationToken);
@@ -1341,7 +1502,6 @@ class StataMcpClient {
                     const durationMs = Date.now() - startedAt;
                     if (this._isCancellationError(error)) {
                         this._log(`[mcp-stata] operation ${label} cancelled after ${durationMs}ms`);
-                        this._statusEmitter.emit('status', this._pending > 0 ? 'queued' : 'connected');
                     } else {
                         this._log(`[mcp-stata] operation ${label} failed after ${durationMs}ms: ${error?.message || error}`);
                         Sentry.captureException(error);
@@ -1350,22 +1510,66 @@ class StataMcpClient {
                     throw error;
                 } finally {
                     this._active = false;
+                    this._activeCancellation = null;
                     this._pending = Math.max(0, this._pending - 1);
+                    if (options.runId) {
+                        this._cancellationSourcesByRunId.delete(String(options.runId));
+                    }
                     if (this._pending === 0) {
                         this._cancelSignal = false;
-                    }
-                    if (this._pending > 0) {
-                        this._statusEmitter.emit('status', 'queued');
-                    } else {
                         this._statusEmitter.emit('status', 'connected');
+                    } else {
+                        this._statusEmitter.emit('status', 'queued');
                     }
                 }
             });
         };
 
-        const next = this._queue.then(work, work);
-        this._queue = next.catch(() => { });
-        return next;
+        const workPromise = (async () => {
+            try {
+                // Wait for the previous task to finish (or fail) before starting
+                if (!bypassQueue) {
+                    await this._queue.catch(() => { });
+                }
+                return await work();
+            } finally {
+                if (sub) {
+                    sub.dispose();
+                }
+            }
+        })();
+
+        // Update the serial queue tail
+        if (!bypassQueue) {
+            this._queue = workPromise.catch(() => { });
+        }
+
+        // If cancelled while still in queue, Promise.race will reject immediately
+        // while the workPromise still correctly honors the serial chain.
+        const out = Promise.race([workPromise, cancelPromise]);
+
+        // If normalization is requested, we catch errors here and return a success:false object.
+        // This ensures callers using normalization (like the extension UI) get a structured error
+        // instead of an unhandled rejection, even if they await it late.
+        const finalOut = normalize ? out.catch(error => {
+            if (error?.message === 'Request cancelled' || this._isCancellationError(error)) {
+                return {
+                    success: false,
+                    rc: -1,
+                    stderr: error?.message || 'Request cancelled',
+                    error: { message: error?.message || 'Request cancelled' }
+                };
+            }
+            // For execution commands (run/runSelection/runFile), we only normalize
+            // cancellation errors to prevent UI timeouts and satisfy the test suite.
+            // Real MCP tool failures (like "Missing Tool" or connection errors) should
+            // still throw so the caller knows something went fundamentally wrong.
+            throw error;
+        }) : out;
+
+        // Prevent unhandled rejection errors if the caller doesn't await immediately
+        finalOut.catch(() => { });
+        return finalOut;
     }
 
     async _withTimeout(promise, timeoutMs, label, cancellationToken) {
@@ -2208,6 +2412,10 @@ class StataMcpClient {
             if (byId) run = byId;
         }
 
+        if (run && run._cancelled) {
+            return;
+        }
+
         const lp = parsed?.path || parsed?.log_path || parsed?.logPath;
         if (run && event === 'log_path' && lp) {
             this._log(`[mcp-stata] log_path payload=${text}`);
@@ -2219,8 +2427,8 @@ class StataMcpClient {
         }
 
         if (!run) {
-            if (event !== 'progress' && event !== 'log_path') {
-                this._log(`[mcp-stata] Warning: received notification ${event} but no active run found and no taskId in payload.`);
+            if (event && event !== 'progress' && event !== 'log_path' && event !== 'logMessage') {
+                this._log(`[mcp-stata] Info: received notification ${event} but no active run found and no taskId in payload.`);
             }
             return;
         }
@@ -2316,7 +2524,7 @@ class StataMcpClient {
                 }
             }
             const filtered = this._filterLogChunk(completedText);
-            if (!filtered) return;
+            if (!filtered || run._cancelled) return;
             run._appendLog?.(filtered);
             if (typeof run.onLog === 'function') {
                 try {

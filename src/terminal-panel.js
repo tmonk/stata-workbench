@@ -106,6 +106,7 @@ class TerminalPanel {
   static _defaultRunCommand = null;
   static _downloadGraphPdf = null;
   static _cancelHandler = null;
+  static _cancelTaskHandler = null;
   static _clearHandler = null;
   static _activeRunId = null;
   static _activeFilePath = null;
@@ -127,9 +128,10 @@ class TerminalPanel {
    * @param {(code: string, hooks?: object) => Promise<object>} options.runCommand
    * @param {(graphName: string) => Promise<void>} [options.downloadGraphPdf]
    * @param {() => Promise<void>} [options.cancelRun]
+   * @param {(runId: string) => Promise<void>} [options.cancelTask]
    * @param {() => Promise<void>} [options.clearAll]
    */
-  static show({ filePath, initialCode, initialResult, runCommand, variableProvider, downloadGraphPdf, cancelRun, clearAll }) {
+  static show({ filePath, initialCode, initialResult, runCommand, variableProvider, downloadGraphPdf, cancelRun, cancelTask, clearAll }) {
     const column = vscode.ViewColumn.Beside;
     TerminalPanel._activeFilePath = filePath || null;
     if (typeof variableProvider === 'function') {
@@ -140,6 +142,9 @@ class TerminalPanel {
     }
     if (typeof cancelRun === 'function') {
       TerminalPanel._cancelHandler = cancelRun;
+    }
+    if (typeof cancelTask === 'function') {
+      TerminalPanel._cancelTaskHandler = cancelTask;
     }
     if (typeof clearAll === 'function') {
       TerminalPanel._clearHandler = clearAll;
@@ -196,6 +201,9 @@ class TerminalPanel {
         }
         if (message.type === 'cancelRun') {
           await TerminalPanel._handleCancelRun();
+        }
+        if (message.type === 'cancelTask' && message.runId) {
+          await TerminalPanel._handleCancelTask(message.runId);
         }
         if (message.type === 'clearAll') {
           await TerminalPanel._handleClearAll();
@@ -445,7 +453,19 @@ class TerminalPanel {
     });
   }
 
-  static startStreamingEntry(code, filePath, runCommand, variableProvider, cancelRun, downloadGraphPdf) {
+  static async _handleCancelTask(runId) {
+    return Sentry.startSpan({ name: 'terminal.cancelTask', op: 'extension.operation' }, async () => {
+      if (typeof TerminalPanel._cancelTaskHandler === 'function') {
+        try {
+          await TerminalPanel._cancelTaskHandler(runId);
+        } catch (error) {
+          console.error('[TerminalPanel] cancelTask failed:', error);
+        }
+      }
+    });
+  }
+
+  static startStreamingEntry(code, filePath, runCommand, variableProvider, cancelRun, cancelTask, downloadGraphPdf) {
     const trimmed = (code || '').trim();
     if (!trimmed) return null;
 
@@ -458,6 +478,9 @@ class TerminalPanel {
     }
     if (typeof cancelRun === 'function') {
       TerminalPanel._cancelHandler = cancelRun;
+    }
+    if (typeof cancelTask === 'function') {
+      TerminalPanel._cancelTaskHandler = cancelTask;
     }
     if (typeof downloadGraphPdf === 'function') {
       TerminalPanel._downloadGraphPdf = downloadGraphPdf;
@@ -472,6 +495,7 @@ class TerminalPanel {
         variableProvider: variableProvider || TerminalPanel.variableProvider,
         downloadGraphPdf: TerminalPanel._downloadGraphPdf,
         cancelRun: TerminalPanel._cancelHandler,
+        cancelTask: TerminalPanel._cancelTaskHandler,
         clearAll: TerminalPanel._clearHandler
       });
     }
@@ -482,6 +506,11 @@ class TerminalPanel {
     TerminalPanel._postMessage({ type: 'runStarted', runId, code: trimmed });
     TerminalPanel.currentPanel.reveal(vscode.ViewColumn.Beside);
     return runId;
+  }
+
+  static updateStreamingStatus(runId, status) {
+    if (!TerminalPanel.currentPanel || !runId) return;
+    TerminalPanel._postMessage({ type: 'runStatusUpdate', runId, status });
   }
 
   static appendStreamingLog(runId, text) {
@@ -781,6 +810,23 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
     .summary-item span {
       color: var(--text-primary);
       font-weight: 600;
+    }
+
+    .btn-xs {
+      padding: 2px 4px;
+      height: 20px;
+      min-width: 20px;
+      font-size: 10px;
+    }
+
+    .cancel-queued-btn {
+      color: var(--text-muted);
+      margin-left: 4px;
+      display: inline-flex;
+    }
+
+    .cancel-queued-btn:hover {
+      color: var(--accent-error);
     }
   </style>
 </head>
@@ -1228,6 +1274,17 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
 
     // Tab switching logic (delegated)
     document.addEventListener('click', (e) => {
+        const cancelQueuedBtn = e.target.closest('.cancel-queued-btn');
+        if (cancelQueuedBtn) {
+            const runId = cancelQueuedBtn.dataset.runId;
+            if (runId) {
+                vscode.postMessage({ type: 'cancelTask', runId });
+                cancelQueuedBtn.disabled = true;
+                cancelQueuedBtn.style.opacity = '0.5';
+            }
+            return;
+        }
+
         const tabBtn = e.target.closest('.tab-btn');
         if (tabBtn) {
             const runId = tabBtn.dataset.runId;
@@ -1397,7 +1454,8 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
             +    '<div class="output-header">'
             +      '<div class="flex items-center gap-xs">'
             +        '<span class="text-muted" id="run-status-dot-' + runId + '" style="color: var(--accent-warning); font-size:16px;">●</span>'
-            +        '<span id="run-status-title-' + runId + '">Stata Output (running…)</span>'
+            +        '<span id="run-status-title-' + runId + '">Stata Output (waiting in queue…)</span>'
+            +        '<button class="btn btn-ghost btn-xs cancel-queued-btn" id="run-cancel-' + runId + '" data-run-id="' + runId + '" title="Cancel this task"><i class="codicon codicon-close"></i></button>'
             +      '</div>'
             +      '<div class="flex items-center gap-sm">'
             +        '<span id="run-rc-' + runId + '"></span>'
@@ -1874,10 +1932,27 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
         updateStatusIndicator(null, null); // Reset status when run starts
       }
 
+      if (msg.type === 'runStatusUpdate') {
+        const runId = msg.runId;
+        const status = msg.status;
+        const run = runs[runId];
+        if (run && run.statusTitle) {
+            if (status === 'running') {
+                run.statusTitle.textContent = 'Stata Output (running…)';
+            } else if (status === 'queued') {
+                run.statusTitle.textContent = 'Stata Output (waiting in queue…)';
+            }
+        }
+      }
+
       if (msg.type === 'runCancelled') {
         const runId = msg.runId;
         const run = runs[runId];
         if (!run) return;
+
+        const cancelBtn = document.getElementById('run-cancel-' + runId);
+        if (cancelBtn) cancelBtn.style.display = 'none';
+
         if (run.statusDot) run.statusDot.style.color = 'var(--accent-warning)';
         if (run.statusTitle) run.statusTitle.textContent = 'Stata Output (cancelled)';
         if (run.stderrEl) {
@@ -1997,6 +2072,9 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
         if (run.statusTitle) {
             run.statusTitle.textContent = 'Stata Output';
         }
+        
+        const cancelBtn = document.getElementById('run-cancel-' + runId);
+        if (cancelBtn) cancelBtn.style.display = 'none';
 
         if (run.rcEl) {
             run.rcEl.textContent = (msg.rc !== null && msg.rc !== undefined) ? ('RC ' + String(msg.rc)) : '';
@@ -2153,6 +2231,10 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
         const runId = msg.runId;
         const run = runs[runId];
         if (!run) return;
+
+        const cancelBtn = document.getElementById('run-cancel-' + runId);
+        if (cancelBtn) cancelBtn.style.display = 'none';
+
         if (run.statusDot) run.statusDot.style.color = 'var(--accent-error)';
         if (run.statusTitle) run.statusTitle.textContent = 'Stata Output (failed)';
         if (run.stderrEl) {

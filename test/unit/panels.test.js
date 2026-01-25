@@ -192,5 +192,41 @@ describe('Panels', () => {
             expect(TerminalPanel._cancelHandler).toBe(h);
             TerminalPanel.currentPanel = null;
         });
+
+        it('should call cancelTaskHandler when receiving cancelTask message', async () => {
+            let receivedRunId = null;
+            const cancelTaskHandler = (runId) => { receivedRunId = runId; };
+            
+            let messageHandler;
+            const mockWebview = {
+                onDidReceiveMessage: (handler) => { messageHandler = handler; return { dispose: () => {} }; },
+                postMessage: () => {},
+                asWebviewUri: (u) => u,
+                cspSource: ''
+            };
+            const mockPanel = {
+                webview: mockWebview,
+                reveal: () => {},
+                onDidDispose: () => { return { dispose: () => {} }; }
+            };
+
+            const vscode = require('vscode');
+            const originalCreate = vscode.window.createWebviewPanel;
+            vscode.window.createWebviewPanel = () => mockPanel;
+
+            TerminalPanel.show({ 
+                cancelTask: cancelTaskHandler,
+                runCommand: async () => ({})
+            });
+
+            // Simulate message from webview
+            await messageHandler({ type: 'cancelTask', runId: 'test-run-123' });
+
+            expect(receivedRunId).toBe('test-run-123');
+
+            // Cleanup
+            TerminalPanel.currentPanel = null;
+            vscode.window.createWebviewPanel = originalCreate;
+        });
     });
 });
