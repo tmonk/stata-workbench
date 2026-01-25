@@ -1,3 +1,10 @@
+## [0.17.1](https://github.com/tmonk/stata-workbench/compare/v0.17.0...v0.17.1) (2026-01-25)
+
+
+### Bug Fixes
+
+* enhance MCP package version retrieval and logging ([7bb58ba](https://github.com/tmonk/stata-workbench/commit/7bb58ba6e66085af35599b018d7cd22b86bd31ce))
+
 # [0.17.0](https://github.com/tmonk/stata-workbench/compare/v0.16.15...v0.17.0) (2026-01-25)
 
 
