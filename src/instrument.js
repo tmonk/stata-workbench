@@ -63,6 +63,14 @@ Sentry.init({
             if (msg.includes('{err}') || msg.includes('stata error:')) {
                 return null;
             }
+            // Ignore VS Code shutdown noise or cancellation during host termination
+            if (msg.includes('channel has been closed') || msg.includes('canceled: canceled') || msg === 'canceled') {
+                return null;
+            }
+            // Ignore errors occurring during shutdown/disposal (stack trace contains .terminate or .dispose)
+            if (error.stack && /\.(terminate|dispose)/.test(error.stack)) {
+                return null;
+            }
         }
         return event;
     },
