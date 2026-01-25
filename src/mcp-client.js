@@ -312,6 +312,14 @@ class StataMcpClient {
         });
     }
 
+    /**
+     * Explicitly start the MCP client connection if not already connected.
+     * Useful for startup loading.
+     */
+    async connect() {
+        return this._ensureClient();
+    }
+
     async fetchGraph(name, options = {}) {
         return this._enqueue('fetch_graph', options, async (client) => {
             // Respect requested format; default to server default (often SVG) unless format is provided.

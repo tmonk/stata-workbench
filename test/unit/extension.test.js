@@ -64,6 +64,7 @@ describe('extension unit tests', () => {
             setLogger: jest.fn(),
             onStatusChanged: jest.fn().mockReturnValue({ dispose: jest.fn() }),
             dispose: jest.fn(),
+            connect: jest.fn().mockResolvedValue({}),
             runSelection: jest.fn().mockResolvedValue({}),
             getUiChannel: jest.fn().mockResolvedValue(null),
             hasConfig: jest.fn().mockReturnValue(false),

@@ -44,7 +44,7 @@ describe('MCP Discovery and Fallback Logic', () => {
                     spawnSync: stubs.spawnSync
                 },
                 'fs': { existsSync: stubs.existsSync, statSync: () => ({ isFile: () => true }) },
-                './mcp-client': { client: { getServerConfig: () => ({}) } },
+                './mcp-client': { client: { getServerConfig: () => ({}), connect: () => Promise.resolve({}) } },
                 './terminal-panel': { TerminalPanel: { setExtensionUri: () => {} } }
             });
 
@@ -84,7 +84,7 @@ describe('MCP Discovery and Fallback Logic', () => {
              const api = proxyquire.noCallThru().load('../../src/extension', {
                 'vscode': vscodeMock,
                 'child_process': { spawnSync: stubs.spawnSync },
-                './mcp-client': { client: { getServerConfig: () => ({}) } },
+                './mcp-client': { client: { getServerConfig: () => ({}), connect: () => Promise.resolve({}) } },
                 './terminal-panel': { TerminalPanel: { setExtensionUri: () => {} } }
             });
 

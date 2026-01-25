@@ -124,6 +124,11 @@
           "default": false,
           "description": "Enable timeout for Stata execution commands (Run File, Run Selection). If disabled, these commands will run indefinitely unless manually cancelled."
         },
+        "stataMcp.loadStataOnStartup": {
+          "type": "boolean",
+          "default": true,
+          "description": "Load Stata automatically when VS Code starts. This makes the first run faster but consumes memory immediately."
+        },
         "stataMcp.autoRevealOutput": {
           "type": "boolean",
           "default": false,

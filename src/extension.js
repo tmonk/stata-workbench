@@ -230,6 +230,15 @@ function activate(context) {
     }
     updateStatusBar(missingCli ? 'missing' : 'idle');
 
+    // Startup loading: if enabled, start the Stata session immediately.
+    // We don't await this so activation finishes quickly, but the process starts in the background.
+    const loadOnStartup = settings.get('loadStataOnStartup', true);
+    if (loadOnStartup && !missingCli) {
+        mcpClient.connect().catch((err) => {
+            appendLine(`[Startup] Failed to load Stata: ${err.message || err}`);
+        });
+    }
+
     // Expose API for testing
     if (context.extensionMode === vscode.ExtensionMode.Test) {
         return {
