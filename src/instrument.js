@@ -71,7 +71,39 @@ Sentry.init({
             if (error.stack && /\.(terminate|dispose)/.test(error.stack)) {
                 return null;
             }
+            // Ignore transient network environment changes
+            if (msg.includes('err_network_changed')) {
+                return null;
+            }
+            // Ignore socket hang-ups or parties ending the connection (common during shutdown or network loss)
+            if (msg.includes('socket has been ended by the other party') || msg.includes('socket hang up') || msg.includes('econnreset')) {
+                return null;
+            }
         }
+
+        // Global noise filter: only allow events that are clearly related to our extension
+        // This stops noise from other extensions sharing the same host (e.g. Copilot, Claude).
+        const isFromOurExtension = (event.exception?.values || []).some(ex => {
+            const hasOurFrame = ex.stacktrace?.frames?.some(frame => 
+                frame.filename && (
+                    frame.filename.includes('stata-workbench') || 
+                    frame.filename.includes('mcp-stata') ||
+                    frame.filename.includes('tmonk')
+                )
+            );
+            if (hasOurFrame) return true;
+
+            const val = (ex.value || "").toLowerCase();
+            return val.includes('stata-workbench') || val.includes('tmonk') || val.includes('mcp-stata');
+        });
+
+        // Always allow our own initialization failures (e.g. profiling failures)
+        const isOurInitFailure = event.tags && event.tags.type === "initialization_failure";
+
+        if (!isFromOurExtension && !isOurInitFailure) {
+            return null;
+        }
+
         return event;
     },
 });
