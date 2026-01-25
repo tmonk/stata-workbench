@@ -1,3 +1,18 @@
+# [0.17.0](https://github.com/tmonk/stata-workbench/compare/v0.16.15...v0.17.0) (2026-01-25)
+
+
+### Bug Fixes
+
+* optimize log reading and update handling in MCP client and terminal panel ([70f7373](https://github.com/tmonk/stata-workbench/commit/70f737378f0363258215f9cc018cb291143573fd))
+* remove VSCode progress notification ([fadaa3e](https://github.com/tmonk/stata-workbench/commit/fadaa3e32a6e24757e846ab497e75a86c203a75e))
+
+
+### Features
+
+* add logging configuration options and enhance logging behavior in extension ([00b6562](https://github.com/tmonk/stata-workbench/commit/00b6562fecad5cb00ff258faf437df102201eb9c))
+* add option to load Stata on startup and enhance MCP client connection handling ([68d41de](https://github.com/tmonk/stata-workbench/commit/68d41dec13669f73af0e39907a15b34a4406a468))
+* add task cancellation functionality to TerminalPanel and MCP client ([5a77720](https://github.com/tmonk/stata-workbench/commit/5a777205b253bcf5ee1e0d03ce619a9151871e2b))
+
 ## [0.16.15](https://github.com/tmonk/stata-workbench/compare/v0.16.14...v0.16.15) (2026-01-25)
 
 
