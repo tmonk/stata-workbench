@@ -1607,42 +1607,29 @@ function renderGraphHtml(graphDetails, webview, extensionUri, nonce) {
 }
 
 async function withStataProgress(title, task, sample) {
-    const cancellable = true;
     const hints = sample && sample.length > 180 ? `${sample.slice(0, 180)}…` : sample;
-    const startedAt = Date.now();
-    const result = await vscode.window.withProgress(
-        {
-            location: vscode.ProgressLocation.Notification,
-            title,
-            cancellable
-        },
-        async (token) => {
-            try {
-                const result = await task(token);
-                return result;
-            } catch (error) {
-                const detail = error?.message || String(error);
-                const isMissingCli = detail.includes('uvx') || detail.includes('ENOENT') || detail.includes('not found') || detail.includes('not recognized');
+    try {
+        const result = await task(null);
+        return result;
+    } catch (error) {
+        const detail = error?.message || String(error);
+        const isMissingCli = detail.includes('uvx') || detail.includes('ENOENT') || detail.includes('not found') || detail.includes('not recognized');
 
-                if (isMissingCli) {
-                    vscode.window.showErrorMessage(
-                        `${title} failed: uvx (uv) not found on PATH. Install uv to run mcp-stata.`,
-                        'Install uv'
-                    ).then(choice => {
-                        if (choice === 'Install uv') {
-                            promptInstallMcpCli(globalContext, true);
-                        }
-                    });
-                } else {
-                    vscode.window.showErrorMessage(`${title} failed: ${detail}${hints ? ` (snippet: ${hints})` : ''}`);
+        if (isMissingCli) {
+            vscode.window.showErrorMessage(
+                `${title} failed: uvx (uv) not found on PATH. Install uv to run mcp-stata.`,
+                'Install uv'
+            ).then(choice => {
+                if (choice === 'Install uv') {
+                    promptInstallMcpCli(globalContext, true);
                 }
-                showOutput(error?.stack || detail);
-                throw error;
-            } finally {
-            }
+            });
+        } else {
+            vscode.window.showErrorMessage(`${title} failed: ${detail}${hints ? ` (snippet: ${hints})` : ''}`);
         }
-    );
-    return result;
+        showOutput(error?.stack || detail);
+        throw error;
+    }
 }
 
 function isStataFailure(result) {
