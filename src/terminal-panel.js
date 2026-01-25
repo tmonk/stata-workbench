@@ -964,15 +964,42 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
     function scheduleHighlight() {
         if (highlightTimer) return;
         highlightScheduled += 1;
-        console.log('[Highlight] scheduled ' + highlightScheduled);
         highlightTimer = requestAnimationFrame(() => {
             const start = Date.now();
             if (window.stataUI && window.stataUI.processSyntaxHighlighting) {
                 window.stataUI.processSyntaxHighlighting();
             }
             const elapsed = Date.now() - start;
-            console.log('[Highlight] ran in ' + elapsed + 'ms');
             highlightTimer = null;
+        });
+    }
+
+    const logUpdateQueued = new Set();
+    let logUpdateTimer = null;
+
+    function scheduleLogUpdate(runId) {
+        logUpdateQueued.add(runId);
+        if (logUpdateTimer) return;
+        logUpdateTimer = requestAnimationFrame(() => {
+            logUpdateTimer = null;
+            const ids = Array.from(logUpdateQueued);
+            logUpdateQueued.clear();
+            for (const runId of ids) {
+                const run = runs[runId];
+                if (!run || !run.rawStdout) continue;
+                
+                const shouldStick = autoScrollPinned;
+                const html = window.stataUI.smclToHtml(run.rawStdout);
+                
+                if (run.stdoutEl) {
+                    run.stdoutEl.innerHTML = html;
+                }
+                if (run.logEl) {
+                    run.logEl.innerHTML = html;
+                }
+                if (shouldStick) scheduleScrollToBottom();
+            }
+            scheduleHighlight();
         });
     }
     
@@ -2019,18 +2046,7 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
             run.rawStdout = safeSliceTail(run.rawStdout, MAX_RAW_BUF);
         }
 
-        const shouldStick = autoScrollPinned;
-        
-        if (run.stdoutEl) {
-            run.stdoutEl.innerHTML = window.stataUI.smclToHtml(run.rawStdout);
-        }
-        
-        if (run.logEl) {
-            run.logEl.innerHTML = window.stataUI.smclToHtml(run.rawStdout);
-        }
-        
-        scheduleHighlight();
-        if (shouldStick) scheduleScrollToBottom();
+        scheduleLogUpdate(runId);
         return;
       }
 

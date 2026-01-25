@@ -999,11 +999,11 @@ class StataMcpClient {
         }
 
         const maxEmptyReads = run._fastDrain ? 1 : 10;
-        const maxIterations = run._fastDrain ? 6 : 200;
-        const idleDelay = run._fastDrain ? 10 : 50;
+        const maxIterations = run._fastDrain ? 20 : 200;
+        const idleDelay = run._fastDrain ? 5 : 50;
         let emptyReads = 0;
         for (let i = 0; i < maxIterations; i++) {
-            const slice = await this._readLogSlice(client, run.logPath, run.logOffset, 65536);
+            const slice = await this._readLogSlice(client, run.logPath, run.logOffset, 262144);
             if (!slice) break;
             if (typeof slice.next_offset === 'number') {
                 run.logOffset = slice.next_offset;
@@ -1018,7 +1018,8 @@ class StataMcpClient {
                 if (lines.length > 0) {
                     const lastLine = lines[lines.length - 1];
                     if (lastLine.trim() === '.') {
-                        run._lineBuffer = lines.pop() + '\n' + (run._lineBuffer || '');
+                        const poppedLine = lines.pop();
+                        run._lineBuffer = poppedLine + '\n' + (run._lineBuffer || '');
                     }
                 }
 
@@ -1033,6 +1034,12 @@ class StataMcpClient {
                     const filtered = this._filterLogChunk(completedText);
                     if (filtered) {
                         run._appendLog?.(filtered);
+                        if (typeof run.onLog === 'function') {
+                            try {
+                                run.onLog(filtered);
+                            } catch (_err) {
+                            }
+                        }
                     }
                 }
                 emptyReads = 0;
@@ -1077,13 +1084,13 @@ class StataMcpClient {
         let emptyCycles = 0;
         while (run && (!run._tailCancelled || (run._fastDrain && emptyCycles < 5))) {
             if (run._cancelled) break;
-            const slice = await this._readLogSlice(client, run.logPath, run.logOffset, 65536);
+            const slice = await this._readLogSlice(client, run.logPath, run.logOffset, 262144);
             if (!slice || !slice.data) {
                 if (run._tailCancelled) {
                     emptyCycles++;
                     if (!run._fastDrain || emptyCycles >= 5) break;
                 }
-                const delay = run._fastDrain ? 20 : 100;
+                const delay = run._fastDrain ? 10 : 50;
                 await this._delay(delay);
                 continue;
             }
@@ -1121,7 +1128,7 @@ class StataMcpClient {
                     }
                 } else {
                     // No full lines yet, need to wait for more data
-                    await this._delay(run._fastDrain ? 10 : 25);
+                    await this._delay(run._fastDrain ? 5 : 10);
                 }
             } else {
                 if (run._tailCancelled && !run._fastDrain) break;
@@ -1130,7 +1137,7 @@ class StataMcpClient {
                     run._idleLogged = true;
                 }
                 // No data at all, wait longer
-                await this._delay(run._fastDrain ? 20 : 100);
+                await this._delay(run._fastDrain ? 10 : 50);
             }
         }
 
@@ -1166,32 +1173,27 @@ class StataMcpClient {
                 this._log('[mcp-stata] read_log skipped: empty path');
                 return null;
             }
-            const exists = fs.existsSync(logPath);
-            if (!exists) {
-                this._log(`[mcp-stata] read_log skipped: missing local file at ${logPath}`);
-                return null;
-            }
-            const stats = fs.statSync(logPath);
-            const size = stats.size;
-            const safeOffset = Math.max(0, Number.isFinite(offset) ? offset : 0);
-            const effectiveOffset = Math.min(safeOffset, size);
-            const maxRead = Math.max(0, Number.isFinite(maxBytes) ? maxBytes : 0);
-            const bytesToRead = Math.min(maxRead, size - effectiveOffset);
-            
-            if (bytesToRead <= 0) {
-                return { data: '', next_offset: effectiveOffset };
-            }
 
+            const safeOffset = Math.max(0, Number.isFinite(offset) ? offset : 0);
+            const maxRead = Math.max(0, Number.isFinite(maxBytes) ? maxBytes : 262144);
+            
+            // Avoid statSync - just try reading. Most OS/FS will handle this faster.
             const fd = fs.openSync(logPath, 'r');
             try {
-                const buffer = Buffer.allocUnsafe(bytesToRead);
-                const bytesRead = fs.readSync(fd, buffer, 0, bytesToRead, effectiveOffset);
+                const buffer = Buffer.allocUnsafe(maxRead);
+                const bytesRead = fs.readSync(fd, buffer, 0, maxRead, safeOffset);
+                
+                if (bytesRead <= 0) {
+                    return { data: '', next_offset: safeOffset };
+                }
+                
                 const data = buffer.slice(0, bytesRead).toString('utf8');
-                return { data, next_offset: effectiveOffset + bytesRead };
+                return { data, next_offset: safeOffset + bytesRead };
             } finally {
                 fs.closeSync(fd);
             }
         } catch (err) {
+            if (err.code === 'ENOENT') return null;
             this._log(`[mcp-stata] read_log local file failed: ${err?.message || err}`);
             return null;
         }
