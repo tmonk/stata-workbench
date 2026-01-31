@@ -511,7 +511,71 @@ class StataMcpClient {
             }
         }
 
-        this._clientPromise = this._createClient();
+        this._clientPromise = (async () => {
+            const { client, transport, setupTimeoutSeconds } = await this._createClient();
+            
+            try {
+                const connectTimeoutMs = (parseInt(setupTimeoutSeconds, 10) || 60) * 1000;
+                let timeoutId;
+                const timeoutPromise = new Promise((_, reject) => {
+                    timeoutId = setTimeout(() => {
+                        const error = new Error(`Connection timed out after ${setupTimeoutSeconds} seconds. The mcp-stata server may be hanging while trying to initialize Stata.`);
+                        error.isTimeout = true;
+                        reject(error);
+                    }, connectTimeoutMs);
+                });
+
+                await Promise.race([
+                    client.connect(transport),
+                    timeoutPromise
+                ]);
+                if (timeoutId) clearTimeout(timeoutId);
+            } catch (err) {
+                this._captureMcpError(err);
+
+                // Explicitly close transport to kill the orphaned process if it's still alive.
+                try {
+                    if (transport && typeof transport.close === 'function') {
+                        await transport.close();
+                    }
+                } catch (closeErr) {
+                    this._log(`[mcp-stata] Failed to close transport after connect error: ${closeErr.message}`);
+                }
+
+                this._resetClientState();
+                const context = this._formatRecentStderr();
+                let message = err?.message || String(err);
+
+                // Enhance error message for common Python/Stata missing issues found in stderr context
+                const stderrText = context.toLowerCase();
+                if (stderrText.includes('modulenotfounderror') && (stderrText.includes('pystata') || stderrText.includes('stata_setup'))) {
+                    message += "\n\nCRITICAL: The 'pystata' or 'stata_setup' Python package is missing. Ensure they are installed in your Python environment (e.g., 'pip install pystata').";
+                } else if (stderrText.includes('stata system information not found') || stderrText.includes('stata not found')) {
+                    message += "\n\nCRITICAL: Stata could not be found or initialized. This usually means 'stata_setup' is configured but cannot find your Stata installation.";
+                } else if (err.isTimeout) {
+                    message += "\n\nHint: This often happens if 'stata_setup' is trying to initialize Stata but hangs (e.g., waiting for a license or stuck in a loop).";
+                }
+
+                throw new Error(`Failed to connect to mcp-stata: ${message}${context}`);
+            }
+
+            this._log(`mcp-stata connected (pid=${transport.pid ?? 'unknown'})`);
+
+            // After connect, try again to capture stderr from the underlying process
+            // The process might only be available after start()/connect()
+            const postConnectProc = transport._process || transport.process || transport._serverProcess;
+            if (postConnectProc && postConnectProc.stderr && !postConnectProc.stderr._stataListenerAttached) {
+                this._log(`[mcp-stata] Post-connect: Found process stderr, attaching listener`);
+                this._attachStderrListener(postConnectProc.stderr, 'post_connect');
+            }
+
+            // Discover available tools so downstream calls choose the right names.
+            await this._refreshToolList(client);
+
+            this._transport = transport;
+            this._statusEmitter.emit('status', 'connected');
+            return client;
+        })();
         return this._clientPromise;
     }
 
@@ -745,31 +809,7 @@ class StataMcpClient {
                 });
             }
         }
-        try {
-            await client.connect(transport);
-        } catch (err) {
-            this._captureMcpError(err);
-            this._resetClientState();
-            const context = this._formatRecentStderr();
-            const message = err?.message || String(err);
-            throw new Error(`Failed to connect to mcp-stata: ${message}${context}`);
-        }
-        this._log(`mcp-stata connected (pid=${transport.pid ?? 'unknown'})`);
-
-        // After connect, try again to capture stderr from the underlying process
-        // The process might only be available after start()/connect()
-        const postConnectProc = transport._process || transport.process || transport._serverProcess;
-        if (postConnectProc && postConnectProc.stderr && !postConnectProc.stderr._stataListenerAttached) {
-            this._log(`[mcp-stata] Post-connect: Found process stderr, attaching listener`);
-            this._attachStderrListener(postConnectProc.stderr, 'post_connect');
-        }
-
-        // Discover available tools so downstream calls choose the right names.
-        await this._refreshToolList(client);
-
-        this._transport = transport;
-        this._statusEmitter.emit('status', 'connected');
-        return client;
+        return { client, transport, setupTimeoutSeconds };
     }
 
     async _refreshToolList(client) {

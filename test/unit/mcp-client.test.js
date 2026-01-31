@@ -1,53 +1,67 @@
 const { describe, it, beforeEach, afterEach, expect, jest } = require('bun:test');
+const { mock: bunMock } = require('bun:test');
 const sinon = require('sinon');
 const path = require('path');
-const proxyquire = require('proxyquire');
 const vscodeMock = require('../mocks/vscode');
 
 // Mock MCP SDK
-const ClientMock = class {
+class ClientMock {
     constructor() {
         this.connect = sinon.stub().resolves();
-        this.callTool = sinon.stub().resolves({ content: [] });
+        this.request = sinon.stub().resolves({ content: [] });
+        this.setNotificationHandler = sinon.stub();
+        this.on = sinon.stub();
+        this.close = sinon.stub().resolves();
+    }
+}
+
+class StdioClientTransportMock {
+    constructor() {
+        this.close = sinon.stub().resolves();
+    }
+}
+
+const dummySchema = {
+    parse: (x) => x,
+    safeParse: (x) => ({ success: true, data: x }),
+    shape: {
+        method: {
+            _def: { value: 'dummy' }
+        }
     }
 };
 
-const StdioClientTransportMock = class {
-    constructor() { }
-};
-
-// Load McpClient with mocks (force fresh module instance per file)
-const fsMock = {
-    existsSync: (p) => true,
-    statSync: () => ({ size: 4 }),
-    openSync: () => 1,
-    readSync: (fd, buffer, offset, length, position) => {
-        if (position >= 4) return 0;
-        const data = Buffer.from('abc\n');
-        data.copy(buffer, offset);
-        return data.length;
-    },
-    closeSync: () => {},
-    readFileSync: () => Buffer.from('fake_image_data'),
-    unlinkSync: () => {}
-};
-
-const { mock: bunMock } = require('bun:test');
-bunMock.module('fs', () => fsMock);
-bunMock.module('node:fs', () => fsMock);
 bunMock.module('vscode', () => vscodeMock);
+bunMock.module('@modelcontextprotocol/sdk/client', () => ({ Client: ClientMock }));
 bunMock.module('@modelcontextprotocol/sdk/client/stdio.js', () => ({ StdioClientTransport: StdioClientTransportMock }));
-bunMock.module('@modelcontextprotocol/sdk/client/index.js', () => ({ Client: ClientMock }));
-bunMock.module('child_process', () => ({
+bunMock.module('@modelcontextprotocol/sdk/types', () => ({
+    LoggingMessageNotificationSchema: dummySchema,
+    ProgressNotificationSchema: dummySchema,
+    CallToolResultSchema: dummySchema
+}));
+bunMock.module('@modelcontextprotocol/sdk/types.js', () => ({
+    LoggingMessageNotificationSchema: dummySchema,
+    ProgressNotificationSchema: dummySchema,
+    CallToolResultSchema: dummySchema
+}));
+
+// Mock child_process for UV detection
+const cpMock = {
     spawn: sinon.stub().returns({
         stdout: { on: sinon.stub() },
         stderr: { on: sinon.stub() },
         on: sinon.stub(),
         kill: sinon.stub()
-    })
-}));
+    }),
+    spawnSync: sinon.stub().returns({ status: 0, stdout: 'uv 0.1.0', stderr: '' })
+};
+bunMock.module('child_process', () => cpMock);
+bunMock.module('node:child_process', () => cpMock);
 
+// Load McpClient with mocks
 const { StataMcpClient: McpClient } = require('../../src/mcp-client');
+
+// ... rest of the file ...
 
 const getVscodeModule = () => {
     try {
@@ -979,6 +993,93 @@ describe('McpClient', () => {
                     expect(client._recentStderr).toContain(s.msg);
                 }
             }
+        });
+    });
+
+    describe('_createClient Connection Handling', () => {
+        let client;
+
+        beforeEach(() => {
+            // Use the real McpClient class but we'll stub its private methods
+            client = new McpClient();
+            
+            // Mock getConfiguration using sinon.stub so it can be restored
+            sinon.stub(vscodeMock.workspace, 'getConfiguration').returns({
+                get: (key, def) => key === 'setupTimeoutSeconds' ? 1 : def
+            });
+        });
+
+        afterEach(() => {
+            sinon.restore();
+        });
+
+        it('should time out if connect hangs and close transport', async () => {
+            const transport = { close: sinon.spy() };
+            const mcpClientStub = {
+                connect: () => new Promise(() => { }), // Hangs
+                setNotificationHandler: () => { },
+                on: () => { },
+                close: sinon.spy()
+            };
+
+            sinon.stub(client, '_createClient').resolves({ client: mcpClientStub, transport, setupTimeoutSeconds: '1' });
+
+            let error;
+            try {
+                await client._ensureClient();
+            } catch (e) {
+                error = e;
+            }
+
+            expect(error).toBeDefined();
+            expect(error.message).toContain('Connection timed out after 1 seconds');
+            expect(transport.close.calledOnce).toBe(true);
+        });
+
+        it('should enhance error message for missing pystata package', async () => {
+            const transport = { close: sinon.spy() };
+            const mcpClientStub = {
+                connect: sinon.stub().rejects(new Error('Connection failed')),
+                setNotificationHandler: () => { },
+                on: () => { }
+            };
+            sinon.stub(client, '_createClient').resolves({ client: mcpClientStub, transport, setupTimeoutSeconds: '60' });
+            
+            // Populate recentStderr with a pystata missing error
+            client._recentStderr = ["ModuleNotFoundError: No module named 'pystata'"];
+
+            let error;
+            try {
+                await client._ensureClient();
+            } catch (e) {
+                error = e;
+            }
+
+            expect(error).toBeDefined();
+            expect(error.message).toContain('CRITICAL: The \'pystata\' or \'stata_setup\' Python package is missing');
+        });
+
+        it('should enhance error message for Stata missing', async () => {
+            const transport = { close: sinon.spy() };
+            const mcpClientStub = {
+                connect: sinon.stub().rejects(new Error('Connection failed')),
+                setNotificationHandler: () => { },
+                on: () => { }
+            };
+            sinon.stub(client, '_createClient').resolves({ client: mcpClientStub, transport, setupTimeoutSeconds: '60' });
+            
+            // Populate recentStderr with a Stata missing error
+            client._recentStderr = ["stata system information not found"];
+
+            let error;
+            try {
+                await client._ensureClient();
+            } catch (e) {
+                error = e;
+            }
+
+            expect(error).toBeDefined();
+            expect(error.message).toContain('CRITICAL: Stata could not be found or initialized');
         });
     });
 });
