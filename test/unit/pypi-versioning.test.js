@@ -83,7 +83,11 @@ describe('McpClient PyPI Versioning (Sinon Stubbing)', () => {
                 latest: '1.18.7',
                 all: ['1.18.7', '1.18.6']
             });
-            client._createClient = sinon.stub().resolves();
+            client._createClient = sinon.stub().resolves({ 
+                client: { connect: sinon.stub().resolves() }, 
+                transport: {}, 
+                setupTimeoutSeconds: '60' 
+            });
 
             await client._ensureClient();
 
@@ -93,7 +97,11 @@ describe('McpClient PyPI Versioning (Sinon Stubbing)', () => {
 
         it('should use fallback if PyPI fetch fails', async () => {
             client._fetchLatestVersion = sinon.stub().rejects(new Error('Network Error'));
-            client._createClient = sinon.stub().resolves();
+            client._createClient = sinon.stub().resolves({ 
+                client: { connect: sinon.stub().resolves() }, 
+                transport: {}, 
+                setupTimeoutSeconds: '60' 
+            });
 
             await client._ensureClient();
 

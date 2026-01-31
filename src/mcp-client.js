@@ -511,7 +511,71 @@ class StataMcpClient {
             }
         }
 
-        this._clientPromise = this._createClient();
+        this._clientPromise = (async () => {
+            const { client, transport, setupTimeoutSeconds } = await this._createClient();
+            
+            try {
+                const connectTimeoutMs = (parseInt(setupTimeoutSeconds, 10) || 60) * 1000;
+                let timeoutId;
+                const timeoutPromise = new Promise((_, reject) => {
+                    timeoutId = setTimeout(() => {
+                        const error = new Error(`Connection timed out after ${setupTimeoutSeconds} seconds. The mcp-stata server may be hanging while trying to initialize Stata.`);
+                        error.isTimeout = true;
+                        reject(error);
+                    }, connectTimeoutMs);
+                });
+
+                await Promise.race([
+                    client.connect(transport),
+                    timeoutPromise
+                ]);
+                if (timeoutId) clearTimeout(timeoutId);
+            } catch (err) {
+                this._captureMcpError(err);
+
+                // Explicitly close transport to kill the orphaned process if it's still alive.
+                try {
+                    if (transport && typeof transport.close === 'function') {
+                        await transport.close();
+                    }
+                } catch (closeErr) {
+                    this._log(`[mcp-stata] Failed to close transport after connect error: ${closeErr.message}`);
+                }
+
+                this._resetClientState();
+                const context = this._formatRecentStderr();
+                let message = err?.message || String(err);
+
+                // Enhance error message for common Python/Stata missing issues found in stderr context
+                const stderrText = context.toLowerCase();
+                if (stderrText.includes('modulenotfounderror') && (stderrText.includes('pystata') || stderrText.includes('stata_setup'))) {
+                    message += "\n\nCRITICAL: The 'pystata' or 'stata_setup' Python package is missing. Ensure they are installed in your Python environment (e.g., 'pip install pystata').";
+                } else if (stderrText.includes('stata system information not found') || stderrText.includes('stata not found')) {
+                    message += "\n\nCRITICAL: Stata could not be found or initialized. This usually means 'stata_setup' is configured but cannot find your Stata installation.";
+                } else if (err.isTimeout) {
+                    message += "\n\nHint: This often happens if 'stata_setup' is trying to initialize Stata but hangs (e.g., waiting for a license or stuck in a loop).";
+                }
+
+                throw new Error(`Failed to connect to mcp-stata: ${message}${context}`);
+            }
+
+            this._log(`mcp-stata connected (pid=${transport.pid ?? 'unknown'})`);
+
+            // After connect, try again to capture stderr from the underlying process
+            // The process might only be available after start()/connect()
+            const postConnectProc = transport._process || transport.process || transport._serverProcess;
+            if (postConnectProc && postConnectProc.stderr && !postConnectProc.stderr._stataListenerAttached) {
+                this._log(`[mcp-stata] Post-connect: Found process stderr, attaching listener`);
+                this._attachStderrListener(postConnectProc.stderr, 'post_connect');
+            }
+
+            // Discover available tools so downstream calls choose the right names.
+            await this._refreshToolList(client);
+
+            this._transport = transport;
+            this._statusEmitter.emit('status', 'connected');
+            return client;
+        })();
         return this._clientPromise;
     }
 
@@ -745,31 +809,7 @@ class StataMcpClient {
                 });
             }
         }
-        try {
-            await client.connect(transport);
-        } catch (err) {
-            this._captureMcpError(err);
-            this._resetClientState();
-            const context = this._formatRecentStderr();
-            const message = err?.message || String(err);
-            throw new Error(`Failed to connect to mcp-stata: ${message}${context}`);
-        }
-        this._log(`mcp-stata connected (pid=${transport.pid ?? 'unknown'})`);
-
-        // After connect, try again to capture stderr from the underlying process
-        // The process might only be available after start()/connect()
-        const postConnectProc = transport._process || transport.process || transport._serverProcess;
-        if (postConnectProc && postConnectProc.stderr && !postConnectProc.stderr._stataListenerAttached) {
-            this._log(`[mcp-stata] Post-connect: Found process stderr, attaching listener`);
-            this._attachStderrListener(postConnectProc.stderr, 'post_connect');
-        }
-
-        // Discover available tools so downstream calls choose the right names.
-        await this._refreshToolList(client);
-
-        this._transport = transport;
-        this._statusEmitter.emit('status', 'connected');
-        return client;
+        return { client, transport, setupTimeoutSeconds };
     }
 
     async _refreshToolList(client) {
@@ -813,7 +853,8 @@ class StataMcpClient {
             this._captureMcpError(err);
             this._availableTools = new Set();
             this._toolMapping = new Map();
-            this._log(`[mcp-stata] listTools failed: ${err?.message || err}`);
+            const context = this._formatRecentStderr();
+            this._log(`[mcp-stata] listTools failed: ${err?.message || err}${context}`);
         }
     }
 
@@ -884,10 +925,12 @@ class StataMcpClient {
                     this._statusEmitter.emit('status', 'connected');
                     throw new Error('Request cancelled');
                 }
-                this._log(`[mcp-stata] tool ${name} failed after ${durationMs}ms: ${error?.message || error}`);
+                
+                const detail = error?.message || String(error);
+                this._log(`[mcp-stata] tool ${name} failed after ${durationMs}ms: ${detail}`);
                 this._captureMcpError(error);
                 this._statusEmitter.emit('status', 'error');
-                const detail = error?.message || String(error);
+                
                 let hint = '';
                 if (detail.includes('-32000') || detail.includes('Connection closed') || detail.includes('ECONNRESET')) {
                     this._resetClientState();
@@ -1028,7 +1071,9 @@ class StataMcpClient {
                     if (typeof run.onRawLog === 'function') {
                         try {
                             run.onRawLog(completedText);
-                        } catch (_err) {
+                        } catch (err) {
+                            this._log(`[mcp-stata tail] onRawLog callback error for run ${run._runId || 'unknown'}: ${err.message}`);
+                            Sentry.captureException(err);
                         }
                     }
                     const filtered = this._filterLogChunk(completedText);
@@ -1037,7 +1082,9 @@ class StataMcpClient {
                         if (typeof run.onLog === 'function') {
                             try {
                                 run.onLog(filtered);
-                            } catch (_err) {
+                            } catch (err) {
+                                this._log(`[mcp-stata tail] onLog callback error for run ${run._runId || 'unknown'}: ${err.message}`);
+                                Sentry.captureException(err);
                             }
                         }
                     }
@@ -1055,14 +1102,21 @@ class StataMcpClient {
             if (typeof run.onRawLog === 'function') {
                 try {
                     run.onRawLog(run._lineBuffer);
-                } catch (_err) {
+                } catch (err) {
+                    this._log(`[mcp-stata tail] onRawLog final flush error for run ${run._runId || 'unknown'}: ${err.message}`);
+                    Sentry.captureException(err);
                 }
             }
             const filtered = this._filterLogChunk(run._lineBuffer);
             if (filtered && !run._cancelled) {
                 run._appendLog?.(filtered);
                 if (typeof run.onLog === 'function') {
-                    run.onLog(filtered);
+                    try {
+                        run.onLog(filtered);
+                    } catch (err) {
+                        this._log(`[mcp-stata tail] onLog final flush error for run ${run._runId || 'unknown'}: ${err.message}`);
+                        Sentry.captureException(err);
+                    }
                 }
             }
             run._lineBuffer = '';
@@ -1113,7 +1167,9 @@ class StataMcpClient {
                     if (typeof run.onRawLog === 'function') {
                         try {
                             run.onRawLog(completedText);
-                        } catch (_err) {
+                        } catch (err) {
+                            this._log(`[mcp-stata tail] onRawLog error for ${run._runId || 'unknown'}: ${err.message}`);
+                            Sentry.captureException(err);
                         }
                     }
                     const filtered = this._filterLogChunk(completedText);
@@ -1122,7 +1178,9 @@ class StataMcpClient {
                         if (typeof run.onLog === 'function') {
                             try {
                                 run.onLog(filtered);
-                            } catch (_err) {
+                            } catch (err) {
+                                this._log(`[mcp-stata tail] onLog error for ${run._runId || 'unknown'}: ${err.message}`);
+                                Sentry.captureException(err);
                             }
                         }
                     }
@@ -1148,7 +1206,10 @@ class StataMcpClient {
             if (typeof run.onRawLog === 'function') {
                 try {
                     run.onRawLog(text);
-                } catch (_err) { }
+                } catch (err) {
+                    this._log(`[mcp-stata tail] onRawLog final error for ${run._runId || 'unknown'}: ${err.message}`);
+                    Sentry.captureException(err);
+                }
             }
             const filtered = this._filterLogChunk(text);
             if (filtered && !run._cancelled) {
@@ -1156,7 +1217,10 @@ class StataMcpClient {
                 if (typeof run.onLog === 'function') {
                     try {
                         run.onLog(filtered);
-                    } catch (_err) { }
+                    } catch (err) {
+                        this._log(`[mcp-stata tail] onLog final error for ${run._runId || 'unknown'}: ${err.message}`);
+                        Sentry.captureException(err);
+                    }
                 }
             }
         }
@@ -1314,11 +1378,15 @@ class StataMcpClient {
         runState._cancelSubscription = cts.token.onCancellationRequested(async () => {
             runState._cancelled = true;
             runState._tailCancelled = true;
-            if (!runState.taskId) return;
+            if (!runState.taskId) {
+                this._log(`[mcp-stata] Cancellation requested for run ${runState._runId || 'unknown'} but no task ID found to cancel on server.`);
+                return;
+            }
             try {
+                this._log(`[mcp-stata] Sending cancel_task for task ${runState.taskId} (run ${runState._runId || 'unknown'})`);
                 await this._cancelTask(client, runState.taskId);
             } catch (err) {
-                this._log(`[mcp-stata] cancel_task failed: ${err?.message || err}`);
+                this._log(`[mcp-stata] cancel_task failed for task ${runState.taskId}: ${err?.message || err}`);
             }
         });
     }
@@ -1516,7 +1584,8 @@ class StataMcpClient {
                     if (this._isCancellationError(error)) {
                         this._log(`[mcp-stata] operation ${label} cancelled after ${durationMs}ms`);
                     } else {
-                        this._log(`[mcp-stata] operation ${label} failed after ${durationMs}ms: ${error?.message || error}`);
+                        const context = this._formatRecentStderr();
+                        this._log(`[mcp-stata] operation ${label} failed after ${durationMs}ms: ${error?.message || error}${context}`);
                         Sentry.captureException(error);
                         this._statusEmitter.emit('status', 'error');
                     }
@@ -2065,7 +2134,7 @@ class StataMcpClient {
         try {
             return await this._callTool(client, 'export_graph', { graph_name: name, format: 'pdf' });
         } catch (err) {
-            this._log(`[mcp-stata export_graph pdf fallback] ${err?.message || err}`);
+            this._log(`[mcp-stata] export_graph (pdf) failed for "${name}", falling back to default format: ${err?.message || err}`);
             return await this._callTool(client, 'export_graph', { graph_name: name });
         }
     }
@@ -2455,8 +2524,9 @@ class StataMcpClient {
                     if (typeof run.onGraphReady === 'function') {
                         try {
                             run.onGraphReady(artifact);
-                        } catch (_err) {
-                            Sentry.captureException(_err);
+                        } catch (err) {
+                            this._log(`[mcp-stata notification] onGraphReady error for run ${run._runId || 'unknown'}: ${err.message}`);
+                            Sentry.captureException(err);
                         }
                     }
                 }
@@ -2479,14 +2549,16 @@ class StataMcpClient {
                 if (hasOnTaskDone) {
                     try {
                         run.onTaskDone(taskPayload);
-                    } catch (_err) {
-                        Sentry.captureException(_err);
+                    } catch (err) {
+                        this._log(`[mcp-stata notification] onTaskDone error for run ${run._runId || 'unknown'}: ${err.message}`);
+                        Sentry.captureException(err);
                     }
                 } else if (typeof this._onTaskDone === 'function') {
                     try {
                         this._onTaskDone(taskPayload);
-                    } catch (_err) {
-                        Sentry.captureException(_err);
+                    } catch (err) {
+                        this._log(`[mcp-stata notification] global onTaskDone error: ${err.message}`);
+                        Sentry.captureException(err);
                     }
                 }
                 run._tailCancelled = true;
@@ -2532,8 +2604,9 @@ class StataMcpClient {
             if (typeof run.onRawLog === 'function') {
                 try {
                     run.onRawLog(completedText);
-                } catch (_err) {
-                    Sentry.captureException(_err);
+                } catch (err) {
+                    this._log(`[mcp-stata notification] onRawLog error for run ${run._runId || 'unknown'}: ${err.message}`);
+                    Sentry.captureException(err);
                 }
             }
             const filtered = this._filterLogChunk(completedText);
@@ -2542,8 +2615,9 @@ class StataMcpClient {
             if (typeof run.onLog === 'function') {
                 try {
                     run.onLog(filtered);
-                } catch (_err) {
-                    Sentry.captureException(_err);
+                } catch (err) {
+                    this._log(`[mcp-stata notification] onLog error for run ${run._runId || 'unknown'}: ${err.message}`);
+                    Sentry.captureException(err);
                 }
             }
         }
