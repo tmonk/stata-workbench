@@ -1,3 +1,11 @@
+## [0.17.2](https://github.com/tmonk/stata-workbench/compare/v0.17.1...v0.17.2) (2026-01-31)
+
+
+### Bug Fixes
+
+* improve connection handling and error messaging in StataMcpClient ([b573cc6](https://github.com/tmonk/stata-workbench/commit/b573cc6a87db6b84e0801cfe184e2e4e4e2ef58f))
+* surface error logging and context in StataMcpClient methods ([8f287c6](https://github.com/tmonk/stata-workbench/commit/8f287c66c80cf27623b2b8ec765e95c3228d2aed))
+
 ## [0.17.1](https://github.com/tmonk/stata-workbench/compare/v0.17.0...v0.17.1) (2026-01-25)
 
 
