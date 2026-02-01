@@ -8,6 +8,7 @@ describe("McpClient Break Session", () => {
 
     beforeEach(() => {
         client = new McpClient();
+        client.setLogger(console.log);
         // Mock vscode workspace configuration
         sinon.stub(vscode.workspace, "getConfiguration").returns({
             get: (key, def) => def
@@ -82,7 +83,7 @@ describe("McpClient Break Session", () => {
         expect(breakCalls.length).toBeGreaterThan(0);
     });
 
-    it("should allow sending a NEW command immediately after break_session", async () => {
+    it("should allow sending a NEW command immediately after break_session and NOT cancel it", async () => {
         client._ensureClient = sinon.stub().resolves({ type: 'standard' });
         
         // Mock _callTool
@@ -97,7 +98,11 @@ describe("McpClient Break Session", () => {
         callToolStub.withArgs(sinon.match.any, 'run_command_background', sinon.match({ code: 'di "After Break"' }))
             .resolves({ rc: 0, stdout: 'After Break\n' });
 
-        callToolStub.withArgs(sinon.match.any, 'break_session', sinon.match.any).resolves({});
+        // break_session takes some time
+        callToolStub.withArgs(sinon.match.any, 'break_session', sinon.match.any).callsFake(async () => {
+            await new Promise(r => setTimeout(r, 10));
+            return {};
+        });
 
         // Mock background helpers
         client._drainActiveRunLog = sinon.stub().resolves();
@@ -111,18 +116,25 @@ describe("McpClient Break Session", () => {
 
         // 1. Start long running task
         const p1 = client.runSelection('forvalues i = 1/10000 { di `i\' }');
-        await new Promise(r => setTimeout(r, 50));
+        // Attach catch immediately to prevent unhandled rejection in test runner environment
+        p1.catch(() => {});
+        
+        await new Promise(r => setTimeout(r, 20));
 
         // 2. Break it
         await client.cancelAll();
-        expect(callToolStub.calledWith(sinon.match.any, 'break_session', sinon.match.any)).toBe(true);
         
-        try { await p1; } catch (e) {}
+        // 3. Start new command AFTER cancelAll has finished
+        const p2 = client.runSelection('di "After Break"');
+        
+        // p1 should reject
+        try { 
+            await p1; 
+        } catch (e) {
+            expect(e.message).toMatch(/cancelled/);
+        }
 
-        // 3. Run new command - should NOT be blocked by the previous one anymore
-        const p2 = await client.runSelection('di "After Break"');
-        
-        expect(p2.stdout).toContain('After Break');
-        expect(callToolStub.calledWith(sinon.match.any, 'run_command_background', sinon.match({ code: 'di "After Break"' }))).toBe(true);
+        const result2 = await p2;
+        expect(result2.stdout).toContain('After Break');
     });
 });

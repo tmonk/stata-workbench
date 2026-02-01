@@ -49,7 +49,6 @@ class StataMcpClient {
         this._queue = Promise.resolve();
         this._pending = 0;
         this._active = false;
-        this._cancelSignal = false;
         this._activeCancellation = null;
         this._log = () => { };
         this._recentStderr = [];
@@ -390,32 +389,36 @@ class StataMcpClient {
         if (!this._clientPromise && !this._active && this._pending === 0) {
             return false;
         }
-        this._cancelSignal = true;
 
+        // 1. Capture what's currently active/queued
+        const activeRun = this._activeRun;
+        const currentSources = Array.from(this._cancellationSourcesByRunId.values());
+
+        // 2. Mark active run as cancelled immediately so logs stop
+        if (activeRun) {
+            activeRun._tailCancelled = true;
+            activeRun._cancelled = true;
+        }
+
+        // 3. Trigger all currently known cancellation sources
         if (this._activeCancellation) {
             this._activeCancellation.cancel('user cancelled');
         }
 
-        // Also cancel any queued tasks by cancelling all known sources
-        for (const source of this._cancellationSourcesByRunId.values()) {
+        for (const source of currentSources) {
             try {
                 source.cancel('user cancelled all');
             } catch (_err) { }
         }
 
-        // Stop log tailing on any active run
-        if (this._activeRun) {
-            this._activeRun._tailCancelled = true;
-            this._activeRun._cancelled = true;
+        // 4. Send break_session to the server
+        try {
+            const client = await this._ensureClient();
+            await this._breakSession(client, 'default');
+        } catch (err) {
+            this._log(`[mcp-stata] break_session failed: ${err?.message || err}`);
         }
-        if (this._activeRun?.taskId) {
-            try {
-                const client = await this._ensureClient();
-                await this._breakSession(client);
-            } catch (err) {
-                this._log(`[mcp-stata] break_session failed: ${err?.message || err}`);
-            }
-        }
+        
         this._statusEmitter.emit('status', this._pending > 0 ? 'queued' : 'connected');
         return true;
     }
@@ -1495,13 +1498,14 @@ class StataMcpClient {
 
         const bypassQueue = !!(options.bypassQueue || isMetadata);
 
+        const internalRunId = options.runId || `internal-${Math.random().toString(36).slice(2, 9)}`;
         this._pending += 1;
         // Improve status: if we have more than 1 pending, we are definitely queued.
         this._statusEmitter.emit('status', this._pending > 1 ? 'queued' : (this._active ? 'running' : 'idle'));
 
-        if (options.runId && options.cancellationSource) {
-            this._cancellationSourcesByRunId.set(String(options.runId), options.cancellationSource);
-        }
+        // Always ensure we have a cancellation source so we can cancel through cancelAll
+        const source = options.cancellationSource || new vscode.CancellationTokenSource();
+        this._cancellationSourcesByRunId.set(String(internalRunId), source);
 
         let cancelReject;
         const cancelPromise = new Promise((_, reject) => {
@@ -1512,42 +1516,39 @@ class StataMcpClient {
             if (cancelReject) {
                 const r = cancelReject;
                 cancelReject = null;
-                // Reject on next tick to avoid unhandled promise rejection errors in some environments
-                // when the caller hasn't yet attached a .catch handler.
+                // Use a microtask to allow the caller to attach a .catch() if they haven't yet,
+                // which often happens with sequential runSelection calls in tests.
                 Promise.resolve().then(() => {
-                    r(new Error(reason || 'Request cancelled'));
-                });
+                    r(new Error(`${reason || 'Request cancelled'}`));
+                }).catch(() => {}); // ignore if already handled
             }
         };
 
         let sub;
-        if (options.cancellationToken) {
-            sub = options.cancellationToken.onCancellationRequested(() => onCancel('Request cancelled'));
+        // Connect the source to our onCancel logic
+        sub = source.token.onCancellationRequested(() => onCancel('Request cancelled'));
+
+        // If an external token was also provided, link it to our source
+        if (options.cancellationToken && options.cancellationToken !== source.token) {
+            options.cancellationToken.onCancellationRequested(() => source.cancel());
             if (options.cancellationToken.isCancellationRequested) {
-                onCancel('Request cancelled');
+                source.cancel();
             }
         }
 
         const work = async () => {
             return Sentry.startSpan({ name: `mcp.operation:${label}`, op: 'mcp.operation' }, async () => {
                 const startedAt = Date.now();
-                if (this._cancelSignal || options?.cancellationToken?.isCancellationRequested) {
+                if (source.token.isCancellationRequested) {
                     this._pending = Math.max(0, this._pending - 1);
-                    if (this._pending === 0) {
-                        this._cancelSignal = false;
-                    }
-                    if (options.runId) {
-                        this._cancellationSourcesByRunId.delete(String(options.runId));
-                    }
+                    this._cancellationSourcesByRunId.delete(String(internalRunId));
                     this._statusEmitter.emit('status', this._pending > 0 ? 'queued' : 'connected');
                     throw new Error('Request cancelled');
                 }
 
                 this._active = true;
                 // Update active cancellation to the one currently running
-                if (options?.cancellationSource) {
-                    this._activeCancellation = options.cancellationSource;
-                }
+                this._activeCancellation = source;
 
                 this._statusEmitter.emit('status', 'running');
                 this._log(`[mcp-stata] starting operation: ${label} (pending: ${this._pending})`);
@@ -1557,7 +1558,7 @@ class StataMcpClient {
                 
                 try {
                     const client = await this._ensureClient();
-                    const result = await this._withTimeout(task(client), timeoutMs, label, options?.cancellationToken);
+                    const result = await this._withTimeout(task(client), timeoutMs, label, source.token);
                     const endedAt = Date.now();
                     const durationMs = endedAt - startedAt;
                     const normalizedMeta = { ...meta, startedAt, endedAt, durationMs, label };
@@ -1589,12 +1590,10 @@ class StataMcpClient {
                 } finally {
                     this._active = false;
                     this._activeCancellation = null;
+                    if (sub) sub.dispose();
                     this._pending = Math.max(0, this._pending - 1);
-                    if (options.runId) {
-                        this._cancellationSourcesByRunId.delete(String(options.runId));
-                    }
+                    this._cancellationSourcesByRunId.delete(String(internalRunId));
                     if (this._pending === 0) {
-                        this._cancelSignal = false;
                         this._statusEmitter.emit('status', 'connected');
                     } else {
                         this._statusEmitter.emit('status', 'queued');
@@ -2482,12 +2481,22 @@ class StataMcpClient {
         const event = parsed?.event;
         this._log(`[${timestamp}] Notification received: ${event || 'logMessage'}`);
         const taskId = parsed?.task_id || parsed?.taskId || parsed?.request_id || parsed?.requestId || parsed?.run_id || parsed?.runId;
-        let run = this._activeRun;
-        if (!run && taskId) {
+        
+        let run = null;
+        if (taskId) {
             run = this._runsByTaskId.get(String(taskId)) || null;
-        } else if (run && taskId && run.taskId && String(run.taskId) !== String(taskId)) {
-            const byId = this._runsByTaskId.get(String(taskId));
-            if (byId) run = byId;
+            // If we found a run by ID but it's not the "active" run (e.g. it's a tail from 
+            // a just-cancelled run), that's fine, we still associate it.
+        }
+        
+        // Falling back to _activeRun if no taskId is present
+        if (!run && this._activeRun) {
+            // If the active run has an assigned taskId, we should be VERY careful 
+            // about adopting logs that DON'T have a taskId.
+            // Background tasks in mcp-stata prioritize task_id for all their logs.
+            if (!this._activeRun.taskId || event === 'progress' || event === 'log_path') {
+                run = this._activeRun;
+            }
         }
 
         if (run && run._cancelled) {

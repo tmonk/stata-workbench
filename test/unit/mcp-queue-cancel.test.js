@@ -239,25 +239,26 @@ describe('McpClient Queue and Cancellation', () => {
 
     describe('Stop Functionality', () => {
         it('cancelAll should cancel all queued and active tasks', async () => {
-            client._cancelTask = sinon.stub().resolves();
+            client._breakSession = sinon.stub().resolves();
+            client._ensureClient = sinon.stub().resolves({});
             client._clientPromise = Promise.resolve({}); // Ensure it doesn't return false early
             
+            // Mock _callTool to avoid real network/MCP calls
+            client._callTool = sinon.stub().resolves({ content: [{ type: 'text', text: '{}' }] });
+
             const p1 = client.runSelection('cmd1', { runId: 'r1' });
             const p2 = client.runSelection('cmd2', { runId: 'r2' });
 
-            const cancelPromise = client.cancelAll();
-            
-            expect(client._cancelSignal).toBe(true);
-
-            await cancelPromise;
-            try { await p1; } catch (e) {}
-            try { await p2; } catch (e) {}
-
-            // Wait for queue to drain so _cancelSignal is reset
+            // Small delay to ensure p1 has actually started its work loop
             await new Promise(r => setTimeout(r, 10));
 
-            // After everything is done, it should be false
-            expect(client._cancelSignal).toBe(false);
+            const cancelPromise = client.cancelAll();
+            
+            await cancelPromise;
+            
+            await Promise.allSettled([p1, p2]);
+
+            expect(client._pending).toBe(0);
         });
     });
 });

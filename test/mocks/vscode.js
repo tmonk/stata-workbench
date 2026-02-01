@@ -99,6 +99,23 @@ const vscode = {
         constructor() { this._listeners = []; }
         get event() { return (listener) => { this._listeners.push(listener); return { dispose: () => { } }; }; }
         fire(data) { this._listeners.forEach(l => l(data)); }
+    },
+    CancellationTokenSource: class {
+        constructor() {
+            this.token = {
+                isCancellationRequested: false,
+                onCancellationRequested: (cb) => {
+                    this._listener = cb;
+                    return { dispose: () => { this._listener = null; } };
+                }
+            };
+        }
+        cancel() {
+            this.token.isCancellationRequested = true;
+            if (this._listener) {
+                this._listener();
+            }
+        }
     }
 };
 
