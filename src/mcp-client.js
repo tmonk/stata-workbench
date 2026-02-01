@@ -411,9 +411,9 @@ class StataMcpClient {
         if (this._activeRun?.taskId) {
             try {
                 const client = await this._ensureClient();
-                await this._cancelTask(client, this._activeRun.taskId);
+                await this._breakSession(client);
             } catch (err) {
-                this._log(`[mcp-stata] cancel_task failed: ${err?.message || err}`);
+                this._log(`[mcp-stata] break_session failed: ${err?.message || err}`);
             }
         }
         this._statusEmitter.emit('status', this._pending > 0 ? 'queued' : 'connected');
@@ -834,7 +834,7 @@ class StataMcpClient {
                     this._toolMapping.set(shortName, fullName);
                 }
                 // Also handle direct suffix matches
-                const suffixMatch = ['run_command_background', 'run_do_file_background', 'get_ui_channel', 'cancel_task', 'stop_session', 'describe', 'codebook', 'get_data', 'get_variable_list', 'list_graphs', 'fetch_graph', 'export_all_graphs']
+                const suffixMatch = ['run_command_background', 'run_do_file_background', 'get_ui_channel', 'break_session', 'stop_session', 'describe', 'codebook', 'get_data', 'get_variable_list', 'list_graphs', 'fetch_graph', 'export_all_graphs']
                     .find(s => fullName.endsWith(s));
                 if (suffixMatch && !this._toolMapping.has(suffixMatch)) {
                     this._toolMapping.set(suffixMatch, fullName);
@@ -948,7 +948,7 @@ class StataMcpClient {
             'run_command_background',
             'run_do_file_background',
             'get_ui_channel',
-            'cancel_task'
+            'break_session'
         ]);
     }
 
@@ -1378,23 +1378,19 @@ class StataMcpClient {
         runState._cancelSubscription = cts.token.onCancellationRequested(async () => {
             runState._cancelled = true;
             runState._tailCancelled = true;
-            if (!runState.taskId) {
-                this._log(`[mcp-stata] Cancellation requested for run ${runState._runId || 'unknown'} but no task ID found to cancel on server.`);
-                return;
-            }
             try {
-                this._log(`[mcp-stata] Sending cancel_task for task ${runState.taskId} (run ${runState._runId || 'unknown'})`);
-                await this._cancelTask(client, runState.taskId);
+                this._log(`[mcp-stata] Sending break_session (run ${runState._runId || 'unknown'})`);
+                await this._breakSession(client);
             } catch (err) {
-                this._log(`[mcp-stata] cancel_task failed for task ${runState.taskId}: ${err?.message || err}`);
+                this._log(`[mcp-stata] break_session failed: ${err?.message || err}`);
             }
         });
     }
 
-    async _cancelTask(client, taskId) {
-        if (!client || !taskId) return;
+    async _breakSession(client, sessionId = 'default') {
+        if (!client) return;
         try {
-            await this._callTool(client, 'cancel_task', { task_id: taskId });
+            await this._callTool(client, 'break_session', { session_id: sessionId });
         } catch (err) {
             throw err;
         }
@@ -1489,7 +1485,7 @@ class StataMcpClient {
             'get_stored_results',
             'read_log',
             'find_in_log',
-            'cancel_task',
+            'break_session',
             'stop_session'
         ].includes(label);
 

@@ -493,6 +493,7 @@ describe('McpClient', () => {
             const callToolStub = sinon.stub().rejects(abortErr);
             const emitSpy = sinon.spy(client._statusEmitter, 'emit');
             const clientMock = { callTool: callToolStub };
+            client._availableTools = new Set(['run_command']);
 
             let thrown = null;
             try {
@@ -517,20 +518,19 @@ describe('McpClient', () => {
             client._pending = 0;
         });
 
-        it('cancelAll calls cancel_task when a background task is active', async () => {
+        it('cancelAll calls break_session when a background task is active', async () => {
             const cancelSpy = sinon.spy();
             client._activeCancellation = { cancel: cancelSpy };
             client._pending = 1;
             client._activeRun = { taskId: 'task-123' };
             client._ensureClient = sinon.stub().resolves({});
-            client._cancelTask = sinon.stub().resolves();
+            client._breakSession = sinon.stub().resolves();
 
             const result = await client.cancelAll();
 
             expect(result).toBe(true);
             expect(cancelSpy.calledOnce).toBe(true);
-            expect(client._cancelTask.calledOnce).toBe(true);
-            expect(client._cancelTask.firstCall.args[1]).toEqual('task-123');
+            expect(client._breakSession.calledOnce).toBe(true);
             client._pending = 0;
             client._activeRun = null;
         });

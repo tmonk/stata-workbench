@@ -137,7 +137,7 @@ describe('McpClient Queue and Cancellation', () => {
             }
         });
 
-        it('should cancel an active task by runId and call cancel_task', async () => {
+        it('should cancel an active task by runId and call break_session', async () => {
             let resolveFirst;
             const firstPromise = new Promise(r => resolveFirst = r);
             
@@ -151,8 +151,8 @@ describe('McpClient Queue and Cancellation', () => {
             // Mock _awaitTaskDone to wait for our signal
             client._awaitTaskDone = sinon.stub().callsFake(() => firstPromise);
             
-            // Mock _cancelTask to verify it's called
-            client._cancelTask = sinon.stub().resolves();
+            // Mock _breakSession to verify it's called
+            client._breakSession = sinon.stub().resolves();
 
             const p1 = client.runSelection('active', { runId: 'run-1' });
 
@@ -168,8 +168,7 @@ describe('McpClient Queue and Cancellation', () => {
                 // Expected
             }
 
-            expect(client._cancelTask.calledOnce).toBe(true);
-            expect(client._cancelTask.firstCall.args[1]).toBe('active-task');
+            expect(client._breakSession.calledOnce).toBe(true);
         });
 
         it('should suppress output after cancellation', async () => {
@@ -207,7 +206,7 @@ describe('McpClient Queue and Cancellation', () => {
             mockClient.listTools.resolves({
                 tools: [
                     { name: 'mcp_stata_run_command_background' },
-                    { name: 'mcp_stata_cancel_task' }
+                    { name: 'mcp_stata_break_session' }
                 ]
             });
             client._ensureClient = sinon.stub().resolves(mockClient);
@@ -217,7 +216,7 @@ describe('McpClient Queue and Cancellation', () => {
             await client._refreshToolList(mockClient);
 
             expect(client._resolveToolName('run_command_background')).toBe('mcp_stata_run_command_background');
-            expect(client._resolveToolName('cancel_task')).toBe('mcp_stata_cancel_task');
+            expect(client._resolveToolName('break_session')).toBe('mcp_stata_break_session');
         });
 
         it('should use resolved name in _callTool', async () => {
@@ -225,16 +224,16 @@ describe('McpClient Queue and Cancellation', () => {
             client._callTool = McpClient.prototype._callTool.bind(client);
             client._ensureClient = sinon.stub().resolves({ type: 'standard' });
             
-            client._toolMapping = new Map([['cancel_task', 'prefixed_cancel']]);
-            client._availableTools = new Set(['prefixed_cancel']);
+            client._toolMapping = new Map([['break_session', 'prefixed_break']]);
+            client._availableTools = new Set(['prefixed_break']);
             
             const callToolStub = sinon.stub().resolves({});
             const mockClient = { callTool: callToolStub, type: 'standard' };
 
-            await client._callTool(mockClient, 'cancel_task', { task_id: '123' });
+            await client._callTool(mockClient, 'break_session', { session_id: 'default' });
 
             expect(callToolStub.calledOnce).toBe(true);
-            expect(callToolStub.firstCall.args[0].name).toBe('prefixed_cancel');
+            expect(callToolStub.firstCall.args[0].name).toBe('prefixed_break');
         });
     });
 
