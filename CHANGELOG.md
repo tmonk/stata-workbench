@@ -1,3 +1,10 @@
+## [0.17.3](https://github.com/tmonk/stata-workbench/compare/v0.17.2...v0.17.3) (2026-02-01)
+
+
+### Bug Fixes
+
+* improve cancellation handling and logging in StataMcpClient ([f0c24e3](https://github.com/tmonk/stata-workbench/commit/f0c24e37060b27bd359949f91395da663d3a20e1))
+
 ## [0.17.2](https://github.com/tmonk/stata-workbench/compare/v0.17.1...v0.17.2) (2026-01-31)
 
 
