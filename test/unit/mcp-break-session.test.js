@@ -1,8 +1,6 @@
 const { expect, describe, it, beforeEach, afterEach, mock: bunMock } = require("bun:test");
 const sinon = require("sinon");
-const { createVscodeMock } = require("../mocks/vscode");
-
-const vscodeMock = createVscodeMock();
+const vscodeMock = require("../mocks/vscode");
 bunMock.module('vscode', () => vscodeMock);
 
 const { StataMcpClient: McpClient } = require("../../src/mcp-client");

@@ -2,8 +2,7 @@ const { describe, it, beforeEach, afterEach, expect, jest } = require('bun:test'
 const { mock: bunMock } = require('bun:test');
 const sinon = require('sinon');
 const path = require('path');
-const { createVscodeMock } = require('../mocks/vscode');
-const vscodeMock = createVscodeMock();
+const vscodeMock = require('../mocks/vscode');
 
 // Mock MCP SDK
 class ClientMock {
