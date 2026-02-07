@@ -1,3 +1,10 @@
+# [0.18.0](https://github.com/tmonk/stata-workbench/compare/v0.17.3...v0.18.0) (2026-02-07)
+
+
+### Features
+
+* add Claude Code CLI configuration options and update related functionality ([177a293](https://github.com/tmonk/stata-workbench/commit/177a293cc125b1036858fcd5b6317f42e15510e4))
+
 ## [0.17.3](https://github.com/tmonk/stata-workbench/compare/v0.17.2...v0.17.3) (2026-02-01)
 
 
