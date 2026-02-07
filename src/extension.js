@@ -264,6 +264,25 @@ function activate(context) {
             if (!isCurrent) {
                 ensureMcpConfigs(context);
             }
+
+            const configureClaudeCode = settings.get('configureClaudeCode', false);
+            if (configureClaudeCode) {
+                const scope = settings.get('claudeCodeConfigScope', 'user');
+                if (isClaudeCodeInstalled()) {
+                    const claudeTarget = getClaudeMcpConfigTarget(context, scope);
+                    if (!claudeTarget) {
+                        appendLine('Skipping Claude Code MCP config update: no target path resolved');
+                    } else {
+                        const existingClaude = loadMcpConfigFromPath(claudeTarget.configPath);
+                        const claudeCurrent = isMcpConfigCurrent(existingClaude, uvCommand, mcpPackageVersion);
+                        if (!claudeCurrent) {
+                            writeMcpConfig(claudeTarget);
+                        }
+                    }
+                } else {
+                    appendLine('Skipping Claude Code MCP config update: claude CLI not detected');
+                }
+            }
         } else {
             appendLine('Skipping MCP config update: stataMcp.autoConfigureMcp is disabled');
         }
@@ -603,6 +622,16 @@ function isMcpConfigWorking(config) {
     }
 }
 
+function isClaudeCodeInstalled() {
+    try {
+        const result = spawnSync('claude', ['--version'], { encoding: 'utf8', shell: process.platform === 'win32', timeout: 3000 });
+        const stderr = (result.stderr || '').toString();
+        return !result.error && result.status === 0 && !stderr.includes('command not found');
+    } catch (_err) {
+        return false;
+    }
+}
+
 /**
  * Checks if the existing MCP config matches what we expect to be "current".
  * If mcp-stata has released a new version, the config might be "working" but not "current".
@@ -637,6 +666,67 @@ function ensureMcpConfigs(context) {
     }
 
     writeMcpConfig(target);
+}
+
+function resolveWorkspaceRoot(context) {
+    if (context?.mcpWorkspaceOverride) return context.mcpWorkspaceOverride;
+    return vscode.workspace.workspaceFolders?.[0]?.uri?.fsPath || null;
+}
+
+function getClaudeMcpConfigTarget(context, scopeOverride) {
+    const scope = scopeOverride || 'user';
+    const hasHomeOverride = context && Object.prototype.hasOwnProperty.call(context, 'mcpHomeOverride');
+
+    let home;
+    if (hasHomeOverride) {
+        home = context.mcpHomeOverride;
+    } else if (context && context.extensionMode === vscode.ExtensionMode.Test) {
+        home = null;
+    } else {
+        home = os.homedir();
+    }
+
+    if (scope === 'project') {
+        const workspaceRoot = resolveWorkspaceRoot(context);
+        if (!workspaceRoot) return null;
+        return {
+            configPath: path.join(workspaceRoot, '.mcp.json'),
+            writeVscode: false,
+            writeCursor: true
+        };
+    }
+
+    if (!home) return null;
+    return {
+        configPath: path.join(home, '.claude.json'),
+        writeVscode: false,
+        writeCursor: true
+    };
+}
+
+function loadMcpConfigFromPath(configPath) {
+    if (!configPath) return { command: null, args: null, env: {}, configPath: null };
+    try {
+        if (!fs.existsSync(configPath)) {
+            return { command: null, args: null, env: {}, configPath };
+        }
+        const raw = fs.readFileSync(configPath, 'utf8');
+        const parsed = safeParseJson(raw);
+        const json = parsed.data && typeof parsed.data === 'object' ? parsed.data : {};
+        const entry = json?.servers?.[MCP_SERVER_ID] || json?.mcpServers?.[MCP_SERVER_ID];
+        if (!entry) {
+            return { command: null, args: null, env: {}, configPath };
+        }
+        const env = (typeof entry.env === 'object' && entry.env !== null) ? entry.env : {};
+        return {
+            command: entry.command || null,
+            args: Array.isArray(entry.args) ? entry.args : null,
+            env,
+            configPath
+        };
+    } catch (_err) {
+        return { command: null, args: null, env: {}, configPath };
+    }
 }
 
 function hasExistingMcpConfig(context) {
@@ -1806,6 +1896,7 @@ module.exports = {
     promptInstallMcpCli,
     hasExistingMcpConfig,
     getMcpConfigTarget,
+    getClaudeMcpConfigTarget,
     downloadGraphAsPdf,
     mcpClient,
     DataBrowserPanel,

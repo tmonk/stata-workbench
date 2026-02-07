@@ -2362,10 +2362,12 @@ class StataMcpClient {
         // 2. Workspace
         if (workspaceRoot) {
             paths.add(path.join(workspaceRoot, '.vscode', 'mcp.json'));
+            paths.add(path.join(workspaceRoot, '.mcp.json'));
         }
 
         // 3. Claude Desktop (Very common source of MCP servers)
         if (home) {
+            paths.add(path.join(home, '.claude.json'));
             if (platform === 'darwin') {
                 paths.add(path.join(home, 'Library', 'Application Support', 'Claude', 'claude_desktop_config.json'));
             } else if (platform === 'win32') {

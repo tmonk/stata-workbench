@@ -5,12 +5,7 @@ const { JSDOM } = require('jsdom');
 const { tableToIPC, tableFromArrays } = require('apache-arrow');
 
 describe('Data Browser Frontend (data-browser.js)', () => {
-    let dom;
-    let window;
-    let document;
-    let vscodeMock;
     let scriptContent;
-    let activeTimers;
 
     beforeAll(() => {
         scriptContent = fs.readFileSync(path.join(__dirname, '../../src/ui-shared/data-browser.js'), 'utf8');
@@ -19,11 +14,11 @@ describe('Data Browser Frontend (data-browser.js)', () => {
         scriptContent = scriptContent.replace(/export default .*;?/g, '');
     });
 
-    beforeEach(() => {
-        activeTimers = new Set();
+    function createTestContext() {
+        const activeTimers = new Set();
 
         // Setup JSDOM
-        dom = new JSDOM(`
+        const dom = new JSDOM(`
             <!DOCTYPE html>
             <html>
             <body>
@@ -55,8 +50,8 @@ describe('Data Browser Frontend (data-browser.js)', () => {
             resources: "usable"
         });
 
-        window = dom.window;
-        document = window.document;
+        const window = dom.window;
+        const document = window.document;
         window.__DATA_BROWSER_TEST__ = true;
 
         // Track JSDOM's timers so we can clear them
@@ -92,7 +87,7 @@ describe('Data Browser Frontend (data-browser.js)', () => {
         };
 
         // Mock VS Code API
-        vscodeMock = {
+        const vscodeMock = {
             postMessage: jest.fn()
         };
         window.acquireVsCodeApi = () => vscodeMock;
@@ -109,52 +104,55 @@ describe('Data Browser Frontend (data-browser.js)', () => {
 
         // Execute the script
         window.eval(scriptContent);
-    });
 
-    afterEach(() => {
-        // Clear all tracked timers
-        activeTimers.forEach(timer => {
-            if (timer.type === 'timeout') {
-                window.clearTimeout(timer.id);
-            } else {
-                window.clearInterval(timer.id);
-            }
-        });
-        activeTimers.clear();
+        const triggerMessage = (message) => {
+            window.dispatchEvent(new window.MessageEvent('message', { data: message }));
+        };
 
-        // Cleanup JSDOM
-        if (dom && dom.window) {
-            dom.window.close();
-        }
-
-        dom = null;
-        window = null;
-        document = null;
-        vscodeMock = null;
-    });
-
-    function triggerMessage(message) {
-        window.dispatchEvent(new window.MessageEvent('message', { data: message }));
-    }
-
-    function getApiCall(urlPart) {
-        return vscodeMock.postMessage.mock.calls.find(args =>
+        const getApiCall = (urlPart) => vscodeMock.postMessage.mock.calls.find(args =>
             args[0] &&
             args[0].type === 'apiCall' &&
             args[0].url &&
             args[0].url.includes(urlPart)
         )?.[0];
-    }
 
-    // Use real promises and microtask queue instead of fake timers
-    async function flushPromises() {
-        // Let microtasks run
-        await Promise.resolve();
-        // Give JSDOM timers a chance to fire
-        await new Promise(resolve => setImmediate(resolve));
+        // Use real promises and microtask queue instead of fake timers
+        const flushPromises = async () => {
+            // Let microtasks run
+            await Promise.resolve();
+            // Give JSDOM timers a chance to fire
+            await new Promise(resolve => setImmediate(resolve));
+        };
+
+        const cleanup = () => {
+            activeTimers.forEach(timer => {
+                if (timer.type === 'timeout') {
+                    window.clearTimeout(timer.id);
+                } else {
+                    window.clearInterval(timer.id);
+                }
+            });
+            activeTimers.clear();
+
+            if (dom && dom.window) {
+                dom.window.close();
+            }
+        };
+
+        return {
+            window,
+            document,
+            vscodeMock,
+            triggerMessage,
+            getApiCall,
+            flushPromises,
+            cleanup
+        };
     }
 
     it('should initialize correctly and default to first 50 variables', async () => {
+        const { window, document, triggerMessage, getApiCall, flushPromises, cleanup } = createTestContext();
+        try {
         // Generate 60 vars
         const bigVars = Array.from({ length: 60 }, (_, i) => ({ name: `v${i}` }));
 
@@ -184,9 +182,14 @@ describe('Data Browser Frontend (data-browser.js)', () => {
         // Count checked boxes
         const checked = document.querySelectorAll('#var-list input[type="checkbox"]:checked');
         expect(checked.length).toBe(50);
+        } finally {
+            cleanup();
+        }
     });
 
     it('should filter variables list via search', async () => {
+        const { document, triggerMessage, getApiCall, flushPromises, cleanup } = createTestContext();
+        try {
         const vars = [{ name: 'apple' }, { name: 'banana' }, { name: 'cherry' }];
 
         // Init
@@ -206,9 +209,14 @@ describe('Data Browser Frontend (data-browser.js)', () => {
         const items = document.querySelectorAll('#var-list .dropdown-item');
         expect(items.length).toBe(1);
         expect(items[0].textContent).toContain('apple');
+        } finally {
+            cleanup();
+        }
     });
 
     it('should select all/none respecting search filter', async () => {
+        const { document, window, triggerMessage, getApiCall, flushPromises, cleanup } = createTestContext();
+        try {
         const vars = [{ name: 'apple' }, { name: 'apricot' }, { name: 'banana' }];
 
         // Init
@@ -244,9 +252,14 @@ describe('Data Browser Frontend (data-browser.js)', () => {
         // Select None -> Deselects all visible
         document.getElementById('btn-select-none').click();
         expect(window.__dataBrowserState.selectedVars.length).toBe(0);
+        } finally {
+            cleanup();
+        }
     });
 
     it('should toggle variables and debounce page load', async () => {
+        const { document, window, vscodeMock, triggerMessage, getApiCall, flushPromises, cleanup } = createTestContext();
+        try {
         const vars = [{ name: 'v1' }];
         // Init
         triggerMessage({ type: 'init', baseUrl: 'http://test', token: 'xyz' });
@@ -276,5 +289,8 @@ describe('Data Browser Frontend (data-browser.js)', () => {
         await new Promise(r => setTimeout(r, 600));
 
         expect(getApiCall('/v1/arrow')).toBeTruthy();
+        } finally {
+            cleanup();
+        }
     });
 });

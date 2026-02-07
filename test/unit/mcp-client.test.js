@@ -2,7 +2,8 @@ const { describe, it, beforeEach, afterEach, expect, jest } = require('bun:test'
 const { mock: bunMock } = require('bun:test');
 const sinon = require('sinon');
 const path = require('path');
-const vscodeMock = require('../mocks/vscode');
+const { createVscodeMock } = require('../mocks/vscode');
+const vscodeMock = createVscodeMock();
 
 // Mock MCP SDK
 class ClientMock {
@@ -94,11 +95,7 @@ const setConfig = (overrides = {}) => {
     };
     const applyConfig = (target) => {
         if (!target?.workspace) return;
-        if (target.workspace.getConfiguration?.mockReturnValue) {
-            target.workspace.getConfiguration.mockReturnValue(config);
-            return;
-        }
-        // If it's not a mock, make it one rather than a plain function to avoid breaking other tests
+        // Ensure a predictable mock implementation in all cases
         target.workspace.getConfiguration = jest.fn().mockReturnValue(config);
     };
 
@@ -107,7 +104,8 @@ const setConfig = (overrides = {}) => {
     return config;
 };
 
-describe('mcp-client normalizeResponse', () => {
+describe.serial('mcp-client', () => {
+    describe('mcp-client normalizeResponse', () => {
     it('keeps longest stdout including logText tail', () => {
         const client = new McpClient();
 
@@ -129,9 +127,9 @@ describe('mcp-client normalizeResponse', () => {
         expect(normalized.stderr).toContain('r(109)');
         expect(normalized.success).toEqual(false);
     });
-});
+    });
 
-describe('McpClient', () => {
+    describe('McpClient', () => {
     let client;
     let mockClientInstance;
 
@@ -1022,7 +1020,7 @@ describe('McpClient', () => {
                 close: sinon.spy()
             };
 
-            sinon.stub(client, '_createClient').resolves({ client: mcpClientStub, transport, setupTimeoutSeconds: '1' });
+            client._createClient = sinon.stub().resolves({ client: mcpClientStub, transport, setupTimeoutSeconds: '1' });
 
             let error;
             try {
@@ -1043,7 +1041,7 @@ describe('McpClient', () => {
                 setNotificationHandler: () => { },
                 on: () => { }
             };
-            sinon.stub(client, '_createClient').resolves({ client: mcpClientStub, transport, setupTimeoutSeconds: '60' });
+            client._createClient = sinon.stub().resolves({ client: mcpClientStub, transport, setupTimeoutSeconds: '60' });
             
             // Populate recentStderr with a pystata missing error
             client._recentStderr = ["ModuleNotFoundError: No module named 'pystata'"];
@@ -1066,7 +1064,7 @@ describe('McpClient', () => {
                 setNotificationHandler: () => { },
                 on: () => { }
             };
-            sinon.stub(client, '_createClient').resolves({ client: mcpClientStub, transport, setupTimeoutSeconds: '60' });
+            client._createClient = sinon.stub().resolves({ client: mcpClientStub, transport, setupTimeoutSeconds: '60' });
             
             // Populate recentStderr with a Stata missing error
             client._recentStderr = ["stata system information not found"];
@@ -1081,5 +1079,6 @@ describe('McpClient', () => {
             expect(error).toBeDefined();
             expect(error.message).toContain('CRITICAL: Stata could not be found or initialized');
         });
+    });
     });
 });

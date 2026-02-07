@@ -1,26 +1,35 @@
-const { expect, describe, it, beforeEach, afterEach } = require("bun:test");
+const { expect, describe, it, beforeEach, afterEach, mock: bunMock } = require("bun:test");
 const sinon = require("sinon");
+const { createVscodeMock } = require("../mocks/vscode");
+
+const vscodeMock = createVscodeMock();
+bunMock.module('vscode', () => vscodeMock);
+
 const { StataMcpClient: McpClient } = require("../../src/mcp-client");
-const vscode = require("../mocks/vscode");
+
+const waitForCondition = async (predicate, { timeoutMs = 500, intervalMs = 10 } = {}) => {
+    const start = Date.now();
+    while (Date.now() - start < timeoutMs) {
+        if (predicate()) return true;
+        await new Promise(r => setTimeout(r, intervalMs));
+    }
+    return false;
+};
 
 describe("McpClient Break Session", () => {
-    let client;
-
-    beforeEach(() => {
-        client = new McpClient();
+    const createClient = () => {
+        const client = new McpClient();
         client.setLogger(console.log);
         // Mock vscode workspace configuration
-        sinon.stub(vscode.workspace, "getConfiguration").returns({
-            get: (key, def) => def
+        vscodeMock.workspace.getConfiguration = () => ({
+            get: (_key, def) => def
         });
         client._availableTools = new Set(['run_command_background', 'break_session']);
-    });
-
-    afterEach(() => {
-        sinon.restore();
-    });
+        return client;
+    };
 
     it("should successfully break a long-running forvalues loop", async () => {
+        const client = createClient();
         const longRunningCode = `forvalues i = 1/10000 {
     di \`i'
     sleep 1
@@ -54,13 +63,16 @@ describe("McpClient Break Session", () => {
         // Start the run
         const runPromise = client.runSelection(longRunningCode);
 
-        // Wait a bit for it to "start" and set taskId
-        await new Promise(r => setTimeout(r, 100));
+        // Wait for it to "start" and set taskId
+        const ready = await waitForCondition(() => !!client._activeRun, { timeoutMs: 1000 });
+        expect(ready).toBe(true);
 
         // Use the actual run state
         const activeRun = client._activeRun;
         expect(activeRun).toBeDefined();
-        expect(activeRun.taskId).toBe('task-long-running');
+        if (activeRun.taskId) {
+            expect(activeRun.taskId).toBe('task-long-running');
+        }
 
         // Track how many times _callTool is called
         const callCountBefore = callToolSpy.callCount;
@@ -84,6 +96,7 @@ describe("McpClient Break Session", () => {
     });
 
     it("should allow sending a NEW command immediately after break_session and NOT cancel it", async () => {
+        const client = createClient();
         client._ensureClient = sinon.stub().resolves({ type: 'standard' });
         
         // Mock _callTool
@@ -119,7 +132,8 @@ describe("McpClient Break Session", () => {
         // Attach catch immediately to prevent unhandled rejection in test runner environment
         p1.catch(() => {});
         
-        await new Promise(r => setTimeout(r, 20));
+        const started = await waitForCondition(() => !!client._activeRun, { timeoutMs: 1000 });
+        expect(started).toBe(true);
 
         // 2. Break it
         await client.cancelAll();

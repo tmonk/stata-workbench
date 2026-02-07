@@ -632,6 +632,32 @@ describe('extension unit tests', () => {
         });
     });
 
+    describe('getClaudeMcpConfigTarget', () => {
+        it('resolves user scope Claude config path', () => {
+            const ctx = {
+                mcpHomeOverride: '/home/alex',
+                extensionMode: vscode.ExtensionMode.Test
+            };
+
+            const target = extension.getClaudeMcpConfigTarget(ctx, 'user');
+            expect(target.configPath).toEqual(path.join('/home/alex', '.claude.json'));
+            expect(target.writeCursor).toBe(true);
+            expect(target.writeVscode).toBe(false);
+        });
+
+        it('resolves project scope Claude config path', () => {
+            const ctx = {
+                mcpWorkspaceOverride: '/workspace',
+                extensionMode: vscode.ExtensionMode.Test
+            };
+
+            const target = extension.getClaudeMcpConfigTarget(ctx, 'project');
+            expect(target.configPath).toEqual(path.join('/workspace', '.mcp.json'));
+            expect(target.writeCursor).toBe(true);
+            expect(target.writeVscode).toBe(false);
+        });
+    });
+
     describe('uv discovery and config validation', () => {
         beforeEach(() => {
             // Note: setupMocks is already called in the top-level beforeEach

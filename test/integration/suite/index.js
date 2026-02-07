@@ -15,7 +15,7 @@ async function run() {
         const testPattern = process.env.TEST_PATTERN;
         const options = {
             config: configPath,
-            runInBand: true, // Required for VS Code integration tests
+            runInBand: true
         };
         if (testPattern) {
             options.testNamePattern = testPattern;
