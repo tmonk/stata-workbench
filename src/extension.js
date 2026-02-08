@@ -1085,7 +1085,7 @@ async function refreshDatasetSummary() {
 }
 
 async function runSelection() {
-    return Sentry.startSpan({ name: 'extension.runSelection', op: 'extension.operation' }, async () => {
+    return Sentry.startSpan({ name: 'stata.extension.runSelection', op: 'extension.operation' }, async () => {
         const editor = vscode.window.activeTextEditor;
         if (!editor) {
             vscode.window.showErrorMessage('No active editor');
@@ -1155,7 +1155,7 @@ async function runSelection() {
 }
 
 async function runFile() {
-    return Sentry.startSpan({ name: 'extension.runFile', op: 'extension.operation' }, async () => {
+    return Sentry.startSpan({ name: 'stata.extension.runFile', op: 'extension.operation' }, async () => {
         const editor = vscode.window.activeTextEditor;
         if (!editor) {
             vscode.window.showErrorMessage('No active editor');

@@ -179,7 +179,7 @@ class DataBrowserPanel {
     }
 
     static _performRequest(urlStr, options, expectBinary = false) {
-        return Sentry.startSpan({ name: 'databrowser.apiCall', op: 'extension.operation' }, () => {
+        return Sentry.startSpan({ name: 'stata.databrowser.apiCall', op: 'extension.operation' }, () => {
             return new Promise((resolve, reject) => {
                 try {
                     const url = new URL(urlStr);

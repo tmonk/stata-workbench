@@ -33,12 +33,15 @@ Sentry.init({
     beforeBreadcrumb(breadcrumb) {
         // Filter out network requests from other extensions
         if (breadcrumb.type === "http" && breadcrumb.data && breadcrumb.data.url) {
-            const url = breadcrumb.data.url;
+            const url = String(breadcrumb.data.url);
+            // Allow only our own infrastructure URLS
             const isOurs =
                 url.includes("stata-workbench") ||
                 url.includes("mcp-stata") ||
                 url.includes("tmonk") ||
-                url.includes("pypi.org/pypi/mcp-stata");
+                url.includes("pypi.org/pypi/mcp-stata") ||
+                url.includes("localhost") && (url.includes("get_ui_channel") || url.includes("stata"));
+
             if (!isOurs) return null;
         }
         return breadcrumb;
@@ -47,13 +50,29 @@ Sentry.init({
     // Filter out transactions from other extensions sharing the host
     beforeSendTransaction(event) {
         const name = event.transaction || "";
-        // Only keep transactions that are clearly related to our extension
+
+        // Explicitly exclude known noise from other extensions sharing the process
+        // This includes Exa, Cursor internals, AWS Q, CodeGPT, etc.
+        const noiseMarkers = [
+            "exa.", "ExtensionServerService",
+            "kiro.", "agent-event", "AgentExecution", "Steering.",
+            "readFile.readFileFromUri", "openTextDocument", "getDiagnostics",
+            "QApi.QAPICall", "AsyncToolCallStart", "Graph.",
+            "codegpt", "autocomplete", "api/autocomplete",
+            "pdf.worker", "pdf.mjs", "viewer.html",
+            "envelope", "sentry.io", "notifications.handleAgentEvent"
+        ];
+
+        if (noiseMarkers.some(marker => name.includes(marker))) {
+            return null;
+        }
+
+        // Allowlist of our own transaction patterns
         const isOurTransaction =
+            name.startsWith("stata.") ||
             name.includes("stata-workbench") ||
             name.includes("mcp-stata") ||
             name.includes("tmonk") ||
-            name.startsWith("mcp.tool:") ||
-            name.startsWith("mcp.operation:") ||
             name.includes("pypi.org/pypi/mcp-stata");
 
         return isOurTransaction ? event : null;

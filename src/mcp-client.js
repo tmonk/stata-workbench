@@ -879,7 +879,7 @@ class StataMcpClient {
             this._log('[mcp-stata] read_log tool call blocked: local file access only');
             throw new Error('read_log tool call disabled; local file access only');
         }
-        return Sentry.startSpan({ name: `mcp.tool:${toolName}`, op: 'mcp.tool_call' }, async () => {
+        return Sentry.startSpan({ name: `stata.mcp.tool:${toolName}`, op: 'mcp.tool_call' }, async () => {
             const toolArgs = args ?? {};
             const startMs = Date.now();
 
@@ -1551,7 +1551,7 @@ class StataMcpClient {
         }
 
         const work = async () => {
-            return Sentry.startSpan({ name: `mcp.operation:${label}`, op: 'mcp.operation' }, async () => {
+            return Sentry.startSpan({ name: `stata.mcp.operation:${label}`, op: 'mcp.operation' }, async () => {
                 const startedAt = Date.now();
                 if (source.token.isCancellationRequested) {
                     this._pending = Math.max(0, this._pending - 1);

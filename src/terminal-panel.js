@@ -314,7 +314,7 @@ class TerminalPanel {
   }
 
   static async handleRun(code, runCommand) {
-    return Sentry.startSpan({ name: 'terminal.handleRun', op: 'extension.operation' }, async () => {
+    return Sentry.startSpan({ name: 'stata.terminal.handleRun', op: 'extension.operation' }, async () => {
       if (!TerminalPanel.currentPanel) return;
       const trimmed = (code || '').trim();
       if (!trimmed) return;
