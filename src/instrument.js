@@ -30,6 +30,35 @@ Sentry.init({
     // Maximum number of breadcrumbs to keep
     maxBreadcrumbs: 100,
 
+    beforeBreadcrumb(breadcrumb) {
+        // Filter out network requests from other extensions
+        if (breadcrumb.type === "http" && breadcrumb.data && breadcrumb.data.url) {
+            const url = breadcrumb.data.url;
+            const isOurs =
+                url.includes("stata-workbench") ||
+                url.includes("mcp-stata") ||
+                url.includes("tmonk") ||
+                url.includes("pypi.org/pypi/mcp-stata");
+            if (!isOurs) return null;
+        }
+        return breadcrumb;
+    },
+
+    // Filter out transactions from other extensions sharing the host
+    beforeSendTransaction(event) {
+        const name = event.transaction || "";
+        // Only keep transactions that are clearly related to our extension
+        const isOurTransaction =
+            name.includes("stata-workbench") ||
+            name.includes("mcp-stata") ||
+            name.includes("tmonk") ||
+            name.startsWith("mcp.tool:") ||
+            name.startsWith("mcp.operation:") ||
+            name.includes("pypi.org/pypi/mcp-stata");
+
+        return isOurTransaction ? event : null;
+    },
+
     // Filter out Stata user errors (not system failures)
     beforeSend(event, hint) {
         // Attach recent logs to the event for better context
