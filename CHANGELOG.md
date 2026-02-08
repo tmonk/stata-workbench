@@ -1,3 +1,10 @@
+## [0.18.3](https://github.com/tmonk/stata-workbench/compare/v0.18.2...v0.18.3) (2026-02-08)
+
+
+### Bug Fixes
+
+* restrict logging filters ([c213cf5](https://github.com/tmonk/stata-workbench/commit/c213cf5a1091555a30884d54ee405324d304ec3c))
+
 ## [0.18.2](https://github.com/tmonk/stata-workbench/compare/v0.18.1...v0.18.2) (2026-02-08)
 
 
