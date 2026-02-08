@@ -756,6 +756,7 @@ class StataMcpClient {
             if (this._recentStderr.length > 10) this._recentStderr.shift();
             this._log(`[mcp-stata transport error] ${message}`);
             this._statusEmitter.emit('status', 'error');
+            this._rejectPendingTaskWaiters(err);
         };
         if (typeof transport.on === 'function') {
             transport.on('error', transportErrorHandler);
@@ -790,6 +791,7 @@ class StataMcpClient {
                 if (this._recentStderr.length > 10) this._recentStderr.shift();
                 this._log(`[mcp-stata client error] ${message}`);
                 this._statusEmitter.emit('status', 'error');
+                this._rejectPendingTaskWaiters(err);
             });
         }
 
@@ -1014,6 +1016,7 @@ class StataMcpClient {
             run._taskDonePayload = null;
             run._taskDoneTaskId = null;
             run._taskDoneResolve = null;
+            run._taskDoneReject = null;
         }
         this._activeRun = run;
         try {
@@ -1402,6 +1405,27 @@ class StataMcpClient {
         }
     }
 
+    _rejectPendingTaskWaiters(error) {
+        const err = error instanceof Error
+            ? error
+            : new Error(String(error || 'MCP client error'));
+        const runs = new Set();
+        if (this._activeRun) runs.add(this._activeRun);
+        for (const run of this._runsByTaskId.values()) {
+            runs.add(run);
+        }
+
+        for (const run of runs) {
+            if (!run || typeof run._taskDoneReject !== 'function') continue;
+            try {
+                run._tailCancelled = true;
+                run._fastDrain = true;
+                run._taskDoneReject(err);
+            } catch (_err) {
+            }
+        }
+    }
+
     async _awaitTaskDone(client, runState, taskId, cancellationToken) {
         if (!runState || !taskId) return null;
         const taskIdText = String(taskId);
@@ -1411,18 +1435,28 @@ class StataMcpClient {
 
         return new Promise((resolve, reject) => {
             let cancelSub = null;
-            let pollInterval = null;
             let isFinished = false;
 
             const finish = (payload) => {
                 if (isFinished) return;
                 isFinished = true;
                 if (cancelSub?.dispose) cancelSub.dispose();
-                if (pollInterval) clearInterval(pollInterval);
+                runState._taskDoneResolve = null;
+                runState._taskDoneReject = null;
                 resolve(payload);
             };
 
+            const fail = (error) => {
+                if (isFinished) return;
+                isFinished = true;
+                if (cancelSub?.dispose) cancelSub.dispose();
+                runState._taskDoneResolve = null;
+                runState._taskDoneReject = null;
+                reject(error instanceof Error ? error : new Error(String(error || 'Task failed')));
+            };
+
             runState._taskDoneResolve = finish;
+            runState._taskDoneReject = fail;
 
             if (runState._taskDonePayload && (!runState._taskDoneTaskId || runState._taskDoneTaskId === taskIdText)) {
                 return finish(runState._taskDonePayload);
@@ -1430,32 +1464,9 @@ class StataMcpClient {
 
             if (cancellationToken?.onCancellationRequested) {
                 cancelSub = cancellationToken.onCancellationRequested(() => {
-                    if (isFinished) return;
-                    isFinished = true;
-                    if (pollInterval) clearInterval(pollInterval);
-                    reject(new Error('Request cancelled'));
+                    fail(new Error('Request cancelled'));
                 });
             }
-
-            // Polling fallback: if notifications are missed or delayed, poll every 2.5s
-            pollInterval = setInterval(async () => {
-                if (isFinished) return;
-                if (runState._taskDonePayload) {
-                    return finish(runState._taskDonePayload);
-                }
-                
-                try {
-                    // Call get_task_status tool for this specific task
-                    const res = await this._callTool(client, 'get_task_status', { task_id: taskIdText });
-                    const status = this._parseToolJson(res);
-                    if (this._isTaskDone(status)) {
-                        const resultRes = await this._callTool(client, 'get_task_result', { task_id: taskIdText });
-                        finish(this._parseToolJson(resultRes) || status);
-                    }
-                } catch (_err) {
-                    // Ignore polling errors to let it try again or wait for notification
-                }
-            }, 2500);
         });
     }
 

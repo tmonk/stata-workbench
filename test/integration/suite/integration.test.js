@@ -13,6 +13,7 @@ describe('McpClient integration (VS Code host)', () => {
     let doDir;
     let doFile;
     let client;
+    let logLines = [];
 
     beforeAll(async () => {
         if (!enabled) {
@@ -42,6 +43,9 @@ describe('McpClient integration (VS Code host)', () => {
 
         const { StataMcpClient } = require('../../../src/mcp-client');
         client = new StataMcpClient();
+        client.setLogger((line) => {
+            if (typeof line === 'string') logLines.push(line);
+        });
     });
 
     afterAll(async () => {
@@ -85,6 +89,15 @@ describe('McpClient integration (VS Code host)', () => {
         expect(result.success).toBe(true);
         expect(result.stdout).toContain('background-log-ok');
         expect(result.logPath).toBeTruthy();
+    });
+
+    runIfEnabled('does not poll task status or result', async () => {
+        logLines.length = 0;
+        const result = await client.runSelection('display "no-poll"', { normalizeResult: true, includeGraphs: false });
+        expect(result.success).toBe(true);
+        const combined = logLines.join('\n');
+        expect(combined).not.toContain('get_task_status');
+        expect(combined).not.toContain('get_task_result');
     });
 
     runIfEnabled('serializes multiple rapid runSelection calls', async () => {

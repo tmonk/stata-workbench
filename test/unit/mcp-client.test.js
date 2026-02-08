@@ -700,18 +700,45 @@ describe('mcp-client', () => {
             expect(result.task_id).toEqual('task-1');
         });
 
+        it('_awaitTaskDone does not poll task status or result', async () => {
+            const runState = {};
+            const cancellationToken = { onCancellationRequested: sinon.stub().returns({ dispose: sinon.stub() }) };
+            // client._callTool is already stubbed in createClient
+            client._callTool.resetHistory();
+
+            const promise = client._awaitTaskDone({}, runState, 'task-2', cancellationToken);
+            runState._taskDoneResolve({ event: 'task_done', task_id: 'task-2' });
+            await promise;
+
+            expect(client._callTool.notCalled).toBe(true);
+        });
+
+        it('_awaitTaskDone rejects when client errors occur', async () => {
+            const runState = {};
+            client._activeRun = runState;
+            const cancellationToken = { onCancellationRequested: sinon.stub().returns({ dispose: sinon.stub() }) };
+
+            const promise = client._awaitTaskDone({}, runState, 'task-3', cancellationToken);
+            client._rejectPendingTaskWaiters(new Error('client crashed'));
+
+            let thrown = null;
+            try {
+                await promise;
+            } catch (err) {
+                thrown = err;
+            }
+
+            expect(thrown).toBeDefined();
+            expect(thrown.message).toContain('client crashed');
+            client._activeRun = null;
+        });
+
         it('_awaitBackgroundResult wires task id and log path', async () => {
             const runState = { logPath: null };
             client._ensureLogTail = sinon.stub().callsFake(async (_client, run, logPath) => {
                 run.logPath = logPath;
             });
             client._awaitTaskDone = sinon.stub().resolves({ event: 'task_done', task_id: 'task-xyz' });
-            client._callTool = sinon.stub().callsFake(async (_client, name) => {
-                if (name === 'get_task_result') {
-                    return { ok: true };
-                }
-                return {};
-            });
 
             const kickoff = {
                 log_path: '/tmp/background.log',
