@@ -1,7 +1,6 @@
 const { expect, describe, it, beforeEach, afterEach, mock: bunMock } = require("bun:test");
 const sinon = require("sinon");
-const vscodeMock = require("../mocks/vscode");
-bunMock.module('vscode', () => vscodeMock);
+const { withTestContext } = require('../helpers/test-context');
 
 const { StataMcpClient: McpClient } = require("../../src/mcp-client");
 
@@ -15,18 +14,20 @@ const waitForCondition = async (predicate, { timeoutMs = 500, intervalMs = 10 } 
 };
 
 describe("McpClient Break Session", () => {
+    const itWithContext = (name, fn) => it(name, () => withTestContext({}, fn));
     const createClient = () => {
         const client = new McpClient();
         client.setLogger(console.log);
         // Mock vscode workspace configuration
-        vscodeMock.workspace.getConfiguration = () => ({
+        const vscode = require('vscode');
+        vscode.workspace.getConfiguration = () => ({
             get: (_key, def) => def
         });
         client._availableTools = new Set(['run_command_background', 'break_session']);
         return client;
     };
 
-    it("should successfully break a long-running forvalues loop", async () => {
+    itWithContext("should successfully break a long-running forvalues loop", async () => {
         const client = createClient();
         const longRunningCode = `forvalues i = 1/10000 {
     di \`i'
@@ -93,7 +94,7 @@ describe("McpClient Break Session", () => {
         expect(breakCalls.length).toBeGreaterThan(0);
     });
 
-    it("should allow sending a NEW command immediately after break_session and NOT cancel it", async () => {
+    itWithContext("should allow sending a NEW command immediately after break_session and NOT cancel it", async () => {
         const client = createClient();
         client._ensureClient = sinon.stub().resolves({ type: 'standard' });
         

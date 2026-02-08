@@ -1,8 +1,9 @@
 const { describe, it, beforeEach, afterEach, expect, jest } = require('bun:test');
 const { mock: bunMock } = require('bun:test');
+const { AsyncLocalStorage } = require('async_hooks');
 const sinon = require('sinon');
 const path = require('path');
-const vscodeMock = require('../mocks/vscode');
+const { withTestContext } = require('../helpers/test-context');
 
 // Mock MCP SDK
 class ClientMock {
@@ -31,7 +32,6 @@ const dummySchema = {
     }
 };
 
-bunMock.module('vscode', () => vscodeMock);
 bunMock.module('@modelcontextprotocol/sdk/client', () => ({ Client: ClientMock }));
 bunMock.module('@modelcontextprotocol/sdk/client/stdio.js', () => ({ StdioClientTransport: StdioClientTransportMock }));
 bunMock.module('@modelcontextprotocol/sdk/types', () => ({
@@ -63,23 +63,18 @@ const { StataMcpClient: McpClient } = require('../../src/mcp-client');
 
 // ... rest of the file ...
 
-const getVscodeModule = () => {
-    try {
-        return require('vscode');
-    } catch (_err) {
-        return vscodeMock;
-    }
+const resolveVscode = (candidate) => (candidate && candidate.workspace ? candidate : require('vscode'));
+
+const setWorkspaceFolders = (vscodeApiOrFolders, maybeFolders) => {
+    const vscodeApi = maybeFolders ? resolveVscode(vscodeApiOrFolders) : resolveVscode();
+    const folders = maybeFolders || vscodeApiOrFolders;
+    vscodeApi.workspace.workspaceFolders = folders;
 };
 
-const setWorkspaceFolders = (folders) => {
-    vscodeMock.workspace.workspaceFolders = folders;
-    const vscodeRuntime = getVscodeModule();
-    if (vscodeRuntime && vscodeRuntime !== vscodeMock && vscodeRuntime.workspace) {
-        vscodeRuntime.workspace.workspaceFolders = folders;
-    }
-};
-
-const setConfig = (overrides = {}) => {
+const setConfig = (vscodeApiOrOverrides, maybeOverrides) => {
+    const overridesOnly = maybeOverrides === undefined;
+    const vscodeApi = overridesOnly ? resolveVscode() : resolveVscode(vscodeApiOrOverrides);
+    const overrides = overridesOnly ? (vscodeApiOrOverrides || {}) : (maybeOverrides || {});
     const merged = {
         requestTimeoutMs: 1000,
         runFileWorkingDirectory: '',
@@ -92,18 +87,62 @@ const setConfig = (overrides = {}) => {
             return def;
         })
     };
-    const applyConfig = (target) => {
-        if (!target?.workspace) return;
-        // Ensure a predictable mock implementation in all cases
-        target.workspace.getConfiguration = jest.fn().mockReturnValue(config);
-    };
-
-    applyConfig(vscodeMock);
-    applyConfig(getVscodeModule());
+    if (vscodeApi?.workspace) {
+        vscodeApi.workspace.getConfiguration = jest.fn().mockReturnValue(config);
+    }
     return config;
 };
 
-describe.serial('mcp-client', () => {
+const clientStore = new AsyncLocalStorage();
+const clientProxy = new Proxy({}, {
+    get(_target, prop) {
+        const client = clientStore.getStore();
+        return client?.[prop];
+    },
+    set(_target, prop, value) {
+        const client = clientStore.getStore();
+        if (!client) return false;
+        client[prop] = value;
+        return true;
+    },
+    has(_target, prop) {
+        const client = clientStore.getStore();
+        return prop in (client || {});
+    },
+    ownKeys() {
+        const client = clientStore.getStore();
+        return Reflect.ownKeys(client || {});
+    },
+    getOwnPropertyDescriptor(_target, prop) {
+        const client = clientStore.getStore();
+        if (!client) return undefined;
+        const desc = Object.getOwnPropertyDescriptor(client, prop);
+        if (desc) return desc;
+        return { configurable: true, enumerable: true, writable: true, value: client[prop] };
+    }
+});
+
+const createClient = (vscodeApi) => {
+    const client = new McpClient({
+        subscriptions: [],
+        extensionUri: { fsPath: '/test/path' }
+    });
+    setWorkspaceFolders(vscodeApi, [{ uri: { fsPath: '/mock/workspace' } }]);
+    setConfig(vscodeApi);
+    client._ensureClient = sinon.stub().resolves(new ClientMock());
+    client._callTool = sinon.stub().resolves({});
+    return client;
+};
+
+const itWithContext = (name, fn) => it(name, () => withTestContext({}, (ctx) => {
+    const instance = createClient(ctx.vscode);
+    return clientStore.run(instance, () => fn(ctx));
+}));
+
+const client = clientProxy;
+
+describe('mcp-client', () => {
+    const it = itWithContext;
     describe('mcp-client normalizeResponse', () => {
     it('keeps longest stdout including logText tail', () => {
         const client = new McpClient();
@@ -129,23 +168,6 @@ describe.serial('mcp-client', () => {
     });
 
     describe('McpClient', () => {
-    let client;
-    let mockClientInstance;
-
-    beforeEach(() => {
-        client = new McpClient({
-            subscriptions: [],
-            extensionUri: { fsPath: '/test/path' }
-        });
-
-        setWorkspaceFolders([{ uri: { fsPath: '/mock/workspace' } }]);
-
-        setConfig();
-
-        // Mock internal methods to avoid actual process spawning
-        client._ensureClient = sinon.stub().resolves(new ClientMock());
-        client._callTool = sinon.stub().resolves({});
-    });
 
     describe('_resolveArtifactsFromList', () => {
         it('should correctly resolve graph artifacts with export fallback', async () => {
@@ -382,8 +404,9 @@ describe.serial('mcp-client', () => {
 
     describe('runFile', () => {
         it('should honor resolved cwd when no workspace folders exist', async () => {
-            const originalFolders = vscodeMock.workspace.workspaceFolders;
-            setWorkspaceFolders([]);
+            const vscode = require('vscode');
+            const originalFolders = vscode.workspace.workspaceFolders;
+            setWorkspaceFolders(vscode, []);
 
             setConfig({ runFileWorkingDirectory: 'relative/run' });
 
@@ -415,7 +438,7 @@ describe.serial('mcp-client', () => {
             expect(result.taskResult.args.path).toEqual('/tmp/project/script.do');
 
             enqueueStub.restore();
-            setWorkspaceFolders(originalFolders);
+            setWorkspaceFolders(vscode, originalFolders);
         });
 
         it('should respect explicitly provided cwd in options', async () => {
@@ -463,12 +486,8 @@ describe.serial('mcp-client', () => {
     });
 
     describe('cancellation', () => {
-        beforeEach(() => {
-            // Use real _callTool implementation for cancellation behaviors.
-            client._callTool = McpClient.prototype._callTool.bind(client);
-        });
-
         it('passes progressToken and signal to client.request when provided', async () => {
+            client._callTool = McpClient.prototype._callTool.bind(client);
             const abort = new AbortController();
             const requestStub = sinon.stub().resolves({ ok: true });
             const callToolStub = sinon.stub().resolves({});
@@ -485,6 +504,7 @@ describe.serial('mcp-client', () => {
         });
 
         it('treats AbortError as cancellation and surfaces a friendly message', async () => {
+            client._callTool = McpClient.prototype._callTool.bind(client);
             const abortErr = new Error('Aborted');
             abortErr.name = 'AbortError';
             const callToolStub = sinon.stub().rejects(abortErr);
@@ -505,6 +525,7 @@ describe.serial('mcp-client', () => {
         });
 
         it('cancelAll triggers active cancellation with a reason', async () => {
+            client._callTool = McpClient.prototype._callTool.bind(client);
             const cancelSpy = sinon.spy();
             client._activeCancellation = { cancel: cancelSpy };
             client._pending = 1;
@@ -516,6 +537,7 @@ describe.serial('mcp-client', () => {
         });
 
         it('cancelAll calls break_session when a background task is active', async () => {
+            client._callTool = McpClient.prototype._callTool.bind(client);
             const cancelSpy = sinon.spy();
             client._activeCancellation = { cancel: cancelSpy };
             client._pending = 1;
@@ -813,16 +835,16 @@ describe.serial('mcp-client', () => {
             expect(cwd).toEqual(path.normalize('/abs/path'));
         });
 
-        it('should expand tilde to home directory', () => {
-            const originalHome = process.env.HOME;
-            process.env.HOME = '/home/tester';
+        it('should expand tilde to home directory', ({ env }) => {
+            const originalHome = env.HOME;
+            env.HOME = '/home/tester';
 
             setConfig({ runFileWorkingDirectory: '~/stata/runs' });
 
             const cwd = client._resolveRunFileCwd('/tmp/project/script.do');
             expect(cwd).toEqual(path.normalize('/home/tester/stata/runs'));
 
-            process.env.HOME = originalHome;
+            env.HOME = originalHome;
         });
 
         it('should fall back to file directory when tokens are unknown', () => {
@@ -840,15 +862,16 @@ describe.serial('mcp-client', () => {
         });
 
         it('should resolve relative paths against process cwd when workspace is missing', () => {
-            const originalFolders = vscodeMock.workspace.workspaceFolders;
-            setWorkspaceFolders([]);
+            const vscode = require('vscode');
+            const originalFolders = vscode.workspace.workspaceFolders;
+            setWorkspaceFolders(vscode, []);
 
             setConfig({ runFileWorkingDirectory: 'relative/run' });
 
             const cwd = client._resolveRunFileCwd('/tmp/project/script.do');
             expect(cwd).toEqual(path.normalize(path.resolve('relative/run')));
 
-            setWorkspaceFolders(originalFolders);
+            setWorkspaceFolders(vscode, originalFolders);
         });
     });
 
@@ -994,23 +1017,17 @@ describe.serial('mcp-client', () => {
     });
 
     describe('_createClient Connection Handling', () => {
-        let client;
-
-        beforeEach(() => {
-            // Use the real McpClient class but we'll stub its private methods
-            client = new McpClient();
-            
-            // Mock getConfiguration using sinon.stub so it can be restored
-            sinon.stub(vscodeMock.workspace, 'getConfiguration').returns({
+        const setupClient = () => {
+            const client = new McpClient();
+            const vscode = require('vscode');
+            const stub = sinon.stub(vscode.workspace, 'getConfiguration').returns({
                 get: (key, def) => key === 'setupTimeoutSeconds' ? 1 : def
             });
-        });
-
-        afterEach(() => {
-            sinon.restore();
-        });
+            return { client, stub };
+        };
 
         it('should time out if connect hangs and close transport', async () => {
+            const { client, stub } = setupClient();
             const transport = { close: sinon.spy() };
             const mcpClientStub = {
                 connect: () => new Promise(() => { }), // Hangs
@@ -1031,9 +1048,11 @@ describe.serial('mcp-client', () => {
             expect(error).toBeDefined();
             expect(error.message).toContain('Connection timed out after 1 seconds');
             expect(transport.close.calledOnce).toBe(true);
+            stub.restore();
         });
 
         it('should enhance error message for missing pystata package', async () => {
+            const { client, stub } = setupClient();
             const transport = { close: sinon.spy() };
             const mcpClientStub = {
                 connect: sinon.stub().rejects(new Error('Connection failed')),
@@ -1054,9 +1073,11 @@ describe.serial('mcp-client', () => {
 
             expect(error).toBeDefined();
             expect(error.message).toContain('CRITICAL: The \'pystata\' or \'stata_setup\' Python package is missing');
+            stub.restore();
         });
 
         it('should enhance error message for Stata missing', async () => {
+            const { client, stub } = setupClient();
             const transport = { close: sinon.spy() };
             const mcpClientStub = {
                 connect: sinon.stub().rejects(new Error('Connection failed')),
@@ -1077,6 +1098,7 @@ describe.serial('mcp-client', () => {
 
             expect(error).toBeDefined();
             expect(error.message).toContain('CRITICAL: Stata could not be found or initialized');
+            stub.restore();
         });
     });
     });

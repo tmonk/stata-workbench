@@ -1,22 +1,23 @@
-const { describe, it, beforeEach, afterEach, expect, mock, jest } = require('bun:test');
+const { describe, it, expect, mock, jest } = require('bun:test');
+const proxyquire = require('proxyquire').noCallThru().noPreserveCache();
+const { withTestContext } = require('../helpers/test-context');
 
-const resetModules = () => {
-    for (const key of Object.keys(require.cache)) {
-        delete require.cache[key];
+const loadTerminalPanel = () => proxyquire('../../src/terminal-panel', {
+    './artifact-utils': {
+        openArtifact: () => { },
+        revealArtifact: () => { },
+        copyToClipboard: () => { },
+        resolveArtifactUri: () => { }
     }
-};
+});
+
+const itWithContext = (name, fn) => it(name, () => withTestContext({}, fn));
 
 describe('Webview Script Integrity', () => {
-    let TerminalPanel;
-    let htmlContent = '';
-
-    beforeEach(() => {
-        resetModules();
+    itWithContext('should produce valid script content without literal newlines in strings', () => {
         const vscode = require('vscode');
+        let htmlContent = '';
 
-        htmlContent = '';
-
-        // Override the mock implementation to capture HTML content
         vscode.window.createWebviewPanel.mockImplementation(() => {
             const webviewBase = {
                 onDidReceiveMessage: jest.fn(),
@@ -44,22 +45,11 @@ describe('Webview Script Integrity', () => {
             };
         });
 
-        // Re-require TerminalPanel so it uses the fresh mock state
-        const terminalPanelModule = require('../../src/terminal-panel');
-        TerminalPanel = terminalPanelModule.TerminalPanel;
+        const terminalPanelModule = loadTerminalPanel();
+        const TerminalPanel = terminalPanelModule.TerminalPanel;
 
-        // CRITICAL: Ensure static state is cleared
         TerminalPanel.currentPanel = null;
-    });
 
-    afterEach(() => {
-        mock.restore();
-        jest.clearAllMocks();
-        resetModules();
-    });
-
-    it('should produce valid script content without literal newlines in strings', () => {
-        const vscode = require('vscode');
         TerminalPanel.setExtensionUri(vscode.Uri.file('/extension'));
 
         TerminalPanel.show({
@@ -67,14 +57,13 @@ describe('Webview Script Integrity', () => {
             runCommand: async () => ({})
         });
 
-        // If this is failing with "", verify TerminalPanel.show() was actually called 
-        // and didn't return early due to currentPanel.
         expect(htmlContent).toBeTruthy();
 
         const strictPattern = /\.indexOf\('[\r\n]+', start\)/;
         expect(htmlContent).not.toMatch(strictPattern);
 
-        // Ensure our fix is present
         expect(htmlContent).toContain('String.fromCharCode(10)');
+
+        mock.restore();
     });
 });

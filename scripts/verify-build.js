@@ -9,16 +9,6 @@ if (!fs.existsSync(extensionJs)) {
     process.exit(1);
 }
 
-// Check for native modules if sentry is used
-const files = fs.readdirSync(distDir);
-const nodeFiles = files.filter(f => f.endsWith('.node'));
-
-if (nodeFiles.length === 0) {
-    console.warn('WARNING: No .node files found in dist/. If Sentry profiling is enabled, this will cause activation to fail.');
-} else {
-    console.log(`Found ${nodeFiles.length} native modules in dist/.`);
-}
-
 // Check for webview assets
 const uiSharedDir = path.join(distDir, 'ui-shared');
 if (!fs.existsSync(uiSharedDir) || fs.readdirSync(uiSharedDir).length === 0) {

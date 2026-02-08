@@ -5,6 +5,7 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 const vscode = require('vscode');
+const { getEnv } = require('./runtime-context');
 const pkg = require('../package.json');
 const https = require('https');
 const { filterMcpLogs } = require('./log-utils');
@@ -499,7 +500,8 @@ class StataMcpClient {
 
         // Try to fetch latest version from PyPI before connecting, if not already fetched.
         // We do this here so it only happens once per client lifecycle.
-        if (!this._pypiVersion && !process.env.MCP_STATA_PACKAGE_SPEC) {
+        const env = getEnv();
+        if (!this._pypiVersion && !env.MCP_STATA_PACKAGE_SPEC) {
             try {
                 const { latest, all } = await this._fetchLatestVersion();
                 this._pypiVersion = latest;
@@ -636,12 +638,13 @@ class StataMcpClient {
 
         // Determine if we are using uvx or a local command
         const config = vscode.workspace.getConfiguration('stataMcp');
-        const uvCommand = process.env.MCP_STATA_UVX_CMD || 'uvx';
+        const env = getEnv();
+        const uvCommand = env.MCP_STATA_UVX_CMD || 'uvx';
         const serverConfig = this._loadServerConfig({ ignoreCommandArgs: this._forceLatestServer });
 
         const fallbackSpec = MCP_PACKAGE_NAME;
         const resolvedSpec = this._pypiVersion ? `${MCP_PACKAGE_NAME}==${this._pypiVersion}` : fallbackSpec;
-        const currentSpec = process.env.MCP_STATA_PACKAGE_SPEC || (this._forceLatestServer ? `${MCP_PACKAGE_NAME}@latest` : resolvedSpec);
+        const currentSpec = env.MCP_STATA_PACKAGE_SPEC || (this._forceLatestServer ? `${MCP_PACKAGE_NAME}@latest` : resolvedSpec);
 
         let finalCommand = serverConfig.command || uvCommand;
         let finalArgs = serverConfig.args || ['--refresh', '--refresh-package', MCP_PACKAGE_NAME, '--from', currentSpec, MCP_PACKAGE_NAME];
@@ -666,7 +669,7 @@ class StataMcpClient {
         }
 
         const setupTimeoutSeconds = (() => {
-            if (process.env.STATA_SETUP_TIMEOUT) return process.env.STATA_SETUP_TIMEOUT;
+            if (env.STATA_SETUP_TIMEOUT) return env.STATA_SETUP_TIMEOUT;
             const val = Number(config.get('setupTimeoutSeconds', 60));
             if (Number.isFinite(val) && val > 0) return String(Math.round(val));
             return '60';
@@ -738,7 +741,7 @@ class StataMcpClient {
             stderr: 'pipe',
             cwd: this._resolveWorkspaceRoot(),
             env: {
-                ...process.env,
+                ...env,
                 ...configuredEnv,
                 STATA_SETUP_TIMEOUT: setupTimeoutSeconds,
                 // Force Python to not buffer output
@@ -1976,8 +1979,9 @@ class StataMcpClient {
 
         if (!expanded) return path.normalize(fileDir);
 
+        const env = getEnv();
         const homeExpanded = expanded.startsWith('~')
-            ? path.join(process.env.HOME || process.env.USERPROFILE || '', expanded.slice(1))
+            ? path.join(env.HOME || env.USERPROFILE || '', expanded.slice(1))
             : expanded;
 
         if (path.isAbsolute(homeExpanded)) {
@@ -2352,6 +2356,7 @@ class StataMcpClient {
         const workspaceRoot = this._resolveWorkspaceRoot();
         const home = os.homedir();
         const platform = process.platform;
+        const env = getEnv();
 
         // 1. Host-determined path (PRIORITY: always check the current IDE's config first)
         const hostConfig = this._resolveHostMcpPath();
@@ -2371,7 +2376,7 @@ class StataMcpClient {
             if (platform === 'darwin') {
                 paths.add(path.join(home, 'Library', 'Application Support', 'Claude', 'claude_desktop_config.json'));
             } else if (platform === 'win32') {
-                const appData = process.env.APPDATA || (home ? path.join(home, 'AppData', 'Roaming') : null);
+                const appData = env.APPDATA || (home ? path.join(home, 'AppData', 'Roaming') : null);
                 if (appData) paths.add(path.join(appData, 'Claude', 'claude_desktop_config.json'));
             } else {
                 paths.add(path.join(home, '.config', 'Claude', 'claude_desktop_config.json'));
@@ -2391,7 +2396,7 @@ class StataMcpClient {
             if (!home) return null;
             if (platform === 'darwin') return path.join(home, 'Library', 'Application Support', codeDir, 'User', 'mcp.json');
             if (platform === 'win32') {
-                const roaming = process.env.APPDATA || (home ? path.join(home, 'AppData', 'Roaming') : null);
+                const roaming = env.APPDATA || (home ? path.join(home, 'AppData', 'Roaming') : null);
                 return roaming ? path.join(roaming, codeDir, 'User', 'mcp.json') : null;
             }
             return path.join(home, '.config', codeDir, 'User', 'mcp.json');
@@ -2406,12 +2411,13 @@ class StataMcpClient {
         const appName = (vscode.env?.appName || '').toLowerCase();
         const home = os.homedir();
         const platform = process.platform;
+        const env = getEnv();
         const codePath = (codeDir) => {
             if (!home) return null;
             if (platform === 'darwin') return path.join(home, 'Library', 'Application Support', codeDir, 'User', 'mcp.json');
             if (platform === 'win32') {
-                const envAppData = (process.env.APPDATA && process.env.APPDATA !== 'undefined' && process.env.APPDATA !== 'null' && process.env.APPDATA !== '')
-                    ? process.env.APPDATA
+                const envAppData = (env.APPDATA && env.APPDATA !== 'undefined' && env.APPDATA !== 'null' && env.APPDATA !== '')
+                    ? env.APPDATA
                     : null;
                 const roaming = envAppData || (home ? path.join(home, 'AppData', 'Roaming') : null);
                 if (!roaming) return null;
@@ -2436,7 +2442,7 @@ class StataMcpClient {
                 return path.join(home, 'Library', 'Application Support', 'Antigravity', 'User', 'mcp.json');
             }
             if (platform === 'win32') {
-                const roaming = process.env.APPDATA || path.join(home, 'AppData', 'Roaming');
+                const roaming = env.APPDATA || path.join(home, 'AppData', 'Roaming');
                 return path.join(roaming, 'Antigravity', 'User', 'mcp.json');
             }
             return path.join(home, '.antigravity', 'mcp.json');

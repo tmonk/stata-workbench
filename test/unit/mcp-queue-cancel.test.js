@@ -1,6 +1,6 @@
 const { describe, it, beforeEach, afterEach, expect, jest } = require('bun:test');
 const sinon = require('sinon');
-const vscodeMock = require('../mocks/vscode');
+const { withTestContext } = require('../helpers/test-context');
 
 // Mock MCP SDK
 const ClientMock = class {
@@ -17,7 +17,6 @@ const StdioClientTransportMock = class {
 };
 
 const { mock: bunMock } = require('bun:test');
-bunMock.module('vscode', () => vscodeMock);
 bunMock.module('@modelcontextprotocol/sdk/client/stdio.js', () => ({ StdioClientTransport: StdioClientTransportMock }));
 bunMock.module('@modelcontextprotocol/sdk/client/index.js', () => ({ Client: ClientMock }));
 bunMock.module('@modelcontextprotocol/sdk/types', () => ({
@@ -38,6 +37,7 @@ const waitForCondition = async (predicate, { timeoutMs = 500, intervalMs = 10 } 
 };
 
 describe('McpClient Queue and Cancellation', () => {
+    const itWithContext = (name, fn) => it(name, () => withTestContext({}, fn));
     const createClient = () => {
         const client = new McpClient();
         client._log = () => {};
@@ -62,7 +62,7 @@ describe('McpClient Queue and Cancellation', () => {
     };
 
     describe('Queue Serialization', () => {
-        it('should execute commands sequentially', async () => {
+        itWithContext('should execute commands sequentially', async () => {
             const client = createClient();
             const executionOrder = [];
             
@@ -89,7 +89,7 @@ describe('McpClient Queue and Cancellation', () => {
             ]);
         });
 
-        it('should emit "queued" status when multiple tasks are pending', async () => {
+        itWithContext('should emit "queued" status when multiple tasks are pending', async () => {
             const client = createClient();
             const statuses = [];
             client.onStatusChanged(s => statuses.push(s));
@@ -117,7 +117,7 @@ describe('McpClient Queue and Cancellation', () => {
     });
 
     describe('Cancellation by runId', () => {
-        it('should cancel a queued task by runId', async () => {
+        itWithContext('should cancel a queued task by runId', async () => {
             const client = createClient();
             // Block the first task to keep the second in queue
             let resolveFirst;
@@ -152,7 +152,7 @@ describe('McpClient Queue and Cancellation', () => {
             }
         });
 
-        it('should cancel an active task by runId and call break_session', async () => {
+        itWithContext('should cancel an active task by runId and call break_session', async () => {
             const client = createClient();
             let resolveFirst;
             const firstPromise = new Promise(r => resolveFirst = r);
@@ -187,7 +187,7 @@ describe('McpClient Queue and Cancellation', () => {
             expect(client._breakSession.calledOnce).toBe(true);
         });
 
-        it('should suppress output after cancellation', async () => {
+        itWithContext('should suppress output after cancellation', async () => {
             const client = createClient();
             const onLog = sinon.stub();
             const runId = 'cancel-me';
@@ -218,7 +218,7 @@ describe('McpClient Queue and Cancellation', () => {
     });
 
     describe('Tool Name Mapping', () => {
-        it('should resolve tool names based on discovered mapping', async () => {
+        itWithContext('should resolve tool names based on discovered mapping', async () => {
             const client = createClient();
             // Mock listTools to return prefixed names
             const mockClient = new ClientMock();
@@ -238,7 +238,7 @@ describe('McpClient Queue and Cancellation', () => {
             expect(client._resolveToolName('break_session')).toBe('mcp_stata_break_session');
         });
 
-        it('should use resolved name in _callTool', async () => {
+        itWithContext('should use resolved name in _callTool', async () => {
             const client = createClient();
             // Restore real _callTool for this test
             client._callTool = McpClient.prototype._callTool.bind(client);
@@ -258,7 +258,7 @@ describe('McpClient Queue and Cancellation', () => {
     });
 
     describe('Stop Functionality', () => {
-        it('cancelAll should cancel all queued and active tasks', async () => {
+        itWithContext('cancelAll should cancel all queued and active tasks', async () => {
             const client = createClient();
             client._breakSession = sinon.stub().resolves();
             client._ensureClient = sinon.stub().resolves({});

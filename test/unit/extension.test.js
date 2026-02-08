@@ -1,138 +1,53 @@
 const { describe, it, beforeEach, afterEach, expect, jest } = require('bun:test');
+const { AsyncLocalStorage } = require('async_hooks');
 const path = require('path');
+const { withTestContext } = require('../helpers/test-context');
+const { createExtensionHarness } = require('../helpers/extension-harness');
 
-const resetModules = () => {
-    for (const key of Object.keys(require.cache)) {
-        delete require.cache[key];
-    }
-};
-
-const mockCjsModule = (modulePath, factory) => {
-    const resolved = require.resolve(modulePath);
-    const existing = require.cache[resolved];
-    require.cache[resolved] = {
-        id: resolved,
-        filename: resolved,
-        loaded: true,
-        exports: factory()
-    };
-    return () => {
-        if (existing) {
-            require.cache[resolved] = existing;
-        } else {
-            delete require.cache[resolved];
+const harnessStore = new AsyncLocalStorage();
+const getHarness = () => harnessStore.getStore();
+const createProxy = (getter) => new Proxy(function () {}, {
+    apply(_target, thisArg, args) {
+        const target = getter();
+        return target?.apply?.(thisArg, args);
+    },
+    get(_target, prop) {
+        const target = getter();
+        const value = target?.[prop];
+        const isMockFunction = typeof value === 'function' && (value._isMockFunction || value.mock);
+        if (typeof value === 'function' && !isMockFunction) {
+            return value.bind(target);
         }
-    };
-};
+        return value;
+    },
+    set(_target, prop, value) {
+        const target = getter();
+        if (!target) return false;
+        target[prop] = value;
+        return true;
+    }
+});
+
+const extension = createProxy(() => getHarness()?.extension);
+const vscode = createProxy(() => getHarness()?.vscode);
+const fs = createProxy(() => getHarness()?.fs);
+const cp = createProxy(() => getHarness()?.cp);
+const mcpClientMock = createProxy(() => getHarness()?.mcpClientMock);
+const spawnSync = createProxy(() => getHarness()?.cp?.spawnSync);
 
 describe('extension unit tests', () => {
-    let extension;
-    let vscode;
-    let fs;
-    let spawnSync;
-    let fsOriginals;
-    let cpOriginalSpawnSync;
-    let restoreModuleMocks = [];
-    let mcpClientMock;
-    let originalUvCmdEnv;
-
-    const setupMocks = () => {
-        resetModules();
-        originalUvCmdEnv = process.env.MCP_STATA_UVX_CMD;
-        delete process.env.MCP_STATA_UVX_CMD;
-
-        // Stub builtin modules in-place
-        fs = require('fs');
-        fsOriginals = {
-            existsSync: fs.existsSync,
-            readFileSync: fs.readFileSync,
-            writeFileSync: fs.writeFileSync,
-            mkdirSync: fs.mkdirSync
-        };
-        fs.existsSync = jest.fn();
-        fs.readFileSync = jest.fn();
-        fs.writeFileSync = jest.fn();
-        fs.mkdirSync = jest.fn();
-
-        const cp = require('child_process');
-        cpOriginalSpawnSync = cp.spawnSync;
-        cp.spawnSync = jest.fn().mockReturnValue({ status: 0, stdout: '', stderr: '' });
-        spawnSync = cp.spawnSync;
-
-        // Mock internal modules to avoid side effects
-        mcpClientMock = {
-            setLogger: jest.fn(),
-            onStatusChanged: jest.fn().mockReturnValue({ dispose: jest.fn() }),
-            dispose: jest.fn(),
-            connect: jest.fn().mockResolvedValue({}),
-            runSelection: jest.fn().mockResolvedValue({}),
-            getUiChannel: jest.fn().mockResolvedValue(null),
-            hasConfig: jest.fn().mockReturnValue(false),
-            getServerConfig: jest.fn().mockReturnValue({ command: null, args: null, env: {}, configPath: null })
-        };
-        restoreModuleMocks = [];
-        restoreModuleMocks.push(mockCjsModule('../../src/mcp-client', () => ({
-            StataMcpClient: jest.fn().mockImplementation(() => mcpClientMock),
-            client: mcpClientMock
-        })));
-        restoreModuleMocks.push(mockCjsModule('../../src/terminal-panel', () => ({
-            TerminalPanel: {
-                setExtensionUri: jest.fn(),
-                addEntry: jest.fn(),
-                show: jest.fn(),
-                setLogProvider: jest.fn(),
-                startStreamingEntry: jest.fn().mockReturnValue(null),
-                appendStreamingLog: jest.fn(),
-                updateStreamingProgress: jest.fn(),
-                finishStreamingEntry: jest.fn(),
-                failStreamingEntry: jest.fn()
-            }
-        })));
-        restoreModuleMocks.push(mockCjsModule('../../src/data-browser-panel', () => ({
-            DataBrowserPanel: { createOrShow: jest.fn(), setLogger: jest.fn(), refresh: jest.fn() }
-        })));
-        restoreModuleMocks.push(mockCjsModule('../../src/artifact-utils', () => ({
-            openArtifact: jest.fn()
-        })));
-        vscode = require('vscode');
-
-        // Reset the shared configuration mock implementation to defaults for each test
-        const config = vscode.workspace.getConfiguration();
-        config.get.mockImplementation((key, defaultValue) => {
-            if (key === 'requestTimeoutMs') return 1000;
-            if (key === 'runFileWorkingDirectory') return '';
-            if (key === 'autoRevealOutput') return true;
-            if (key === 'autoConfigureMcp') return true;
-            return defaultValue;
-        });
-
-        extension = require('../../src/extension');
-    };
-
-    beforeEach(() => {
-        setupMocks();
-    });
-
-    afterEach(() => {
-        restoreModuleMocks.forEach((restore) => restore());
-        restoreModuleMocks = [];
-        process.env.MCP_STATA_UVX_CMD = originalUvCmdEnv;
-        if (fs && fsOriginals) {
-            fs.existsSync = fsOriginals.existsSync;
-            fs.readFileSync = fsOriginals.readFileSync;
-            fs.writeFileSync = fsOriginals.writeFileSync;
-            fs.mkdirSync = fsOriginals.mkdirSync;
-        }
-        if (cpOriginalSpawnSync) {
-            const cp = require('child_process');
-            cp.spawnSync = cpOriginalSpawnSync;
-        }
-        jest.clearAllMocks();
-        resetModules();
+    const itWithHarness = (name, fn) => it(name, () => {
+        const harness = createExtensionHarness();
+        return withTestContext({
+            vscode: harness.vscode,
+            fs: harness.fs,
+            childProcess: harness.cp,
+            mcpClient: harness.mcpClientMock
+        }, (ctx) => harnessStore.run(harness, () => fn(ctx)));
     });
 
     describe('output log streaming', () => {
-        it('streams raw logs to Output channel when enabled', async () => {
+        itWithHarness('streams raw logs to Output channel when enabled', async () => {
             const config = vscode.workspace.getConfiguration();
             config.get.mockImplementation((key, def) => {
                 if (key === 'showAllLogsInOutput') return true;
@@ -186,12 +101,13 @@ describe('extension unit tests', () => {
     });
 
     describe('refreshMcpPackage', () => {
-        it('refreshes to latest version when uvx succeeds', () => {
+        itWithHarness('refreshes to latest version when uvx succeeds', () => {
             spawnSync.mockReturnValue({ status: 0, stdout: '2.0.0\n', stderr: '' });
             const version = extension.refreshMcpPackage();
             expect(version).toEqual('2.0.0');
-            expect(spawnSync).toHaveBeenCalled();
-            const [cmd, args] = spawnSync.mock.calls[0];
+            const spawnSyncMock = getHarness().cp.spawnSync;
+            expect(spawnSyncMock).toHaveBeenCalled();
+            const [cmd, args] = spawnSyncMock.mock.calls[0];
             expect(cmd).toEqual('uvx');
             expect(args).toContain('--refresh');
             expect(args).toContain('--refresh-package');
@@ -199,16 +115,16 @@ describe('extension unit tests', () => {
             expect(args).toContain('mcp-stata@latest');
         });
 
-        it('returns null when uvx fails', () => {
+        itWithHarness('returns null when uvx fails', () => {
             spawnSync.mockReturnValue({ status: 1, stdout: '', stderr: 'boom' });
             const version = extension.refreshMcpPackage();
             expect(version).toBeNull();
-            expect(spawnSync).toHaveBeenCalled();
+            expect(getHarness().cp.spawnSync).toHaveBeenCalled();
         });
     });
 
     describe('writeMcpConfig', () => {
-        it('writeMcpConfig (VS Code host) writes only servers entry, merges env, and removes cursor mcp_stata', () => {
+        itWithHarness('writeMcpConfig (VS Code host) writes only servers entry, merges env, and removes cursor mcp_stata', () => {
             fs.existsSync.mockReturnValue(true);
             fs.readFileSync.mockReturnValue(JSON.stringify({
                 servers: {
@@ -268,7 +184,7 @@ describe('extension unit tests', () => {
             });
         });
 
-        it('writeMcpConfig (Cursor host) writes only mcpServers entry, merges env, and removes VS Code mcp_stata', () => {
+        itWithHarness('writeMcpConfig (Cursor host) writes only mcpServers entry, merges env, and removes VS Code mcp_stata', () => {
             fs.existsSync.mockReturnValue(true);
             fs.readFileSync.mockReturnValue(JSON.stringify({
                 servers: {
@@ -328,7 +244,7 @@ describe('extension unit tests', () => {
             });
         });
 
-        it('writeMcpConfig auto-updates old mcp.json formatting to the new uvx command', () => {
+        itWithHarness('writeMcpConfig auto-updates old mcp.json formatting to the new uvx command', () => {
             fs.existsSync.mockReturnValue(true);
             fs.readFileSync.mockReturnValue(JSON.stringify({
                 servers: {
@@ -367,21 +283,21 @@ describe('extension unit tests', () => {
     });
 
     describe('getUvInstallCommand', () => {
-        it('returns curl/sh installer on macOS', () => {
+        itWithHarness('returns curl/sh installer on macOS', () => {
             const result = extension.getUvInstallCommand('darwin');
             expect(result.command).toEqual('sh');
             expect(result.args).toEqual(['-c', 'curl -LsSf https://astral.sh/uv/install.sh | sh']);
             expect(result.display).toContain('curl -LsSf https://astral.sh/uv/install.sh | sh');
         });
 
-        it('returns curl/sh installer on Linux', () => {
+        itWithHarness('returns curl/sh installer on Linux', () => {
             const result = extension.getUvInstallCommand('linux');
             expect(result.command).toEqual('sh');
             expect(result.args).toEqual(['-c', 'curl -LsSf https://astral.sh/uv/install.sh | sh']);
             expect(result.display).toContain('curl -LsSf https://astral.sh/uv/install.sh | sh');
         });
 
-        it('returns powershell installer on Windows', () => {
+        itWithHarness('returns powershell installer on Windows', () => {
             const result = extension.getUvInstallCommand('win32');
             expect(result.command).toEqual('powershell');
             expect(result.args).toEqual(['-NoLogo', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', 'iwr https://astral.sh/uv/install.ps1 -useb | iex']);
@@ -391,7 +307,7 @@ describe('extension unit tests', () => {
     });
 
     describe('promptInstallMcpCli', () => {
-        it('shows missing CLI prompt only on first invocation', async () => {
+        itWithHarness('shows missing CLI prompt only on first invocation', async () => {
             const globalState = { get: jest.fn().mockReturnValue(false), update: jest.fn().mockResolvedValue() };
             const context = { globalState };
 
@@ -404,7 +320,7 @@ describe('extension unit tests', () => {
             expect(vscode.window.showErrorMessage).not.toHaveBeenCalled();
         });
 
-        it('skips prompt when already recorded', async () => {
+        itWithHarness('skips prompt when already recorded', async () => {
             const globalState = { get: jest.fn().mockReturnValue(true), update: jest.fn().mockResolvedValue() };
             const context = { globalState };
 
@@ -415,7 +331,7 @@ describe('extension unit tests', () => {
     });
 
     describe('existing mcp config', () => {
-        it('respects opt-out setting and skips auto config', async () => {
+        itWithHarness('respects opt-out setting and skips auto config', async () => {
             fs.existsSync.mockReturnValue(false);
             fs.readFileSync.mockReturnValue('');
 
@@ -445,7 +361,7 @@ describe('extension unit tests', () => {
             expect(fs.writeFileSync).not.toHaveBeenCalled();
         });
 
-        it('detects existing servers in config files', () => {
+        itWithHarness('detects existing servers in config files', () => {
             fs.existsSync.mockReturnValue(true);
             fs.readFileSync.mockReturnValue(JSON.stringify({
                 servers: { mcp_stata: { command: 'uvx', args: [] } }
@@ -455,7 +371,7 @@ describe('extension unit tests', () => {
             expect(extension.hasExistingMcpConfig(ctx)).toBe(true);
         });
 
-        it('suppresses missing CLI prompt when config already present', async () => {
+        itWithHarness('suppresses missing CLI prompt when config already present', async () => {
             mcpClientMock.hasConfig.mockReturnValue(true);
             fs.existsSync.mockImplementation((p) => p.includes('mcp.json'));
             fs.readFileSync.mockReturnValue(JSON.stringify({
@@ -488,7 +404,7 @@ describe('extension unit tests', () => {
             expect(globalState.update).toHaveBeenCalledWith(expect.any(String), true);
         });
 
-        it('detects cursor-format configs in user storage', () => {
+        itWithHarness('detects cursor-format configs in user storage', () => {
             fs.existsSync.mockReturnValue(true);
             fs.readFileSync.mockReturnValue(JSON.stringify({
                 mcpServers: {
@@ -503,9 +419,9 @@ describe('extension unit tests', () => {
             expect(extension.hasExistingMcpConfig(ctx)).toBe(true);
         });
 
-        it('resolves VS Code path on windows', () => {
-            const originalAppData = process.env.APPDATA;
-            delete process.env.APPDATA;
+        itWithHarness('resolves VS Code path on windows', ({ env }) => {
+            const originalAppData = env.APPDATA;
+            delete env.APPDATA;
 
             const ctx = {
                 mcpPlatformOverride: 'win32',
@@ -518,10 +434,10 @@ describe('extension unit tests', () => {
             expect(target.configPath).toEqual(expected);
             expect(target.writeCursor).toBe(false);
 
-            process.env.APPDATA = originalAppData;
+            env.APPDATA = originalAppData;
         });
 
-        it('resolves Cursor path on windows', () => {
+        itWithHarness('resolves Cursor path on windows', () => {
             const ctx = {
                 mcpPlatformOverride: 'win32',
                 mcpHomeOverride: 'C:\\Users\\Bob',
@@ -534,7 +450,7 @@ describe('extension unit tests', () => {
             expect(target.writeCursor).toBe(true);
         });
 
-        it('resolves Windsurf path on linux', () => {
+        itWithHarness('resolves Windsurf path on linux', () => {
             const ctx = {
                 mcpPlatformOverride: 'linux',
                 mcpHomeOverride: '/home/alex',
@@ -547,7 +463,7 @@ describe('extension unit tests', () => {
             expect(target.writeCursor).toBe(true);
         });
 
-        it('resolves Windsurf Next path on mac', () => {
+        itWithHarness('resolves Windsurf Next path on mac', () => {
             const ctx = {
                 mcpPlatformOverride: 'darwin',
                 mcpHomeOverride: '/Users/tom',
@@ -560,9 +476,9 @@ describe('extension unit tests', () => {
             expect(target.writeCursor).toBe(true);
         });
 
-        it('resolves Antigravity path on windows', () => {
-            const originalAppData = process.env.APPDATA;
-            process.env.APPDATA = path.join('C:\\Users\\Bob', 'AppData', 'Roaming');
+        itWithHarness('resolves Antigravity path on windows', ({ env }) => {
+            const originalAppData = env.APPDATA;
+            env.APPDATA = path.join('C:\\Users\\Bob', 'AppData', 'Roaming');
 
             const ctx = {
                 mcpPlatformOverride: 'win32',
@@ -578,10 +494,10 @@ describe('extension unit tests', () => {
             expect(target.configPath).toEqual(expected);
             expect(target.writeCursor).toBe(true);
 
-            process.env.APPDATA = originalAppData;
+            env.APPDATA = originalAppData;
         });
 
-        it('resolves VS Code Insiders path on linux', () => {
+        itWithHarness('resolves VS Code Insiders path on linux', () => {
             const ctx = {
                 mcpPlatformOverride: 'linux',
                 mcpHomeOverride: '/home/dev',
@@ -594,7 +510,7 @@ describe('extension unit tests', () => {
             expect(target.writeCursor).toBe(false);
         });
 
-        it('honors explicit override path and writes both formats', () => {
+        itWithHarness('honors explicit override path and writes both formats', () => {
             const ctx = { mcpConfigPath: '/tmp/override/mcp.json' };
             const target = extension.getMcpConfigTarget(ctx);
             expect(target.configPath).toEqual('/tmp/override/mcp.json');
@@ -602,9 +518,9 @@ describe('extension unit tests', () => {
             expect(target.writeVscode).toBe(false);
         });
 
-        it('falls back to home/AppData/Roaming when APPDATA unset', () => {
-            const originalAppData = process.env.APPDATA;
-            delete process.env.APPDATA;
+        itWithHarness('falls back to home/AppData/Roaming when APPDATA unset', ({ env }) => {
+            const originalAppData = env.APPDATA;
+            delete env.APPDATA;
 
             const ctx = {
                 mcpPlatformOverride: 'win32',
@@ -617,15 +533,15 @@ describe('extension unit tests', () => {
             expect(target.configPath).toEqual(expected);
             expect(target.writeCursor).toBe(false);
 
-            process.env.APPDATA = originalAppData;
+            env.APPDATA = originalAppData;
         });
 
-        it('returns null and logs when home cannot be resolved', () => {
+        itWithHarness('returns null and logs when home cannot be resolved', () => {
             const target = extension.getMcpConfigTarget({ mcpHomeOverride: null, mcpPlatformOverride: 'linux' });
             expect(target).toBeNull();
         });
 
-        it('skips write when no targets selected', () => {
+        itWithHarness('skips write when no targets selected', () => {
             fs.writeFileSync.mockClear();
             extension.writeMcpConfig({ configPath: '/tmp/none.json', writeVscode: false, writeCursor: false });
             expect(fs.writeFileSync).not.toHaveBeenCalled();
@@ -633,7 +549,7 @@ describe('extension unit tests', () => {
     });
 
     describe('getClaudeMcpConfigTarget', () => {
-        it('resolves user scope Claude config path', () => {
+        itWithHarness('resolves user scope Claude config path', () => {
             const ctx = {
                 mcpHomeOverride: '/home/alex',
                 extensionMode: vscode.ExtensionMode.Test
@@ -645,7 +561,7 @@ describe('extension unit tests', () => {
             expect(target.writeVscode).toBe(false);
         });
 
-        it('resolves project scope Claude config path', () => {
+        itWithHarness('resolves project scope Claude config path', () => {
             const ctx = {
                 mcpWorkspaceOverride: '/workspace',
                 extensionMode: vscode.ExtensionMode.Test
@@ -659,13 +575,9 @@ describe('extension unit tests', () => {
     });
 
     describe('uv discovery and config validation', () => {
-        beforeEach(() => {
-            // Note: setupMocks is already called in the top-level beforeEach
-            // But we want to ensure spawnSync fails by default for these tests
+        itWithHarness('findUvBinary prioritizes system PATH over bundled binary', ({ env }) => {
+            delete env.MCP_STATA_UVX_CMD;
             spawnSync.mockReturnValue({ status: 1, error: new Error('not found') });
-        });
-
-        it('findUvBinary prioritizes system PATH over bundled binary', () => {
             // 1. Mock system uv is present, but uvx is NOT
             spawnSync.mockImplementation((cmd, args) => {
                 if (cmd === 'uv' && args[0] === '--version') {
@@ -689,7 +601,9 @@ describe('extension unit tests', () => {
             expect(found).toBe('uv');
         });
 
-        it('findUvBinary falls back to bundled binary if system PATH fails', () => {
+        itWithHarness('findUvBinary falls back to bundled binary if system PATH fails', ({ env }) => {
+            delete env.MCP_STATA_UVX_CMD;
+            spawnSync.mockReturnValue({ status: 1, error: new Error('not found') });
             const bundledPath = path.join('/mock/extension', 'bin', `${process.platform}-${process.arch}`, 'uvx');
 
             // 1. Mock ALL system path checks fail, but bundled check succeeds
@@ -715,7 +629,8 @@ describe('extension unit tests', () => {
             expect(found).toBe(bundledPath);
         });
 
-        it('isMcpConfigWorking returns true for functional commands', () => {
+        itWithHarness('isMcpConfigWorking returns true for functional commands', () => {
+            spawnSync.mockReturnValue({ status: 1, error: new Error('not found') });
             const api = extension.activate({ 
                 extensionUri: { fsPath: '/mock/extension' },
                 globalState: { get: jest.fn(), update: jest.fn().mockResolvedValue(true) },
@@ -727,7 +642,8 @@ describe('extension unit tests', () => {
             expect(api.isMcpConfigWorking({ command: 'uvx' })).toBe(true);
         });
 
-        it('isMcpConfigWorking returns false for broken commands', () => {
+        itWithHarness('isMcpConfigWorking returns false for broken commands', () => {
+            spawnSync.mockReturnValue({ status: 1, error: new Error('not found') });
             const api = extension.activate({ 
                 extensionUri: { fsPath: '/mock/extension' },
                 globalState: { get: jest.fn(), update: jest.fn().mockResolvedValue(true) },
@@ -739,7 +655,8 @@ describe('extension unit tests', () => {
             expect(api.isMcpConfigWorking({ command: 'broken' })).toBe(false);
         });
 
-        it('isMcpConfigCurrent returns false if command does not match and is not uv-like', () => {
+        itWithHarness('isMcpConfigCurrent returns false if command does not match and is not uv-like', () => {
+            spawnSync.mockReturnValue({ status: 1, error: new Error('not found') });
             const api = extension.activate({ 
                 extensionUri: { fsPath: '/mock/extension' },
                 globalState: { get: jest.fn(), update: jest.fn().mockResolvedValue(true) },
@@ -750,7 +667,8 @@ describe('extension unit tests', () => {
             expect(api.isMcpConfigCurrent({ command: 'python' }, 'uvx')).toBe(false);
         });
 
-        it('isMcpConfigCurrent returns true if command is uv-like and args match package', () => {
+        itWithHarness('isMcpConfigCurrent returns true if command is uv-like and args match package', () => {
+            spawnSync.mockReturnValue({ status: 1, error: new Error('not found') });
             const api = extension.activate({ 
                 extensionUri: { fsPath: '/mock/extension' },
                 globalState: { get: jest.fn(), update: jest.fn().mockResolvedValue(true) },
@@ -762,7 +680,8 @@ describe('extension unit tests', () => {
             expect(api.isMcpConfigCurrent(config, 'uvx')).toBe(true);
         });
 
-        it('isMcpConfigCurrent returns false if version mismatch', () => {
+        itWithHarness('isMcpConfigCurrent returns false if version mismatch', () => {
+            spawnSync.mockReturnValue({ status: 1, error: new Error('not found') });
             const api = extension.activate({ 
                 extensionUri: { fsPath: '/mock/extension' },
                 globalState: { get: jest.fn(), update: jest.fn().mockResolvedValue(true) },
@@ -774,7 +693,8 @@ describe('extension unit tests', () => {
             expect(api.isMcpConfigCurrent(config, 'uvx', '1.1.0')).toBe(false);
         });
 
-        it('activate flow: uses existing config if working and current', () => {
+        itWithHarness('activate flow: uses existing config if working and current', () => {
+            spawnSync.mockReturnValue({ status: 1, error: new Error('not found') });
             mcpClientMock.getServerConfig.mockReturnValue({
                 command: 'uvx',
                 args: ['--from', 'mcp-stata@latest', 'mcp-stata'],
@@ -796,7 +716,8 @@ describe('extension unit tests', () => {
             expect(fs.writeFileSync).not.toHaveBeenCalled();
         });
 
-        it('activate flow: updates config if working but not current (outdated version)', () => {
+        itWithHarness('activate flow: updates config if working but not current (outdated version)', () => {
+            spawnSync.mockReturnValue({ status: 1, error: new Error('not found') });
             // Existing config has old version
             const existingConfig = {
                 command: 'uvx',
@@ -854,7 +775,7 @@ describe('extension unit tests', () => {
     });
 
     describe('Stata Startup Loading', () => {
-        it('calls connect() on activation when loadStataOnStartup is true', async () => {
+        itWithHarness('calls connect() on activation when loadStataOnStartup is true', async () => {
             const config = vscode.workspace.getConfiguration();
             config.get.mockImplementation((key, def) => {
                 if (key === 'loadStataOnStartup') return true;
@@ -875,7 +796,7 @@ describe('extension unit tests', () => {
             expect(mcpClientMock.connect).toHaveBeenCalled();
         });
 
-        it('does NOT call connect() on activation when loadStataOnStartup is false', async () => {
+        itWithHarness('does NOT call connect() on activation when loadStataOnStartup is false', async () => {
             const config = vscode.workspace.getConfiguration();
             config.get.mockImplementation((key, def) => {
                 if (key === 'loadStataOnStartup') return false;

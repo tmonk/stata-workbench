@@ -1,0 +1,1598 @@
+$ bun test --concurrent --preload ./test/bun-preload.js test/unit && bun run test:integration:parallel
+bun test v1.3.6 (d530ed99)
+
+test/unit/mcp-break-session.test.js:
+[mcp-stata] setLogger called - logger is now active
+[mcp-stata] starting operation: run_selection (pending: 1)
+[mcp-stata] tool run_command_background completed in 0ms
+[mcp-stata] setLogger called - logger is now active
+[mcp-stata] starting operation: run_selection (pending: 1)
+[mcp-stata] Sending break_session (run unknown)
+[mcp-stata] tool break_session completed in 0ms
+[mcp-stata] operation run_selection cancelled after 12ms
+[mcp-stata] tool break_session completed in 0ms
+(pass) McpClient Break Session > should successfully break a long-running forvalues loop [17.22ms]
+[mcp-stata] Sending break_session (run unknown)
+[mcp-stata] operation run_selection cancelled after 10ms
+[mcp-stata] starting operation: run_selection (pending: 1)
+[mcp-stata] operation run_selection completed in 0ms
+(pass) McpClient Break Session > should allow sending a NEW command immediately after break_session and NOT cancel it [22.79ms]
+
+test/unit/truncation_logic.test.js:
+(pass) Truncation Logic Regression Test > should split cleanly at a newline
+(pass) Truncation Logic Regression Test > should align to tag start if closer than newline
+(pass) Truncation Logic Regression Test > should align to tag start if no newline is found
+(pass) Truncation Logic Regression Test > should handle large limits correctly (start < 0 is not possible, but small start)
+
+test/unit/mcp-queue.test.js:
+(pass) StataMcpClient Queueing > should handle cancellation of queued tasks [51.21ms]
+(pass) StataMcpClient Queueing > should serialize multiple calls [62.44ms]
+(pass) StataMcpClient Queueing > should emit correct status transitions during queuing [61.96ms]
+(pass) StataMcpClient Queueing > should call onStarted when task actually begins [103.78ms]
+
+test/unit/pypi-versioning.test.js:
+(pass) McpClient PyPI Versioning (Sinon Stubbing) > _sortVersions > should correctly sort semantic versions [1.03ms]
+(pass) McpClient PyPI Versioning (Sinon Stubbing) > _fetchLatestVersion > should resolve with latest version and all versions on success [1.25ms]
+(pass) McpClient PyPI Versioning (Sinon Stubbing) > _fetchLatestVersion > should reject on non-200 status code [0.48ms]
+(pass) McpClient PyPI Versioning (Sinon Stubbing) > _fetchLatestVersion > should reject on timeout [12.07ms]
+(pass) McpClient PyPI Versioning (Sinon Stubbing) > _ensureClient implementation > should fetch from PyPI if not already cached and no env var set [1.27ms]
+(pass) McpClient PyPI Versioning (Sinon Stubbing) > _ensureClient implementation > should use fallback if PyPI fetch fails [0.85ms]
+
+test/unit/highlighting.test.js:
+(pass) Syntax Highlighting Logic (main.js) > should be defined [16.22ms]
+[Highlight] elements=1 chars=17
+[Highlight] style sample color=canvastext bg=rgba(0, 0, 0, 0)
+[Highlight] elements=1 chars=17 done in 10ms
+(pass) Syntax Highlighting Logic (main.js) > should highlight code blocks [17.34ms]
+[Highlight] elements=1 chars=2
+[Highlight] style sample color=canvastext bg=rgba(0, 0, 0, 0)
+[Highlight] elements=1 chars=2 done in 2ms
+(pass) Syntax Highlighting Logic (main.js) > should NOT add hljs class to empty prompts [5.02ms]
+[Highlight] elements=1 chars=19
+[Highlight] style sample color=canvastext bg=rgba(0, 0, 0, 0)
+[Highlight] elements=1 chars=19 done in 1ms
+(pass) Syntax Highlighting Logic (main.js) > should handle raw strings without prompt [4.01ms]
+[Highlight] elements=1 chars=9
+[Highlight] style sample color=canvastext bg=rgba(0, 0, 0, 0)
+[Highlight] elements=1 chars=9 done in 2ms
+(pass) Syntax Highlighting Logic (main.js) > should NOT destroy child elements (like smcl-hline) when highlighting [3.51ms]
+
+test/unit/repro_clearing.test.js:
+(pass) Terminal Clearing Reproduction > should not clear output when processing large content sequence [0.44ms]
+(pass) Terminal Clearing Reproduction > should handle exactly standard inputs without clearing [0.08ms]
+
+test/unit/html_consistency.test.js:
+(pass) HTML Output Consistency (Streaming vs Final) > should stay consistent when prompt is streamed separately from command [3.48ms]
+(pass) HTML Output Consistency (Streaming vs Final) > should collapse prompt with newline if content follows [0.07ms]
+(pass) HTML Output Consistency (Streaming vs Final) > should collapse prompt without space if content follows [0.04ms]
+(pass) HTML Output Consistency (Streaming vs Final) > should collapse newline even if prompt is the VERY LAST thing (nothing follows) [0.03ms]
+(pass) HTML Output Consistency (Streaming vs Final) > should handle partial prompts without spaces if they occur [0.02ms]
+(pass) HTML Output Consistency (Streaming vs Final) > should not have an unexpected empty line at the very end if input ends with newline [0.05ms]
+
+test/unit/mcp-queue-cancel.test.js:
+(pass) McpClient Queue and Cancellation > Cancellation by runId > should cancel a queued task by runId [0.78ms]
+(pass) McpClient Queue and Cancellation > Tool Name Mapping > should resolve tool names based on discovered mapping [0.64ms]
+(pass) McpClient Queue and Cancellation > Tool Name Mapping > should use resolved name in _callTool [0.32ms]
+(pass) McpClient Queue and Cancellation > Queue Serialization > should emit "queued" status when multiple tasks are pending [12.28ms]
+(pass) McpClient Queue and Cancellation > Cancellation by runId > should cancel an active task by runId and call break_session [18.33ms]
+(pass) McpClient Queue and Cancellation > Cancellation by runId > should suppress output after cancellation [18.56ms]
+(pass) McpClient Queue and Cancellation > Stop Functionality > cancelAll should cancel all queued and active tasks [16.84ms]
+(pass) McpClient Queue and Cancellation > Queue Serialization > should execute commands sequentially [41.56ms]
+
+test/unit/rc10.test.js:
+(pass) parseSMCL RC 10 and Amber Refinement > should not detect RC 10 from char(10) [0.17ms]
+(pass) parseSMCL RC 10 and Amber Refinement > should detect RC 10 from standalone r(10);
+(pass) parseSMCL RC 10 and Amber Refinement > should detect RC 10 from search tag
+(pass) parseSMCL RC 10 and Amber Refinement > should correctly set hasError when {err} tag is present
+(pass) parseSMCL RC 10 and Amber Refinement > determineSuccess Refinement > should treat RC 0 as success
+(pass) parseSMCL RC 10 and Amber Refinement > determineSuccess Refinement > should treat RC 1 as failure
+(pass) parseSMCL RC 10 and Amber Refinement > determineSuccess Refinement > should treat RC 9 as failure
+(pass) parseSMCL RC 10 and Amber Refinement > determineSuccess Refinement > should treat RC 10 as failure
+(pass) parseSMCL RC 10 and Amber Refinement > determineSuccess Refinement > should treat other RCs as failure
+
+test/unit/mcp-client.test.js:
+(pass) mcp-client > mcp-client normalizeResponse > keeps longest stdout including logText tail [0.49ms]
+(pass) mcp-client > mcp-client normalizeResponse > falls back to log tail for stderr on non-zero rc [0.35ms]
+(pass) mcp-client > McpClient > _resolveArtifactsFromList > should correctly resolve graph artifacts with export fallback [0.85ms]
+(pass) mcp-client > McpClient > _resolveArtifactsFromList > should handle export failures gracefully [0.34ms]
+(pass) mcp-client > McpClient > _normalizeResponse > prefers scml stderr payloads for errors [0.37ms]
+(pass) mcp-client > McpClient > _normalizeResponse > should not treat structured JSON content as stdout/contentText and should prefer error fields [0.20ms]
+(pass) mcp-client > McpClient > _normalizeResponse > preserves graph artifact arrays in normalized responses [0.18ms]
+(pass) mcp-client > McpClient > Artifact Parsing > _parseArtifactLikeJson should handle graph objects [0.36ms]
+(pass) mcp-client > McpClient > Artifact Parsing > _parseArtifactLikeJson should handle flat objects [0.02ms]
+(pass) mcp-client > McpClient > Artifact Parsing > _parseArtifactLikeJson should return null for invalid json
+(pass) mcp-client > McpClient > run > should enable artifact collection [1.22ms]
+(pass) mcp-client > McpClient > fetchGraph > enqueues export_graph with graph_name and format (no base64) [0.71ms]
+(pass) mcp-client > McpClient > getVariableList > enqueues get_variable_list and returns normalized list [0.51ms]
+(pass) mcp-client > McpClient > getVariableList > _normalizeVariableList handles strings, objects, and nested content [0.09ms]
+(pass) mcp-client > McpClient > getUiChannel > enqueues get_ui_channel and returns parsed result [0.66ms]
+(pass) mcp-client > McpClient > runFile > should honor resolved cwd when no workspace folders exist [0.82ms]
+(pass) mcp-client > McpClient > runFile > should respect explicitly provided cwd in options [0.44ms]
+(pass) mcp-client > McpClient > cwd propagation > runSelection should pass cwd through to run_command when provided [0.61ms]
+(pass) mcp-client > McpClient > cancellation > passes progressToken and signal to client.request when provided [0.52ms]
+(pass) mcp-client > McpClient > cancellation > treats AbortError as cancellation and surfaces a friendly message [0.53ms]
+(pass) mcp-client > McpClient > cancellation > cancelAll triggers active cancellation with a reason [4.25ms]
+(pass) mcp-client > McpClient > cancellation > cancelAll calls break_session when a background task is active [0.50ms]
+(pass) mcp-client > McpClient > log tailing > _drainActiveRunLog should append remaining log data to buffer [0.16ms]
+(pass) mcp-client > McpClient > log tailing > _tailLogLoop should forward read_log data to onLog until cancelled [1.05ms]
+(pass) mcp-client > McpClient > log tailing > runSelection should drain read_log when log_path is only present in tool response [0.85ms]
+(pass) mcp-client > McpClient > background task helpers > _awaitTaskDone resolves after task_done notification [0.45ms]
+(pass) mcp-client > McpClient > background task helpers > _awaitBackgroundResult wires task id and log path [0.44ms]
+(pass) mcp-client > McpClient > background task helpers > _extractLogPathFromResponse should strictly prioritize path over smcl_path [0.12ms]
+(pass) mcp-client > McpClient > background task helpers > _onLoggingMessage should handle object payload and strictly prioritize path [0.51ms]
+(pass) mcp-client > McpClient > background task helpers > _onLoggingMessage should allow logs to flow if logPath is not yet set [0.34ms]
+(pass) mcp-client > McpClient > background task helpers > _onLoggingMessage should strictly prioritize path over smcl_path in object payload [0.31ms]
+(pass) mcp-client > McpClient > _resolveRunFileCwd > should default to the file directory when unset [0.20ms]
+(pass) mcp-client > McpClient > _resolveRunFileCwd > should expand workspace and fileDir tokens [0.35ms]
+(pass) mcp-client > McpClient > _resolveRunFileCwd > should honor absolute paths [0.25ms]
+(pass) mcp-client > McpClient > _resolveRunFileCwd > should expand tilde to home directory [0.25ms]
+(pass) mcp-client > McpClient > _resolveRunFileCwd > should fall back to file directory when tokens are unknown [0.21ms]
+(pass) mcp-client > McpClient > _resolveRunFileCwd > should resolve relative paths against workspace root when available [0.51ms]
+(pass) mcp-client > McpClient > _resolveRunFileCwd > should resolve relative paths against process cwd when workspace is missing [0.33ms]
+(pass) mcp-client > McpClient > listGraphs > should resolve artifacts with client access [0.94ms]
+(pass) mcp-client > McpClient > listGraphs > should aggregate graph lists across multiple content chunks [0.68ms]
+(pass) mcp-client > McpClient > listGraphs > should handle text-wrapped graph lists [0.54ms]
+(pass) mcp-client > McpClient > _formatRecentStderr > should prioritize critical error lines [0.30ms]
+(pass) mcp-client > McpClient > _formatRecentStderr > should fall back to last 5 lines if no critical lines found [0.24ms]
+(pass) mcp-client > McpClient > _formatRecentStderr > should clear buffer on createClient [12.65ms]
+(pass) mcp-client > McpClient > _formatRecentStderr > should clear buffer when various success signals are seen [0.29ms]
+(pass) mcp-client > McpClient > _createClient Connection Handling > should enhance error message for Stata missing [81.38ms]
+(pass) mcp-client > McpClient > _createClient Connection Handling > should enhance error message for missing pystata package [109.22ms]
+(pass) mcp-client > McpClient > _createClient Connection Handling > should time out if connect hangs and close transport [1085.05ms]
+
+test/unit/smcl_layout.test.js:
+(pass) SMCL Layout Principles > should align text using {col} correctly [0.18ms]
+(pass) SMCL Layout Principles > should handle {col} after newline correctly [0.06ms]
+(pass) SMCL Layout Principles > should ignore {col} if already past column [0.04ms]
+(pass) SMCL Layout Principles > should handle {space} [0.01ms]
+(pass) SMCL Layout Principles > should handle {hline}
+(pass) SMCL Layout Principles > should handle {res:content} shorthand
+(pass) SMCL Layout Principles > should handle {ralign N:content} by outputting content at least [0.10ms]
+(pass) SMCL Layout Principles > should normalize 
+ to 
+ early [0.04ms]
+(pass) SMCL Layout Principles > Advanced Rendering > should handle paragraph settings {p # # #} [0.09ms]
+(pass) SMCL Layout Principles > Advanced Rendering > should handle paragraph shortcuts like {pstd} [0.02ms]
+(pass) SMCL Layout Principles > Advanced Rendering > should handle {p2colset} and {p2col} [0.04ms]
+(pass) SMCL Layout Principles > Advanced Rendering > should handle {synopt} which is a synonym for p2col
+(pass) SMCL Layout Principles > Advanced Rendering > should handle {hi} and {hilite} [0.20ms]
+(pass) SMCL Layout Principles > Advanced Rendering > should render helpb and helpi correctly
+(pass) SMCL Layout Principles > Advanced Rendering > should end paragraph on blank line
+(pass) SMCL Layout Principles > Advanced Rendering > should handle {dup}
+(pass) SMCL Layout Principles > Advanced Rendering > should handle {c} with codes [0.21ms]
+(pass) SMCL Layout Principles > Advanced Rendering > should render complex describe table rows correctly [0.19ms]
+(pass) SMCL Layout Principles > Advanced Rendering > should handle a mix of headers, lines, and table rows sensibly [0.20ms]
+(pass) SMCL Layout Principles > Advanced Rendering > should handle nested colors inside p2col without breaking layout [0.12ms]
+
+test/unit/data-browser.test.js:
+(pass) Data Browser Frontend (data-browser.js) > should initialize correctly and default to first 50 variables [42.53ms]
+(pass) Data Browser Frontend (data-browser.js) > should filter variables list via search [35.77ms]
+(pass) Data Browser Frontend (data-browser.js) > should select all/none respecting search filter [32.10ms]
+(pass) Data Browser Frontend (data-browser.js) > should toggle variables and debounce page load [621.09ms]
+
+test/unit/bundled-binary.test.js:
+(pass) Bundled Binary Discovery > finds bundled binary when system uv is missing [28.51ms]
+
+test/unit/mcp-auto-refresh.test.js:
+(pass) McpClient Auto-Refresh > forces latest server when required tools are missing [4.24ms]
+(pass) McpClient Auto-Refresh > preserves env while ignoring command/args during forced refresh [0.83ms]
+(pass) McpClient Auto-Refresh > throws explicit error if tools still missing after refresh [3.77ms]
+
+test/unit/mcp-discovery.test.js:
+(pass) MCP Discovery and Fallback Logic > findUvBinary identifies broken shims and skips them [4.34ms]
+(pass) MCP Discovery and Fallback Logic > isMcpConfigWorking checks stderr for failures [1.43ms]
+
+test/unit/fs-utils.test.js:
+(pass) fs-utils > should determine if a directory is writable [0.70ms]
+(pass) fs-utils > should return a temporary directory [0.96ms]
+(pass) fs-utils > should generate a temporary file path [0.22ms]
+(pass) fs-utils > should fallback to home directory if os.tmpdir is not writable [0.05ms]
+
+test/unit/logging.test.js:
+(pass) Logging behaviour tests > suppresses raw stderr logs by default but sends to Sentry [2.07ms]
+(pass) Logging behaviour tests > shows code logs when logStataCode is true [1.23ms]
+(pass) Logging behaviour tests > shows everything when showAllLogsInOutput is true [1.18ms]
+(pass) Logging behaviour tests > correctly routes high-level connection events by default [1.57ms]
+(pass) Logging behaviour tests > logRunToOutput suppresses output on success when settings are off [1.80ms]
+(pass) Logging behaviour tests > logRunToOutput shows output on failure even when settings are off [1.09ms]
+(pass) Logging behaviour tests > logRunToOutput shows output on success when logStataCode is on [1.14ms]
+(pass) Logging behaviour tests > updates mcpClient config when VS Code settings change [1.10ms]
+
+test/unit/webview_integrity.test.js:
+(pass) Webview Script Integrity > should produce valid script content without literal newlines in strings [2.97ms]
+
+test/unit/extension.test.js:
+(pass) extension unit tests > output log streaming > streams raw logs to Output channel when enabled [3.52ms]
+(pass) extension unit tests > refreshMcpPackage > refreshes to latest version when uvx succeeds [1.40ms]
+(pass) extension unit tests > refreshMcpPackage > returns null when uvx fails [1.11ms]
+(pass) extension unit tests > writeMcpConfig > writeMcpConfig (VS Code host) writes only servers entry, merges env, and removes cursor mcp_stata [1.22ms]
+(pass) extension unit tests > writeMcpConfig > writeMcpConfig (Cursor host) writes only mcpServers entry, merges env, and removes VS Code mcp_stata [0.95ms]
+(pass) extension unit tests > writeMcpConfig > writeMcpConfig auto-updates old mcp.json formatting to the new uvx command [1.25ms]
+(pass) extension unit tests > getUvInstallCommand > returns curl/sh installer on macOS [1.50ms]
+(pass) extension unit tests > getUvInstallCommand > returns curl/sh installer on Linux [1.20ms]
+(pass) extension unit tests > getUvInstallCommand > returns powershell installer on Windows [0.96ms]
+(pass) extension unit tests > promptInstallMcpCli > shows missing CLI prompt only on first invocation [1.24ms]
+(pass) extension unit tests > promptInstallMcpCli > skips prompt when already recorded [0.93ms]
+(pass) extension unit tests > existing mcp config > respects opt-out setting and skips auto config [1.12ms]
+(pass) extension unit tests > existing mcp config > detects existing servers in config files [1.02ms]
+(pass) extension unit tests > existing mcp config > suppresses missing CLI prompt when config already present [1.32ms]
+(pass) extension unit tests > existing mcp config > detects cursor-format configs in user storage [1.25ms]
+(pass) extension unit tests > existing mcp config > resolves VS Code path on windows [0.88ms]
+(pass) extension unit tests > existing mcp config > resolves Cursor path on windows [1.13ms]
+(pass) extension unit tests > existing mcp config > resolves Windsurf path on linux [0.63ms]
+(pass) extension unit tests > existing mcp config > resolves Windsurf Next path on mac [1.40ms]
+(pass) extension unit tests > existing mcp config > resolves Antigravity path on windows [0.98ms]
+(pass) extension unit tests > existing mcp config > resolves VS Code Insiders path on linux [0.97ms]
+(pass) extension unit tests > existing mcp config > honors explicit override path and writes both formats [1.02ms]
+(pass) extension unit tests > existing mcp config > falls back to home/AppData/Roaming when APPDATA unset [1.15ms]
+(pass) extension unit tests > existing mcp config > returns null and logs when home cannot be resolved [0.98ms]
+(pass) extension unit tests > existing mcp config > skips write when no targets selected [1.00ms]
+(pass) extension unit tests > getClaudeMcpConfigTarget > resolves user scope Claude config path [0.88ms]
+(pass) extension unit tests > getClaudeMcpConfigTarget > resolves project scope Claude config path [0.83ms]
+(pass) extension unit tests > uv discovery and config validation > findUvBinary prioritizes system PATH over bundled binary [0.99ms]
+(pass) extension unit tests > uv discovery and config validation > findUvBinary falls back to bundled binary if system PATH fails [1.07ms]
+(pass) extension unit tests > uv discovery and config validation > isMcpConfigWorking returns true for functional commands [1.20ms]
+(pass) extension unit tests > uv discovery and config validation > isMcpConfigWorking returns false for broken commands [1.21ms]
+(pass) extension unit tests > uv discovery and config validation > isMcpConfigCurrent returns false if command does not match and is not uv-like [1.00ms]
+(pass) extension unit tests > uv discovery and config validation > isMcpConfigCurrent returns true if command is uv-like and args match package [1.08ms]
+(pass) extension unit tests > uv discovery and config validation > isMcpConfigCurrent returns false if version mismatch [1.01ms]
+(pass) extension unit tests > uv discovery and config validation > activate flow: uses existing config if working and current [0.92ms]
+(pass) extension unit tests > uv discovery and config validation > activate flow: updates config if working but not current (outdated version) [1.03ms]
+(pass) extension unit tests > Stata Startup Loading > calls connect() on activation when loadStataOnStartup is true [1.01ms]
+(pass) extension unit tests > Stata Startup Loading > does NOT call connect() on activation when loadStataOnStartup is false [1.01ms]
+
+test/unit/panels.test.js:
+(pass) Panels > TerminalPanel helpers > toEntry should structure data correctly on success [1.29ms]
+(pass) Panels > TerminalPanel helpers > toEntry should hide stdout and keep fullStdout on failure [0.52ms]
+(pass) Panels > TerminalPanel helpers > toEntry should detect hasError from {err} even if success=true (legacy/edge cases) [0.53ms]
+(pass) Panels > TerminalPanel helpers > normalizeArtifacts should filter nulls [0.61ms]
+(pass) Panels > TerminalPanel helpers > parseSMCL > should detect RC from standard search tag [0.51ms]
+(pass) Panels > TerminalPanel helpers > parseSMCL > should detect RC from standalone line [0.53ms]
+(pass) Panels > TerminalPanel helpers > parseSMCL > should ignore false positive RCs in table data [0.30ms]
+(pass) Panels > TerminalPanel helpers > parseSMCL > should capture error only from {err} tag [0.49ms]
+(pass) Panels > TerminalPanel helpers > parseSMCL > should ignore errors in plain text [0.39ms]
+(pass) Panels > TerminalPanel helpers > parseSMCL > should capture command with multiple prefixes [0.33ms]
+(pass) Panels > TerminalPanel helpers > parseSMCL > should ignore loop keywords [0.49ms]
+(pass) Panels > TerminalPanel helpers > parseSMCL > should track and freeze stack on error [0.39ms]
+(pass) Panels > TerminalPanel helpers > parseSMCL > should strictly pop only matching tags [0.45ms]
+(pass) Panels > TerminalPanel helpers > parseSMCL > should handle reghdfe output correctly [0.22ms]
+(pass) Panels > TerminalPanel Class > should reveal panel if exists on addEntry [1.02ms]
+(pass) Panels > TerminalPanel Class > should store handlers on show [0.77ms]
+(pass) Panels > TerminalPanel Class > should call cancelTaskHandler when receiving cancelTask message [1.06ms]
+
+ 192 pass
+ 0 fail
+ 404 expect() calls
+Ran 192 tests across 20 files. [2.74s]
+$ TEST_SHARD_TOTAL=4 bun -e "process.env.MCP_STATA_INTEGRATION='1'; require('./test/integration/runTest');"
+- Resolving version...
+- Resolving version...
+- Resolving version...
+- Resolving version...
+✔ Validated version: 1.109.0
+✔ Found existing install in /Users/tom/Library/CloudStorage/Dropbox/projects/stata-workbench/.vscode-test/vscode-darwin-arm64-1.109.0
+✔ Validated version: 1.109.0
+✔ Found existing install in /Users/tom/Library/CloudStorage/Dropbox/projects/stata-workbench/.vscode-test/vscode-darwin-arm64-1.109.0
+✔ Validated version: 1.109.0
+✔ Found existing install in /Users/tom/Library/CloudStorage/Dropbox/projects/stata-workbench/.vscode-test/vscode-darwin-arm64-1.109.0
+✔ Validated version: 1.109.0
+✔ Found existing install in /Users/tom/Library/CloudStorage/Dropbox/projects/stata-workbench/.vscode-test/vscode-darwin-arm64-1.109.0
+[90m[main 2026-02-08T01:00:27.367Z][0m update#setState disabled
+[90m[main 2026-02-08T01:00:27.367Z][0m update#ctor - updates are disabled by the environment
+[90m[main 2026-02-08T01:00:27.397Z][0m update#setState disabled
+[90m[main 2026-02-08T01:00:27.398Z][0m update#ctor - updates are disabled by the environment
+[90m[main 2026-02-08T01:00:27.403Z][0m update#setState disabled
+[90m[main 2026-02-08T01:00:27.403Z][0m update#ctor - updates are disabled by the environment
+[90m[main 2026-02-08T01:00:27.403Z][0m update#setState disabled
+[90m[main 2026-02-08T01:00:27.403Z][0m update#ctor - updates are disabled by the environment
+Started local extension host with pid 79252.
+Started initializing default profile extensions in extensions installation folder. file:///var/folders/4h/57tv1nhj11g23lnw73k0csm40000gn/T/vscode-test-exts-r7IKAB
+Started local extension host with pid 79257.
+Started local extension host with pid 79260.
+MCP Registry configured: https://api.mcp.github.com
+Started local extension host with pid 79261.
+Started initializing default profile extensions in extensions installation folder. file:///var/folders/4h/57tv1nhj11g23lnw73k0csm40000gn/T/vscode-test-exts-yYPCu9
+Started initializing default profile extensions in extensions installation folder. file:///var/folders/4h/57tv1nhj11g23lnw73k0csm40000gn/T/vscode-test-exts-ZChdQ5
+MCP Registry configured: https://api.mcp.github.com
+MCP Registry configured: https://api.mcp.github.com
+Started initializing default profile extensions in extensions installation folder. file:///var/folders/4h/57tv1nhj11g23lnw73k0csm40000gn/T/vscode-test-exts-88DYYR
+MCP Registry configured: https://api.mcp.github.com
+Completed initializing default profile extensions in extensions installation folder. file:///var/folders/4h/57tv1nhj11g23lnw73k0csm40000gn/T/vscode-test-exts-r7IKAB
+Loading development extension at /Users/tom/Library/CloudStorage/Dropbox/projects/stata-workbench
+Completed initializing default profile extensions in extensions installation folder. file:///var/folders/4h/57tv1nhj11g23lnw73k0csm40000gn/T/vscode-test-exts-yYPCu9
+Completed initializing default profile extensions in extensions installation folder. file:///var/folders/4h/57tv1nhj11g23lnw73k0csm40000gn/T/vscode-test-exts-88DYYR
+Completed initializing default profile extensions in extensions installation folder. file:///var/folders/4h/57tv1nhj11g23lnw73k0csm40000gn/T/vscode-test-exts-ZChdQ5
+Loading development extension at /Users/tom/Library/CloudStorage/Dropbox/projects/stata-workbench
+Settings Sync: Account status changed from uninitialized to unavailable
+Loading development extension at /Users/tom/Library/CloudStorage/Dropbox/projects/stata-workbench
+Loading development extension at /Users/tom/Library/CloudStorage/Dropbox/projects/stata-workbench
+Settings Sync: Account status changed from uninitialized to unavailable
+Settings Sync: Account status changed from uninitialized to unavailable
+Settings Sync: Account status changed from uninitialized to unavailable
+[INTEGRATION] MCP_STATA_INTEGRATION: 1
+[INTEGRATION] MCP_STATA_INTEGRATION: 1
+[INTEGRATION] MCP_STATA_INTEGRATION: 1
+[INTEGRATION] MCP_STATA_INTEGRATION: 1
+(node:79257) [DEP0180] DeprecationWarning: fs.Stats constructor is deprecated.
+(Use `Code Helper (Plugin) --trace-deprecation ...` to show where the warning was created)
+(node:79260) [DEP0180] DeprecationWarning: fs.Stats constructor is deprecated.
+(Use `Code Helper (Plugin) --trace-deprecation ...` to show where the warning was created)
+(node:79261) [DEP0180] DeprecationWarning: fs.Stats constructor is deprecated.
+(Use `Code Helper (Plugin) --trace-deprecation ...` to show where the warning was created)
+(node:79252) [DEP0180] DeprecationWarning: fs.Stats constructor is deprecated.
+(Use `Code Helper (Plugin) --trace-deprecation ...` to show where the warning was created)
+[Client Log] info: Terminal webview booted
+[Client Log] info: [Modal] Modal script loaded, vscode API: object
+[Client Log] info: [Busy] value=false reason=unknown
+[Client Log] info: [Highlight] elements=0 chars=0
+[Client Log] info: [Highlight] style sample color=null bg=null
+[Client Log] info: [Highlight] elements=0 chars=0 done in 0ms
+[Client Log] info: [Busy] value=true reason=busy
+PASS test/integration/suite/mcp-config.test.js
+PASS test/integration/suite/data-browser.test.js
+  ● Console
+
+    console.log
+      Skipping live server test (MCP_STATA_LIVE !== 1)
+
+      at Object.log (test/integration/suite/data-browser.test.js:119:21)
+
+PASS test/integration/suite/scroll.test.js
+  ● Console
+
+    console.log
+      [TerminalPanel] _handleFetchLog: runId=test-scroll-run path=/Users/tom/Library/CloudStorage/Dropbox/projects/stata-workbench/test/integration/suite/scroll_test.log offset=8900
+
+      at log (src/terminal-panel.js:620:15)
+
+    console.log
+      [TerminalPanel] _handleFetchLog: runId=test-scroll-run path=/Users/tom/Library/CloudStorage/Dropbox/projects/stata-workbench/test/integration/suite/scroll_test.log offset=8800
+
+      at log (src/terminal-panel.js:620:15)
+
+
+Test Suites: 3 passed, 3 total
+Tests:       11 passed, 11 total
+Snapshots:   0 total
+Time:        1.506 s
+Ran all test suites within paths "/Users/tom/Library/CloudStorage/Dropbox/projects/stata-workbench/test/integration/suite/data-browser.test.js", "/Users/tom/Library/CloudStorage/Dropbox/projects/stata-workbench/test/integration/suite/mcp-config.test.js", "/Users/tom/Library/CloudStorage/Dropbox/projects/stata-workbench/test/integration/suite/scroll.test.js".
+[90m[main 2026-02-08T01:00:32.200Z][0m Extension host with pid 79252 exited with code: 0, signal: unknown.
+Exit code:   0
+Test completed successfully. Dumping logs...
+
+--- MCP log tail: /var/folders/4h/57tv1nhj11g23lnw73k0csm40000gn/T/vscode-test-user-VdtoKg/logs/20260208T010027/window1/exthost/output_logging_20260208T010028/1-Stata Workbench.log ---
+Stata Workbench ready (extension v0.18.0)
+[mcp-stata] setLogger called - logger is now active
+[mcp-stata] Found server config in /Users/tom/Library/Application Support/Code/User/mcp.json
+Using existing, functional MCP configuration
+Ensured latest mcp-stata via uvx --refresh --refresh-package mcp-stata (1.23.3)
+Skipping MCP config update: no home directory or host path could be resolved
+Skipping MCP config update: no user-level mcp.json path resolved
+mcp-stata version: 1.23.3
+[mcp-stata] starting operation: connect (pending: 1)
+[mcp-stata] PyPI versions (latest 5): 1.23.3, 1.23.2, 1.23.1, 1.23.0, 1.22.2
+[mcp-stata] Resolved latest version: 1.23.3
+[mcp-stata] Found server config in /Users/tom/Library/Application Support/Code/User/mcp.json
+Starting mcp-stata via uvx --refresh --refresh-package mcp-stata --from /Users/tom/Library/CloudStorage/Dropbox/projects/stata-workbench/mcp-stata/ mcp-stata (ext v0.18.0)
+[mcp-stata] Creating StdioClientTransport
+[mcp-stata] Config source: /Users/tom/Library/Application Support/Code/User/mcp.json
+[mcp-stata] Command: uvx
+[mcp-stata] Args: ["--refresh","--refresh-package","mcp-stata","--from","/Users/tom/Library/CloudStorage/Dropbox/projects/stata-workbench/mcp-stata/","mcp-stata"]
+[DataBrowserPanel] Fetching UI channel details...
+[mcp-stata] starting operation: get_ui_channel (pending: 2)
+[DataBrowser Proxy] Sending GET request to http://127.0.0.1:60237/v1/dataset
+[DataBrowser Proxy] Response from /v1/dataset: Status 200, Body length: 53
+[DataBrowser Proxy] Sending POST request to http://127.0.0.1:60240/v1/echo with body length 25
+[DataBrowser Proxy] Response from /v1/echo: Status 200, Body length: 25
+[DataBrowser Proxy] Sending POST request to http://127.0.0.1:60245/v1/arrow
+[DataBrowser Proxy] Response from /v1/arrow: Status 200, Body length: 312
+[DataBrowser Proxy] Sending GET request to http://127.0.0.1:60250/v1/error
+[DataBrowser Proxy] Response from /v1/error: Status 400, Body length: 23
+
+--- end MCP log tail ---
+[Client Log] info: [Highlight] elements=2 chars=58
+[Client Log] info: [Highlight] style sample color=rgb(201, 209, 217) bg=rgba(0, 0, 0, 0)
+[Client Log] info: [Highlight] elements=2 chars=58 done in 3ms
+[Client Log] info: [Busy] value=false reason=taskDone
+[Client Log] info: [Highlight] elements=0 chars=0
+[Client Log] info: [Highlight] style sample color=rgb(201, 209, 217) bg=rgba(0, 0, 0, 0)
+[Client Log] info: [Highlight] elements=0 chars=0 done in 1ms
+[Client Log] info: [Busy] value=false reason=runFinished
+[Client Log] info: [Busy] value=false reason=busy
+[Extension] cancelRequest called
+[Client Log] info: [Busy] value=true reason=busy
+[Client Log] info: [Highlight] elements=2 chars=58
+[Client Log] info: [Highlight] style sample color=rgb(201, 209, 217) bg=rgba(0, 0, 0, 0)
+[Client Log] info: [Highlight] elements=2 chars=58 done in 1ms
+[Client Log] info: [Busy] value=false reason=runFinished
+[Client Log] info: [Busy] value=false reason=busy
+[Client Log] info: [Busy] value=true reason=busy
+[Client Log] info: [Highlight] elements=2 chars=42
+[Client Log] info: [Highlight] style sample color=rgb(201, 209, 217) bg=rgba(0, 0, 0, 0)
+[Client Log] info: [Highlight] elements=2 chars=42 done in 0ms
+[Client Log] info: [Busy] value=false reason=taskDone
+[Client Log] info: [Highlight] elements=0 chars=0
+[Client Log] info: [Highlight] style sample color=rgb(201, 209, 217) bg=rgba(0, 0, 0, 0)
+[Client Log] info: [Highlight] elements=0 chars=0 done in 0ms
+[Client Log] info: [Busy] value=false reason=runFinished
+[Client Log] info: [Busy] value=false reason=busy
+[Client Log] info: [Highlight] elements=2 chars=42
+[Client Log] info: [Highlight] style sample color=rgb(201, 209, 217) bg=rgba(0, 0, 0, 0)
+[Client Log] info: [Highlight] elements=2 chars=42 done in 0ms
+PASS test/integration/suite/ui.test.js (8.273 s)
+[Client Log] info: Terminal webview booted
+[Client Log] info: [Modal] Modal script loaded, vscode API: object
+[Client Log] info: [Busy] value=false reason=unknown
+[Client Log] info: [Highlight] elements=0 chars=0
+[Client Log] info: [Highlight] style sample color=null bg=null
+[Client Log] info: [Highlight] elements=0 chars=0 done in 0ms
+[Client Log] info: [Busy] value=true reason=busy
+[Client Log] info: [Highlight] elements=6 chars=220
+[Client Log] info: [Highlight] style sample color=rgb(201, 209, 217) bg=rgba(0, 0, 0, 0)
+[Client Log] info: [Highlight] elements=6 chars=220 done in 2ms
+[Client Log] info: [Busy] value=false reason=taskDone
+[Client Log] info: [Highlight] elements=3 chars=110
+[Client Log] info: [Highlight] style sample color=rgb(201, 209, 217) bg=rgba(0, 0, 0, 0)
+[Client Log] info: [Highlight] elements=3 chars=110 done in 1ms
+[Client Log] info: [RunFinished] deferring runId=run_mld1e5dz_yfyr9qbd
+[Client Log] info: [Busy] value=false reason=busy
+[79177:0208/010039.619971:ERROR:gpu/command_buffer/service/shared_image/shared_image_manager.cc:393] SharedImageManager::ProduceSkia: Trying to Produce a Skia representation from a non-existent mailbox.
+[79177:0208/010039.620720:ERROR:gpu/command_buffer/service/shared_image/shared_image_manager.cc:393] SharedImageManager::ProduceSkia: Trying to Produce a Skia representation from a non-existent mailbox.
+[Client Log] info: [Busy] value=false reason=busy
+[Client Log] info: Terminal webview booted
+[Client Log] info: [Modal] Modal script loaded, vscode API: object
+[Client Log] info: [Busy] value=false reason=unknown
+[Client Log] info: [Highlight] elements=0 chars=0
+[Client Log] info: [Highlight] style sample color=null bg=null
+[Client Log] info: [Highlight] elements=0 chars=0 done in 0ms
+[Client Log] info: [Busy] value=true reason=busy
+[Client Log] info: [Highlight] elements=4 chars=25000
+[Client Log] info: [Highlight] style sample color=rgb(201, 209, 217) bg=rgba(0, 0, 0, 0)
+[Client Log] info: [Highlight] elements=4 chars=25000 done in 1ms
+[Client Log] info: [Highlight] elements=2 chars=24998
+[Client Log] info: [Highlight] style sample color=rgb(201, 209, 217) bg=rgba(0, 0, 0, 0)
+[Client Log] info: [Highlight] elements=2 chars=24998 done in 0ms
+[Client Log] info: [Highlight] elements=2 chars=24998
+[Client Log] info: [Highlight] style sample color=rgb(201, 209, 217) bg=rgba(0, 0, 0, 0)
+[Client Log] info: [Highlight] elements=2 chars=24998 done in 1ms
+[Client Log] info: [Highlight] elements=4 chars=24868
+[Client Log] info: [Highlight] style sample color=rgb(201, 209, 217) bg=rgba(0, 0, 0, 0)
+[Client Log] info: [Highlight] elements=4 chars=24868 done in 1ms
+[Client Log] info: [Busy] value=false reason=taskDone
+[Client Log] info: [Highlight] elements=0 chars=0
+[Client Log] info: [Highlight] style sample color=rgb(201, 209, 217) bg=rgba(0, 0, 0, 0)
+[Client Log] info: [Highlight] elements=0 chars=0 done in 0ms
+[File Watcher (node.js)] Watcher shutdown because watched path got deleted
+[File Watcher (node.js)] Watcher shutdown because watched path got deleted
+PASS test/integration/suite/run-file-ui.test.js
+PASS test/integration/suite/pypi-versioning.test.js (10.475 s)
+  ● Console
+
+    console.log
+      [PyPI Dynamic Test Log] [mcp-stata] setLogger called - logger is now active
+
+      at log (test/integration/suite/pypi-versioning.test.js:33:21)
+
+    console.log
+      [PyPI Dynamic Test Log] [mcp-stata] starting operation: run_command (pending: 1)
+
+      at StataMcpClient.log [as _log] (test/integration/suite/pypi-versioning.test.js:33:21)
+
+    console.log
+      [PyPI Dynamic Test Log] [mcp-stata] PyPI versions (latest 5): 1.23.3, 1.23.2, 1.23.1, 1.23.0, 1.22.2
+
+      at StataMcpClient.log [as _log] (test/integration/suite/pypi-versioning.test.js:33:21)
+
+    console.log
+      [PyPI Dynamic Test Log] [mcp-stata] Resolved latest version: 1.23.3
+
+      at StataMcpClient.log [as _log] (test/integration/suite/pypi-versioning.test.js:33:21)
+
+    console.log
+      [PyPI Dynamic Test Log] Starting mcp-stata via uvx --refresh --refresh-package mcp-stata --from mcp-stata==1.23.3 mcp-stata (ext v0.18.0)
+
+      at StataMcpClient.log [as _log] (test/integration/suite/pypi-versioning.test.js:33:21)
+
+    console.log
+      [PyPI Dynamic Test Log] [mcp-stata] Creating StdioClientTransport
+
+      at StataMcpClient.log [as _log] (test/integration/suite/pypi-versioning.test.js:33:21)
+
+    console.log
+      [PyPI Dynamic Test Log] [mcp-stata] Config source: defaults (uvx --refresh --refresh-package)
+
+      at StataMcpClient.log [as _log] (test/integration/suite/pypi-versioning.test.js:33:21)
+
+    console.log
+      [PyPI Dynamic Test Log] [mcp-stata] Command: uvx
+
+      at StataMcpClient.log [as _log] (test/integration/suite/pypi-versioning.test.js:33:21)
+
+    console.log
+      [PyPI Dynamic Test Log] [mcp-stata] Args: ["--refresh","--refresh-package","mcp-stata","--from","mcp-stata==1.23.3","mcp-stata"]
+
+      at StataMcpClient.log [as _log] (test/integration/suite/pypi-versioning.test.js:33:21)
+
+    console.log
+      [PyPI Dynamic Test Log] [mcp-stata] Transport created. Has stderr: true, type: object
+
+      at StataMcpClient.log [as _log] (test/integration/suite/pypi-versioning.test.js:33:21)
+
+    console.log
+      [PyPI Dynamic Test Log] [mcp-stata] Transport keys: _readBuffer, _stderrStream, _serverParams
+
+      at StataMcpClient.log [as _log] (test/integration/suite/pypi-versioning.test.js:33:21)
+
+    console.log
+      [PyPI Dynamic Test Log] [mcp-stata] Setting up transport.stderr listener
+
+      at StataMcpClient.log [as _log] (test/integration/suite/pypi-versioning.test.js:33:21)
+
+    console.log
+      [PyPI Dynamic Test Log] [mcp-stata stderr] [mcp_stata] INFO: === mcp-stata server starting ===
+      [mcp_stata] INFO: mcp-stata version: 1.23.3
+
+      at StataMcpClient.log [as _log] (test/integration/suite/pypi-versioning.test.js:33:21)
+
+    console.log
+      [PyPI Dynamic Test Log] [mcp-stata stderr] [mcp_stata] INFO: STATA_PATH env at startup: <not set>
+      [mcp_stata] INFO: LOG_LEVEL: DEBUG
+
+      at StataMcpClient.log [as _log] (test/integration/suite/pypi-versioning.test.js:33:21)
+
+    console.log
+      [PyPI Dynamic Test Log] [mcp-stata stderr] [02/08/26 01:00:32] INFO     STATA_PATH env not set;         stata_client.py:115
+                                   attempting auto-discovery
+
+      at StataMcpClient.log [as _log] (test/integration/suite/pypi-versioning.test.js:33:21)
+
+    console.log
+      [PyPI Dynamic Test Log] [mcp-stata stderr]                     INFO     Auto-discovered Stata at           discovery.py:498
+                                   /Applications/StataNow/StataMP.app                 
+                                   /Contents/MacOS/stata-mp (mp)
+
+      at StataMcpClient.log [as _log] (test/integration/suite/pypi-versioning.test.js:33:21)
+
+    console.log
+      [PyPI Dynamic Test Log] [mcp-stata stderr]                     INFO     Auto-discovered Stata at           discovery.py:498
+                                   /Applications/StataNow/StataSE.app                 
+                                   /Contents/MacOS/stata-se (se)
+
+      at StataMcpClient.log [as _log] (test/integration/suite/pypi-versioning.test.js:33:21)
+
+    console.log
+      [PyPI Dynamic Test Log] [mcp-stata stderr]                     INFO     Discovery found Stata at:       stata_client.py:124
+                                   /Applications/StataNow/StataMP.                    
+                                   app/Contents/MacOS/stata-mp                        
+                                   (mp)
+
+      at StataMcpClient.log [as _log] (test/integration/suite/pypi-versioning.test.js:33:21)
+
+    console.log
+      [PyPI Dynamic Test Log] [mcp-stata stderr]                     INFO     Initializing Stata engine      stata_client.py:1512
+                                   (attempting up to 2 candidate                      
+                                   binaries)...
+
+      at StataMcpClient.log [as _log] (test/integration/suite/pypi-versioning.test.js:33:21)
+
+    console.log
+      [PyPI Dynamic Test Log] [mcp-stata stderr] [mcp_stata] DEBUG: Pre-flight check for path '/Applications/StataNow'
+
+      at StataMcpClient.log [as _log] (test/integration/suite/pypi-versioning.test.js:33:21)
+
+    console.log
+      [PyPI Dynamic Test Log] [mcp-stata stderr] [mcp_stata] Pre-flight succeeded for '/Applications/StataNow'. Proceeding to in-process init.
+
+      at StataMcpClient.log [as _log] (test/integration/suite/pypi-versioning.test.js:33:21)
+
+    console.log
+      [PyPI Dynamic Test Log] [mcp-stata stderr] [mcp_stata] DEBUG: Pre-emptively inserting /Applications/StataNow/utilities at head of sys.path
+      [mcp_stata] DEBUG: In-process stata_setup.config('/Applications/StataNow', 'mp')
+
+      at StataMcpClient.log [as _log] (test/integration/suite/pypi-versioning.test.js:33:21)
+
+    console.log
+      [PyPI Dynamic Test Log] [mcp-stata stderr] 
+        ___  ____  ____  ____  ____ ®
+       /__    /   ____/   /   ____/      StataNow 19.5
+      ___/   /   /___/   /   /___/       MP—Parallel Edition
+      
+       Statistics and Data Science       Copyright 1985-2025 StataCorp LLC
+                                         StataCorp
+                                         4905 Lakeway Drive
+                                         College Station, Texas 77845 USA
+                                         800-782-8272        https://www.stata.com
+                                         979-696-4600        service@stata.com
+      
+      Stata license: Single-user 4-core network, expiring 17 Feb 2026
+      Serial number: 501909355902
+        Licensed to: Z
+                     
+      
+      Notes:
+            1. Unicode is supported; see help unicode_advice.
+            2. More than 2 billion observations are allowed; see help obs_advice.
+            3. Maximum number of variables is set to 5,000 but can be increased;
+                see help set_maxvar.
+
+      at StataMcpClient.log [as _log] (test/integration/suite/pypi-versioning.test.js:33:21)
+
+    console.log
+      [PyPI Dynamic Test Log] [mcp-stata stderr] [mcp_stata] DEBUG: stata_setup.config succeeded for path: /Applications/StataNow
+
+      at StataMcpClient.log [as _log] (test/integration/suite/pypi-versioning.test.js:33:21)
+
+    console.log
+      [PyPI Dynamic Test Log] [mcp-stata stderr] [02/08/26 01:00:35] INFO     stata_setup.config succeeded   stata_client.py:1666
+                                   with path:                                         
+                                   /Applications/StataNow
+
+      at StataMcpClient.log [as _log] (test/integration/suite/pypi-versioning.test.js:33:21)
+
+    console.log
+      [PyPI Dynamic Test Log] [mcp-stata stderr] [mcp_stata] DEBUG: Importing pystata and warming up...
+      1
+
+      at StataMcpClient.log [as _log] (test/integration/suite/pypi-versioning.test.js:33:21)
+
+    console.log
+      [PyPI Dynamic Test Log] [mcp-stata stderr] [mcp_stata] DEBUG: pystata warmed up successfully
+
+      at StataMcpClient.log [as _log] (test/integration/suite/pypi-versioning.test.js:33:21)
+
+    console.log
+      [PyPI Dynamic Test Log] [mcp-stata stderr] (file
+          /var/folders/4h/57tv1nhj11g23lnw73k0csm40000gn/T/mcp_session_0f117592abaa
+          > 4a8fb3b764147f2461df.smcl not found)
+      -------------------------------------------------------------------------------
+            name:  _mcp_session
+             log:  /var/folders/4h/57tv1nhj11g23lnw73k0csm40000gn/T/mcp_session_0f117
+      > 592abaa4a8fb3b764147f2461df.smcl
+        log type:  smcl
+       opened on:   8 Feb 2026, 01:00:35
+
+      at StataMcpClient.log [as _log] (test/integration/suite/pypi-versioning.test.js:33:21)
+
+    console.log
+      [PyPI Dynamic Test Log] [mcp-stata stderr]                     INFO     StataClient initialized        stata_client.py:1751
+                                   successfully with                                  
+                                   /Applications/StataNow/StataMP                     
+                                   .app/Contents/MacOS/stata-mp                       
+                                   (mp)
+
+      at StataMcpClient.log [as _log] (test/integration/suite/pypi-versioning.test.js:33:21)
+
+    console.log
+      [PyPI Dynamic Test Log] [mcp-stata stderr]                     INFO     StataWorker initialized and ready.     worker.py:70
+
+      at StataMcpClient.log [as _log] (test/integration/suite/pypi-versioning.test.js:33:21)
+
+    console.log
+      [PyPI Dynamic Test Log] mcp-stata connected (pid=79871)
+
+      at StataMcpClient.log [as _log] (test/integration/suite/pypi-versioning.test.js:33:21)
+
+    console.log
+      [PyPI Dynamic Test Log] [mcp-stata] Post-connect: Found process stderr, attaching listener
+
+      at StataMcpClient.log [as _log] (test/integration/suite/pypi-versioning.test.js:33:21)
+
+    console.log
+      [PyPI Dynamic Test Log] [mcp-stata stderr] [mcp.server.lowlevel.server] DEBUG: Received message: root=InitializedNotification(method='notifications/initialized', params=None, jsonrpc='2.0')
+
+      at StataMcpClient.log [as _log] (test/integration/suite/pypi-versioning.test.js:33:21)
+
+    console.log
+      [PyPI Dynamic Test Log] [mcp-stata stderr] [mcp.server.lowlevel.server] DEBUG: Received message: <mcp.shared.session.RequestResponder object at 0x108855810>
+
+      at StataMcpClient.log [as _log] (test/integration/suite/pypi-versioning.test.js:33:21)
+
+    console.log
+      [PyPI Dynamic Test Log] [mcp-stata stderr] [mcp.server.lowlevel.server] INFO: Processing request of type ListToolsRequest
+      [mcp.server.lowlevel.server] DEBUG: Dispatching request of type ListToolsRequest
+
+      at StataMcpClient.log [as _log] (test/integration/suite/pypi-versioning.test.js:33:21)
+
+    console.log
+      [PyPI Dynamic Test Log] [mcp-stata stderr] [mcp.server.lowlevel.server] DEBUG: Response sent
+
+      at StataMcpClient.log [as _log] (test/integration/suite/pypi-versioning.test.js:33:21)
+
+    console.log
+      [PyPI Dynamic Test Log] [mcp-stata] available tools: create_session, stop_session, list_sessions, run_do_file_background, get_task_status, get_task_result, cancel_task, break_session, run_command_background, run_command, read_log, find_in_log, get_data, get_ui_channel, describe, list_graphs, export_graph, get_help, get_stored_results, load_data, codebook, run_do_file, get_variable_list, export_graphs_all
+
+      at StataMcpClient.log [as _log] (test/integration/suite/pypi-versioning.test.js:33:21)
+
+    console.log
+      [PyPI Dynamic Test Log] [mcp-stata stderr] [mcp.server.lowlevel.server] DEBUG: Received message: <mcp.shared.session.RequestResponder object at 0x1088556d0>
+
+      at StataMcpClient.log [as _log] (test/integration/suite/pypi-versioning.test.js:33:21)
+
+    console.log
+      [PyPI Dynamic Test Log] [mcp-stata stderr] [mcp.server.lowlevel.server] INFO: Processing request of type CallToolRequest
+      [mcp.server.lowlevel.server] DEBUG: Dispatching request of type CallToolRequest
+
+      at StataMcpClient.log [as _log] (test/integration/suite/pypi-versioning.test.js:33:21)
+
+    console.log
+      [PyPI Dynamic Test Log] [mcp-stata stderr] [mcp_stata] INFO: MCP tool call: run_command_background request_id=2
+
+      at StataMcpClient.log [as _log] (test/integration/suite/pypi-versioning.test.js:33:21)
+
+    console.log
+      [PyPI Dynamic Test Log] [mcp-stata stderr] [mcp_stata.payloads] INFO: MCP notify logMessage request_id=2 payload={"event": "log_path", "path": "/var/folders/4h/57tv1nhj11g23lnw73k0csm40000gn/T/mcp_stata_0jhcjbtz.log", "smcl_path": "/var/folders/4h/57tv1nhj11g23lnw73k0csm40000gn/T/mcp_session_0f117592abaa4a8fb3b764147f2461df.smcl", "task_id": "caafa9ad52944a0bbe2ee169d8656e6a"}
+
+      at StataMcpClient.log [as _log] (test/integration/suite/pypi-versioning.test.js:33:21)
+
+    console.log
+      [PyPI Dynamic Test Log] [01:00:35] Notification received: log_path
+
+      at StataMcpClient.log [as _log] (test/integration/suite/pypi-versioning.test.js:33:21)
+
+    console.log
+      [PyPI Dynamic Test Log] [mcp-stata] log_path payload={"event": "log_path", "path": "/var/folders/4h/57tv1nhj11g23lnw73k0csm40000gn/T/mcp_stata_0jhcjbtz.log", "smcl_path": "/var/folders/4h/57tv1nhj11g23lnw73k0csm40000gn/T/mcp_session_0f117592abaa4a8fb3b764147f2461df.smcl", "task_id": "caafa9ad52944a0bbe2ee169d8656e6a"}
+
+      at StataMcpClient.log [as _log] (test/integration/suite/pypi-versioning.test.js:33:21)
+
+    console.log
+      [PyPI Dynamic Test Log] [mcp-stata] log_path event matched for run unknown, path=/var/folders/4h/57tv1nhj11g23lnw73k0csm40000gn/T/mcp_stata_0jhcjbtz.log
+
+      at StataMcpClient.log [as _log] (test/integration/suite/pypi-versioning.test.js:33:21)
+
+    console.log
+      [PyPI Dynamic Test Log] [mcp-stata stderr]                     INFO     SMCL log_opened=True            stata_client.py:658
+                                   path=/var/folders/4h/57tv1nhj11                    
+                                   g23lnw73k0csm40000gn/T/mcp_sess                    
+                                   ion_0f117592abaa4a8fb3b764147f2                    
+                                   461df.smcl
+
+      at StataMcpClient.log [as _log] (test/integration/suite/pypi-versioning.test.js:33:21)
+
+    console.log
+      [PyPI Dynamic Test Log] [mcp-stata stderr] [mcp.server.lowlevel.server] DEBUG: Response sent
+
+      at StataMcpClient.log [as _log] (test/integration/suite/pypi-versioning.test.js:33:21)
+
+    console.log
+      [PyPI Dynamic Test Log] [mcp-stata] tool run_command_background completed in 14ms
+
+      at StataMcpClient.log [as _log] (test/integration/suite/pypi-versioning.test.js:33:21)
+
+    console.log
+      [PyPI Dynamic Test Log] [mcp-stata stderr] [mcp_stata.payloads] INFO: MCP notify logMessage request_id=2 payload={"event": "output", "text": "{com}. display 1\n{res}1", "task_id": "caafa9ad52944a0bbe2ee169d8656e6a"}
+
+      at StataMcpClient.log [as _log] (test/integration/suite/pypi-versioning.test.js:33:21)
+
+    console.log
+      [PyPI Dynamic Test Log] [01:00:35] Notification received: output
+
+      at StataMcpClient.log [as _log] (test/integration/suite/pypi-versioning.test.js:33:21)
+
+    console.log
+      [PyPI Dynamic Test Log] [mcp-stata stderr] [02/08/26 01:00:36] INFO     stata.run(stream) rc=0         stata_client.py:2923
+                                   success=True trace=False                           
+                                   duration_ms=317.56                                 
+                                   code_preview=display 1
+
+      at StataMcpClient.log [as _log] (test/integration/suite/pypi-versioning.test.js:33:21)
+
+    console.log
+      [PyPI Dynamic Test Log] [01:00:36] Notification received: task_done
+
+      at StataMcpClient.log [as _log] (test/integration/suite/pypi-versioning.test.js:33:21)
+
+    console.log
+      [PyPI Dynamic Test Log] [mcp-stata] operation run_command completed in 5388ms
+
+      at StataMcpClient.log [as _log] (test/integration/suite/pypi-versioning.test.js:33:21)
+
+    console.log
+      [PyPI Forced Test Log] [mcp-stata] setLogger called - logger is now active
+
+      at log (test/integration/suite/pypi-versioning.test.js:66:21)
+
+    console.log
+      [PyPI Forced Test Log] [mcp-stata] starting operation: run_command (pending: 1)
+
+      at StataMcpClient.log [as _log] (test/integration/suite/pypi-versioning.test.js:66:21)
+
+    console.log
+      [PyPI Forced Test Log] [mcp-stata] PyPI versions (latest 5): 1.23.3, 1.23.2, 1.23.1, 1.23.0, 1.22.2
+
+      at StataMcpClient.log [as _log] (test/integration/suite/pypi-versioning.test.js:66:21)
+
+    console.log
+      [PyPI Forced Test Log] [mcp-stata] Resolved latest version: 1.23.3
+
+      at StataMcpClient.log [as _log] (test/integration/suite/pypi-versioning.test.js:66:21)
+
+    console.log
+      [PyPI Forced Test Log] Starting mcp-stata via uvx --refresh --refresh-package mcp-stata --from mcp-stata@latest mcp-stata (ext v0.18.0)
+
+      at StataMcpClient.log [as _log] (test/integration/suite/pypi-versioning.test.js:66:21)
+
+    console.log
+      [PyPI Forced Test Log] [mcp-stata] Creating StdioClientTransport
+
+      at StataMcpClient.log [as _log] (test/integration/suite/pypi-versioning.test.js:66:21)
+
+    console.log
+      [PyPI Forced Test Log] [mcp-stata] Config source: defaults (uvx --refresh --refresh-package)
+
+      at StataMcpClient.log [as _log] (test/integration/suite/pypi-versioning.test.js:66:21)
+
+    console.log
+      [PyPI Forced Test Log] [mcp-stata] Command: uvx
+
+      at StataMcpClient.log [as _log] (test/integration/suite/pypi-versioning.test.js:66:21)
+
+    console.log
+      [PyPI Forced Test Log] [mcp-stata] Args: ["--refresh","--refresh-package","mcp-stata","--from","mcp-stata@latest","mcp-stata"]
+
+      at StataMcpClient.log [as _log] (test/integration/suite/pypi-versioning.test.js:66:21)
+
+    console.log
+      [PyPI Forced Test Log] [mcp-stata] Transport created. Has stderr: true, type: object
+
+      at StataMcpClient.log [as _log] (test/integration/suite/pypi-versioning.test.js:66:21)
+
+    console.log
+      [PyPI Forced Test Log] [mcp-stata] Transport keys: _readBuffer, _stderrStream, _serverParams
+
+      at StataMcpClient.log [as _log] (test/integration/suite/pypi-versioning.test.js:66:21)
+
+    console.log
+      [PyPI Forced Test Log] [mcp-stata] Setting up transport.stderr listener
+
+      at StataMcpClient.log [as _log] (test/integration/suite/pypi-versioning.test.js:66:21)
+
+    console.log
+      [PyPI Forced Test Log] [mcp-stata stderr] [mcp_stata] INFO: === mcp-stata server starting ===
+      [mcp_stata] INFO: mcp-stata version: 1.23.3
+
+      at StataMcpClient.log [as _log] (test/integration/suite/pypi-versioning.test.js:66:21)
+
+    console.log
+      [PyPI Forced Test Log] [mcp-stata stderr] [mcp_stata] INFO: STATA_PATH env at startup: <not set>
+      [mcp_stata] INFO: LOG_LEVEL: DEBUG
+
+      at StataMcpClient.log [as _log] (test/integration/suite/pypi-versioning.test.js:66:21)
+
+    console.log
+      [PyPI Forced Test Log] [mcp-stata stderr] [02/08/26 01:00:37] INFO     STATA_PATH env not set;         stata_client.py:115
+                                   attempting auto-discovery
+
+      at StataMcpClient.log [as _log] (test/integration/suite/pypi-versioning.test.js:66:21)
+
+    console.log
+      [PyPI Forced Test Log] [mcp-stata stderr]                     INFO     Auto-discovered Stata at           discovery.py:498
+                                   /Applications/StataNow/StataMP.app                 
+                                   /Contents/MacOS/stata-mp (mp)
+
+      at StataMcpClient.log [as _log] (test/integration/suite/pypi-versioning.test.js:66:21)
+
+    console.log
+      [PyPI Forced Test Log] [mcp-stata stderr]                     INFO     Auto-discovered Stata at           discovery.py:498
+                                   /Applications/StataNow/StataSE.app                 
+                                   /Contents/MacOS/stata-se (se)
+
+      at StataMcpClient.log [as _log] (test/integration/suite/pypi-versioning.test.js:66:21)
+
+    console.log
+      [PyPI Forced Test Log] [mcp-stata stderr]                     INFO     Discovery found Stata at:       stata_client.py:124
+                                   /Applications/StataNow/StataMP.                    
+                                   app/Contents/MacOS/stata-mp                        
+                                   (mp)
+
+      at StataMcpClient.log [as _log] (test/integration/suite/pypi-versioning.test.js:66:21)
+
+    console.log
+      [PyPI Forced Test Log] [mcp-stata stderr]                     INFO     Initializing Stata engine      stata_client.py:1512
+                                   (attempting up to 2 candidate                      
+                                   binaries)...
+
+      at StataMcpClient.log [as _log] (test/integration/suite/pypi-versioning.test.js:66:21)
+
+    console.log
+      [PyPI Forced Test Log] [mcp-stata stderr] [mcp_stata] DEBUG: Pre-flight check for path '/Applications/StataNow'
+
+      at StataMcpClient.log [as _log] (test/integration/suite/pypi-versioning.test.js:66:21)
+
+    console.log
+      [PyPI Forced Test Log] [mcp-stata stderr] [mcp_stata] Pre-flight succeeded for '/Applications/StataNow'. Proceeding to in-process init.
+
+      at StataMcpClient.log [as _log] (test/integration/suite/pypi-versioning.test.js:66:21)
+
+    console.log
+      [PyPI Forced Test Log] [mcp-stata stderr] [mcp_stata] DEBUG: Pre-emptively inserting /Applications/StataNow/utilities at head of sys.path
+      [mcp_stata] DEBUG: In-process stata_setup.config('/Applications/StataNow', 'mp')
+
+      at StataMcpClient.log [as _log] (test/integration/suite/pypi-versioning.test.js:66:21)
+
+    console.log
+      [PyPI Forced Test Log] [mcp-stata stderr] 
+        ___  ____  ____  ____  ____ ®
+       /__    /   ____/   /   ____/      StataNow 19.5
+      ___/   /   /___/   /   /___/       MP—Parallel Edition
+      
+       Statistics and Data Science       Copyright 1985-2025 StataCorp LLC
+                                         StataCorp
+                                         4905 Lakeway Drive
+                                         College Station, Texas 77845 USA
+                                         800-782-8272        https://www.stata.com
+                                         979-696-4600        service@stata.com
+      
+      Stata license: Single-user 4-core network, expiring 17 Feb 2026
+      Serial number: 501909355902
+        Licensed to: Z
+                     
+      
+      Notes:
+            1. Unicode is supported; see help unicode_advice.
+            2. More than 2 billion observations are allowed; see help obs_advice.
+            3. Maximum number of variables is set to 5,000 but can be increased;
+                see help set_maxvar.
+
+      at StataMcpClient.log [as _log] (test/integration/suite/pypi-versioning.test.js:66:21)
+
+    console.log
+      [PyPI Forced Test Log] [mcp-stata stderr] [mcp_stata] DEBUG: stata_setup.config succeeded for path: /Applications/StataNow
+
+      at StataMcpClient.log [as _log] (test/integration/suite/pypi-versioning.test.js:66:21)
+
+    console.log
+      [PyPI Forced Test Log] [mcp-stata stderr] [02/08/26 01:00:39] INFO     stata_setup.config succeeded   stata_client.py:1666
+                                   with path:                                         
+                                   /Applications/StataNow
+
+      at StataMcpClient.log [as _log] (test/integration/suite/pypi-versioning.test.js:66:21)
+
+    console.log
+      [PyPI Forced Test Log] [mcp-stata stderr] [mcp_stata] DEBUG: Importing pystata and warming up...
+      1
+
+      at StataMcpClient.log [as _log] (test/integration/suite/pypi-versioning.test.js:66:21)
+
+    console.log
+      [PyPI Forced Test Log] [mcp-stata stderr] [mcp_stata] DEBUG: pystata warmed up successfully
+
+      at StataMcpClient.log [as _log] (test/integration/suite/pypi-versioning.test.js:66:21)
+
+    console.log
+      [PyPI Forced Test Log] [mcp-stata stderr] (file
+          /var/folders/4h/57tv1nhj11g23lnw73k0csm40000gn/T/mcp_session_1b466062f5db
+          > 430e81d1207a7f01e4f7.smcl not found)
+      -------------------------------------------------------------------------------
+            name:  _mcp_session
+             log:  /var/folders/4h/57tv1nhj11g23lnw73k0csm40000gn/T/mcp_session_1b466
+      > 062f5db430e81d1207a7f01e4f7.smcl
+        log type:  smcl
+       opened on:   8 Feb 2026, 01:00:40
+
+      at StataMcpClient.log [as _log] (test/integration/suite/pypi-versioning.test.js:66:21)
+
+    console.log
+      [PyPI Forced Test Log] [mcp-stata stderr] [02/08/26 01:00:40] INFO     StataClient initialized        stata_client.py:1751
+                                   successfully with                                  
+                                   /Applications/StataNow/StataMP                     
+                                   .app/Contents/MacOS/stata-mp                       
+                                   (mp)
+
+      at StataMcpClient.log [as _log] (test/integration/suite/pypi-versioning.test.js:66:21)
+
+    console.log
+      [PyPI Forced Test Log] [mcp-stata stderr]                     INFO     StataWorker initialized and ready.     worker.py:70
+
+      at StataMcpClient.log [as _log] (test/integration/suite/pypi-versioning.test.js:66:21)
+
+    console.log
+      [PyPI Forced Test Log] mcp-stata connected (pid=79977)
+
+      at StataMcpClient.log [as _log] (test/integration/suite/pypi-versioning.test.js:66:21)
+
+    console.log
+      [PyPI Forced Test Log] [mcp-stata] Post-connect: Found process stderr, attaching listener
+
+      at StataMcpClient.log [as _log] (test/integration/suite/pypi-versioning.test.js:66:21)
+
+    console.log
+      [PyPI Forced Test Log] [mcp-stata stderr] [mcp.server.lowlevel.server] DEBUG: Received message: root=InitializedNotification(method='notifications/initialized', params=None, jsonrpc='2.0')
+
+      at StataMcpClient.log [as _log] (test/integration/suite/pypi-versioning.test.js:66:21)
+
+    console.log
+      [PyPI Forced Test Log] [mcp-stata stderr] [mcp.server.lowlevel.server] DEBUG: Received message: <mcp.shared.session.RequestResponder object at 0x10c371810>
+
+      at StataMcpClient.log [as _log] (test/integration/suite/pypi-versioning.test.js:66:21)
+
+    console.log
+      [PyPI Forced Test Log] [mcp-stata stderr] [mcp.server.lowlevel.server] INFO: Processing request of type ListToolsRequest
+      [mcp.server.lowlevel.server] DEBUG: Dispatching request of type ListToolsRequest
+
+      at StataMcpClient.log [as _log] (test/integration/suite/pypi-versioning.test.js:66:21)
+
+    console.log
+      [PyPI Forced Test Log] [mcp-stata stderr] [mcp.server.lowlevel.server] DEBUG: Response sent
+
+      at StataMcpClient.log [as _log] (test/integration/suite/pypi-versioning.test.js:66:21)
+
+    console.log
+      [PyPI Forced Test Log] [mcp-stata] available tools: create_session, stop_session, list_sessions, run_do_file_background, get_task_status, get_task_result, cancel_task, break_session, run_command_background, run_command, read_log, find_in_log, get_data, get_ui_channel, describe, list_graphs, export_graph, get_help, get_stored_results, load_data, codebook, run_do_file, get_variable_list, export_graphs_all
+
+      at StataMcpClient.log [as _log] (test/integration/suite/pypi-versioning.test.js:66:21)
+
+    console.log
+      [PyPI Forced Test Log] [mcp-stata stderr] [mcp.server.lowlevel.server] DEBUG: Received message: <mcp.shared.session.RequestResponder object at 0x10c3716d0>
+
+      at StataMcpClient.log [as _log] (test/integration/suite/pypi-versioning.test.js:66:21)
+
+    console.log
+      [PyPI Forced Test Log] [mcp-stata stderr] [mcp.server.lowlevel.server] INFO: Processing request of type CallToolRequest
+      [mcp.server.lowlevel.server] DEBUG: Dispatching request of type CallToolRequest
+
+      at StataMcpClient.log [as _log] (test/integration/suite/pypi-versioning.test.js:66:21)
+
+    console.log
+      [PyPI Forced Test Log] [mcp-stata stderr] [mcp_stata] INFO: MCP tool call: run_command_background request_id=2
+
+      at StataMcpClient.log [as _log] (test/integration/suite/pypi-versioning.test.js:66:21)
+
+    console.log
+      [PyPI Forced Test Log] [mcp-stata stderr] [mcp_stata.payloads] INFO: MCP notify logMessage request_id=2 payload={"event": "log_path", "path": "/var/folders/4h/57tv1nhj11g23lnw73k0csm40000gn/T/mcp_stata_1pl1bwik.log", "smcl_path": "/var/folders/4h/57tv1nhj11g23lnw73k0csm40000gn/T/mcp_session_1b466062f5db430e81d1207a7f01e4f7.smcl", "task_id": "7403d477cbc64ee19ccbc9323f589062"}
+
+      at StataMcpClient.log [as _log] (test/integration/suite/pypi-versioning.test.js:66:21)
+
+    console.log
+      [PyPI Forced Test Log] [01:00:40] Notification received: log_path
+
+      at StataMcpClient.log [as _log] (test/integration/suite/pypi-versioning.test.js:66:21)
+
+    console.log
+      [PyPI Forced Test Log] [mcp-stata] log_path payload={"event": "log_path", "path": "/var/folders/4h/57tv1nhj11g23lnw73k0csm40000gn/T/mcp_stata_1pl1bwik.log", "smcl_path": "/var/folders/4h/57tv1nhj11g23lnw73k0csm40000gn/T/mcp_session_1b466062f5db430e81d1207a7f01e4f7.smcl", "task_id": "7403d477cbc64ee19ccbc9323f589062"}
+
+      at StataMcpClient.log [as _log] (test/integration/suite/pypi-versioning.test.js:66:21)
+
+    console.log
+      [PyPI Forced Test Log] [mcp-stata] log_path event matched for run unknown, path=/var/folders/4h/57tv1nhj11g23lnw73k0csm40000gn/T/mcp_stata_1pl1bwik.log
+
+      at StataMcpClient.log [as _log] (test/integration/suite/pypi-versioning.test.js:66:21)
+
+    console.log
+      [PyPI Forced Test Log] [mcp-stata stderr]                     INFO     SMCL log_opened=True            stata_client.py:658
+                                   path=/var/folders/4h/57tv1nhj11                    
+                                   g23lnw73k0csm40000gn/T/mcp_sess                    
+                                   ion_1b466062f5db430e81d1207a7f0                    
+                                   1e4f7.smcl
+
+      at StataMcpClient.log [as _log] (test/integration/suite/pypi-versioning.test.js:66:21)
+
+    console.log
+      [PyPI Forced Test Log] [mcp-stata stderr] [mcp.server.lowlevel.server] DEBUG: Response sent
+
+      at StataMcpClient.log [as _log] (test/integration/suite/pypi-versioning.test.js:66:21)
+
+    console.log
+      [PyPI Forced Test Log] [mcp-stata] tool run_command_background completed in 13ms
+
+      at StataMcpClient.log [as _log] (test/integration/suite/pypi-versioning.test.js:66:21)
+
+    console.log
+      [PyPI Forced Test Log] [mcp-stata stderr] [mcp_stata.payloads] INFO: MCP notify logMessage request_id=2 payload={"event": "output", "text": "{com}. display 1\n{res}1", "task_id": "7403d477cbc64ee19ccbc9323f589062"}
+
+      at StataMcpClient.log [as _log] (test/integration/suite/pypi-versioning.test.js:66:21)
+
+    console.log
+      [PyPI Forced Test Log] [01:00:40] Notification received: output
+
+      at StataMcpClient.log [as _log] (test/integration/suite/pypi-versioning.test.js:66:21)
+
+    console.log
+      [PyPI Forced Test Log] [mcp-stata stderr]                     INFO     stata.run(stream) rc=0         stata_client.py:2923
+                                   success=True trace=False                           
+                                   duration_ms=318.18                                 
+                                   code_preview=display 1
+
+      at StataMcpClient.log [as _log] (test/integration/suite/pypi-versioning.test.js:66:21)
+
+    console.log
+      [PyPI Forced Test Log] [01:00:40] Notification received: task_done
+
+      at StataMcpClient.log [as _log] (test/integration/suite/pypi-versioning.test.js:66:21)
+
+    console.log
+      [PyPI Forced Test Log] [mcp-stata] operation run_command completed in 4268ms
+
+      at StataMcpClient.log [as _log] (test/integration/suite/pypi-versioning.test.js:66:21)
+
+[Client Log] info: [LogViewer] Initializing. Size: 200330 Start Offset: 0 AutoLoadAll: true
+[TerminalPanel] _handleFetchLog: runId=run_mld1e5p2_at01cko4 path=/var/folders/4h/57tv1nhj11g23lnw73k0csm40000gn/T/mcp_stata_77qtxhvg.log offset=0
+[Client Log] info: [Busy] value=false reason=runFinished
+[Client Log] info: [Busy] value=false reason=busy
+PASS test/integration/suite/log-buffering.test.js
+
+Test Suites: 1 skipped, 3 passed, 3 of 4 total
+Tests:       2 skipped, 8 passed, 10 total
+Snapshots:   0 total
+Time:        10.762 s
+Ran all test suites within paths "/Users/tom/Library/CloudStorage/Dropbox/projects/stata-workbench/test/integration/suite/bundled-binary.test.js", "/Users/tom/Library/CloudStorage/Dropbox/projects/stata-workbench/test/integration/suite/log-buffering.test.js", "/Users/tom/Library/CloudStorage/Dropbox/projects/stata-workbench/test/integration/suite/run-file-ui.test.js", "/Users/tom/Library/CloudStorage/Dropbox/projects/stata-workbench/test/integration/suite/ui.test.js".
+[90m[main 2026-02-08T01:00:41.175Z][0m Extension host with pid 79257 exited with code: 0, signal: unknown.
+Exit code:   0
+Test completed successfully. Dumping logs...
+
+--- MCP log tail: /var/folders/4h/57tv1nhj11g23lnw73k0csm40000gn/T/vscode-test-user-5A3iNs/logs/20260208T010027/window1/exthost/output_logging_20260208T010028/1-Stata Workbench.log ---
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+{txt}
+{com}. ppp
+{err}command {bf}ppp{sf} is unrecognized
+{txt}{search r(199), local:r(199);}
+
+end of do-file
+
+{search r(199), local:r(199);}
+
+[mcp-stata] starting operation: get_ui_channel (pending: 1)
+[mcp-stata] tool get_ui_channel completed in 212ms
+[mcp-stata] operation get_ui_channel completed in 213ms
+[DataBrowser Proxy] Sending GET request to http://127.0.0.1:60265/v1/dataset
+
+--- end MCP log tail ---
+[Client Log] info: Terminal webview booted
+[Client Log] info: [Modal] Modal script loaded, vscode API: object
+[Client Log] info: [Busy] value=false reason=unknown
+[Client Log] info: [Highlight] elements=0 chars=0
+[Client Log] info: [Highlight] style sample color=null bg=null
+[Client Log] info: [Highlight] elements=0 chars=0 done in 0ms
+[Client Log] info: [Busy] value=true reason=busy
+[Client Log] info: [Busy] value=false reason=taskDone
+[Client Log] info: [Highlight] elements=6 chars=208
+[Client Log] info: [Highlight] style sample color=rgb(201, 209, 217) bg=rgba(0, 0, 0, 0)
+[Client Log] info: [Highlight] elements=6 chars=208 done in 4ms
+[File Watcher (node.js)] Watcher shutdown because watched path got deleted
+PASS test/integration/suite/integration.test.js (10.899 s)
+PASS test/integration/suite/tab-completion.test.js
+[Client Log] info: [RunFinished] deferring runId=run_mld1e6ue_9wsq3h9i
+[Client Log] info: [Busy] value=false reason=busy
+[Client Log] info: [Busy] value=false reason=busy
+[Client Log] info: [Busy] value=true reason=busy
+[Client Log] info: [Highlight] elements=2 chars=14
+[Client Log] info: [Highlight] style sample color=rgb(201, 209, 217) bg=rgba(0, 0, 0, 0)
+[Client Log] info: [Highlight] elements=2 chars=14 done in 1ms
+[Client Log] info: Terminal webview booted
+[Client Log] info: [Modal] Modal script loaded, vscode API: object
+[Client Log] info: [Busy] value=false reason=unknown
+[Client Log] info: [Highlight] elements=0 chars=0
+[Client Log] info: [Highlight] style sample color=null bg=null
+[Client Log] info: [Highlight] elements=0 chars=0 done in 0ms
+[Client Log] info: [Busy] value=true reason=busy
+[Client Log] info: [Busy] value=false reason=taskDone
+[Client Log] info: [Highlight] elements=4 chars=64
+[Client Log] info: [Highlight] style sample color=rgb(201, 209, 217) bg=rgba(0, 0, 0, 0)
+[Client Log] info: [Highlight] elements=4 chars=64 done in 4ms
+[Client Log] info: [Busy] value=false reason=taskDone
+[Client Log] info: [Highlight] elements=0 chars=0
+[Client Log] info: [Highlight] style sample color=rgb(201, 209, 217) bg=rgba(0, 0, 0, 0)
+[Client Log] info: [Highlight] elements=0 chars=0 done in 1ms
+[Client Log] info: [Busy] value=false reason=runFinished
+[Client Log] info: [Busy] value=false reason=busy
+[Client Log] info: [Busy] value=true reason=busy
+[Client Log] info: [Highlight] elements=6 chars=68
+[Client Log] info: [Highlight] style sample color=rgb(201, 209, 217) bg=rgba(0, 0, 0, 0)
+[Client Log] info: [Highlight] elements=6 chars=68 done in 0ms
+[Client Log] info: [Highlight] elements=2 chars=50
+[Client Log] info: [Highlight] style sample color=rgb(201, 209, 217) bg=rgba(0, 0, 0, 0)
+[Client Log] info: [Highlight] elements=2 chars=50 done in 1ms
+PASS test/integration/suite/error-context.test.js
+
+Test Suites: 3 passed, 3 total
+Tests:       4 passed, 4 total
+Snapshots:   0 total
+Time:        12.158 s, estimated 28 s
+Ran all test suites within paths "/Users/tom/Library/CloudStorage/Dropbox/projects/stata-workbench/test/integration/suite/error-context.test.js", "/Users/tom/Library/CloudStorage/Dropbox/projects/stata-workbench/test/integration/suite/pypi-versioning.test.js", "/Users/tom/Library/CloudStorage/Dropbox/projects/stata-workbench/test/integration/suite/tab-completion.test.js".
+[Client Log] info: [Busy] value=false reason=taskDone
+[Client Log] info: [Highlight] elements=0 chars=0
+[Client Log] info: [Highlight] style sample color=rgb(201, 209, 217) bg=rgba(0, 0, 0, 0)
+[Client Log] info: [Highlight] elements=0 chars=0 done in 1ms
+[90m[main 2026-02-08T01:00:42.589Z][0m Extension host with pid 79260 exited with code: 0, signal: unknown.
+[Client Log] info: [Busy] value=false reason=runFinished
+[Client Log] info: [Busy] value=false reason=busy
+[Client Log] info: [Busy] value=true reason=busy
+[Client Log] info: [Highlight] elements=2 chars=50
+[Client Log] info: [Highlight] style sample color=rgb(201, 209, 217) bg=rgba(0, 0, 0, 0)
+[Client Log] info: [Highlight] elements=2 chars=50 done in 0ms
+Exit code:   0
+Test completed successfully. Dumping logs...
+
+--- MCP log tail: /var/folders/4h/57tv1nhj11g23lnw73k0csm40000gn/T/vscode-test-user-TAVgM4/logs/20260208T010027/window1/exthost/output_logging_20260208T010028/1-Stata Workbench.log ---
+Stata Workbench ready (extension v0.18.0)
+[mcp-stata] setLogger called - logger is now active
+[mcp-stata] Found server config in /Users/tom/Library/Application Support/Code/User/mcp.json
+Using existing, functional MCP configuration
+Ensured latest mcp-stata via uvx --refresh --refresh-package mcp-stata (1.23.3)
+Skipping MCP config update: no home directory or host path could be resolved
+Skipping MCP config update: no user-level mcp.json path resolved
+mcp-stata version: 1.23.3
+[mcp-stata] starting operation: connect (pending: 1)
+[mcp-stata] PyPI versions (latest 5): 1.23.3, 1.23.2, 1.23.1, 1.23.0, 1.22.2
+[mcp-stata] Resolved latest version: 1.23.3
+[mcp-stata] Found server config in /Users/tom/Library/Application Support/Code/User/mcp.json
+Starting mcp-stata via uvx --refresh --refresh-package mcp-stata --from /Users/tom/Library/CloudStorage/Dropbox/projects/stata-workbench/mcp-stata/ mcp-stata (ext v0.18.0)
+[mcp-stata] Creating StdioClientTransport
+[mcp-stata] Config source: /Users/tom/Library/Application Support/Code/User/mcp.json
+[mcp-stata] Command: uvx
+[mcp-stata] Args: ["--refresh","--refresh-package","mcp-stata","--from","/Users/tom/Library/CloudStorage/Dropbox/projects/stata-workbench/mcp-stata/","mcp-stata"]
+mcp-stata connected (pid=79792)
+[mcp-stata] available tools: create_session, stop_session, list_sessions, run_do_file_background, get_task_status, get_task_result, cancel_task, break_session, run_command_background, run_command, read_log, find_in_log, get_data, get_ui_channel, describe, list_graphs, export_graph, get_help, get_stored_results, load_data, codebook, run_do_file, get_variable_list, export_graphs_all
+[mcp-stata] operation connect completed in 5100ms
+[mcp-stata] starting operation: run_file (pending: 1)
+[mcp-stata] log_path payload={"event": "log_path", "path": "/var/folders/4h/57tv1nhj11g23lnw73k0csm40000gn/T/mcp_stata_1wjqddyo.log", "smcl_path": "/var/folders/4h/57tv1nhj11g23lnw73k0csm40000gn/T/mcp_session_cee23d422c82463cb4c1553f1fbdfc29.smcl", "task_id": "19283f1d8442462da6e81598b964d579"}
+[mcp-stata] log_path event matched for run run_mld1e6ue_9wsq3h9i, path=/var/folders/4h/57tv1nhj11g23lnw73k0csm40000gn/T/mcp_stata_1wjqddyo.log
+[mcp-stata] tool run_do_file_background completed in 13ms
+[mcp-stata] starting operation: get_variable_list (pending: 2)
+[mcp-stata] tool get_variable_list completed in 2ms
+[mcp-stata] operation get_variable_list completed in 3ms
+[mcp-stata] operation run_file completed in 424ms
+[mcp-stata] starting operation: get_ui_channel (pending: 1)
+[mcp-stata] tool get_ui_channel completed in 212ms
+[mcp-stata] operation get_ui_channel completed in 212ms
+[DataBrowser Proxy] Sending GET request to http://127.0.0.1:60333/v1/dataset
+[mcp-stata] starting operation: run_selection (pending: 1)
+[DataBrowser Proxy] Response from /v1/dataset: Status 200, Body length: 117
+[mcp-stata] log_path payload={"event": "log_path", "path": "/var/folders/4h/57tv1nhj11g23lnw73k0csm40000gn/T/mcp_stata_nv_i3ij3.log", "smcl_path": "/var/folders/4h/57tv1nhj11g23lnw73k0csm40000gn/T/mcp_session_cee23d422c82463cb4c1553f1fbdfc29.smcl", "task_id": "f0acc8309e6549a791221f8181c2eb96"}
+[mcp-stata] log_path event matched for run run_mld1e7d4_01dcvx9h, path=/var/folders/4h/57tv1nhj11g23lnw73k0csm40000gn/T/mcp_stata_nv_i3ij3.log
+[mcp-stata] tool run_command_background completed in 22ms
+[mcp-stata] operation run_selection completed in 444ms
+
+=== 2026-02-08T01:00:42.245Z — cljn ===
+cmd: cljn
+rc: 0
+duration: 444 ms
+logPath: /var/folders/4h/57tv1nhj11g23lnw73k0csm40000gn/T/mcp_stata_nv_i3ij3.log
+{com}. cljn
+{err}command {bf}cljn{sf} is unrecognized
+{txt}{search r(199), local:r(199);}
+
+[mcp-stata] starting operation: get_ui_channel (pending: 1)
+[mcp-stata] tool get_ui_channel completed in 214ms
+[mcp-stata] operation get_ui_channel completed in 214ms
+[DataBrowser Proxy] Sending GET request to http://127.0.0.1:60333/v1/dataset
+
+--- end MCP log tail ---
+[Client Log] info: [Highlight] elements=2 chars=40
+[Client Log] info: [Highlight] style sample color=rgb(201, 209, 217) bg=rgba(0, 0, 0, 0)
+[Client Log] info: [Highlight] elements=2 chars=40 done in 1ms
+[Client Log] info: [Highlight] elements=4 chars=96
+[Client Log] info: [Highlight] style sample color=rgb(201, 209, 217) bg=rgba(0, 0, 0, 0)
+[Client Log] info: [Highlight] elements=4 chars=96 done in 1ms
+[TerminalPanel] SVG previewPath https://file%2B.vscode-resource.vscode-cdn.net/var/folders/4h/57tv1nhj11g23lnw73k0csm40000gn/T/mcp_stata_fx7mv987.svg
+[Client Log] info: [Artifacts] previewPath https://file%2B.vscode-resource.vscode-cdn.net/var/folders/4h/57tv1nhj11g23lnw73k0csm40000gn/T/mcp_stata_fx7mv987.svg path /var/folders/4h/57tv1nhj11g23lnw73k0csm40000gn/T/mcp_stata_fx7mv987.svg
+[Client Log] info: [Artifacts] session render count=1
+[Client Log] info: [Busy] value=false reason=taskDone
+[Client Log] info: [Highlight] elements=0 chars=0
+[Client Log] info: [Highlight] style sample color=rgb(201, 209, 217) bg=rgba(0, 0, 0, 0)
+[Client Log] info: [Highlight] elements=0 chars=0 done in 0ms
+[Client Log] info: [Artifacts] img load (session) Graph 10ms https://file%2B.vscode-resource.vscode-cdn.net/var/folders/4h/57tv1nhj11g23lnw73k0csm40000gn/T/mcp_stata_fx7mv987.svg
+PASS test/integration/suite/terminal-output.test.js
+[Client Log] info: [Artifacts] previewPath https://file%2B.vscode-resource.vscode-cdn.net/var/folders/4h/57tv1nhj11g23lnw73k0csm40000gn/T/mcp_stata_fx7mv987.svg path /var/folders/4h/57tv1nhj11g23lnw73k0csm40000gn/T/mcp_stata_fx7mv987.svg
+[Client Log] info: [Busy] value=false reason=runFinished
+[Client Log] info: [Busy] value=false reason=busy
+[Client Log] info: [Busy] value=true reason=busy
+[Client Log] info: [Busy] value=false reason=runFinished
+[Client Log] info: [Busy] value=false reason=busy
+[Client Log] info: [Busy] value=true reason=busy
+[Client Log] info: [Busy] value=false reason=runFinished
+[Client Log] info: [Busy] value=false reason=busy
+[Client Log] info: [Highlight] elements=7 chars=120
+[Client Log] info: [Highlight] style sample color=rgb(201, 209, 217) bg=rgba(0, 0, 0, 0)
+[Client Log] info: [Highlight] elements=7 chars=120 done in 1ms
+[Client Log] info: Terminal webview booted
+[Client Log] info: [Modal] Modal script loaded, vscode API: object
+[Client Log] info: [Busy] value=false reason=unknown
+[Client Log] info: [Highlight] elements=0 chars=0
+[Client Log] info: [Highlight] style sample color=null bg=null
+[Client Log] info: [Highlight] elements=0 chars=0 done in 0ms
+[Client Log] info: [Busy] value=true reason=busy
+[Client Log] info: [Busy] value=false reason=taskDone
+[Client Log] info: [Highlight] elements=6 chars=164
+[Client Log] info: [Highlight] style sample color=rgb(201, 209, 217) bg=rgba(0, 0, 0, 0)
+[Client Log] info: [Highlight] elements=6 chars=164 done in 3ms
+[Client Log] info: [Highlight] elements=12 chars=328
+[Client Log] info: [Highlight] style sample color=rgb(201, 209, 217) bg=rgba(0, 0, 0, 0)
+[Client Log] info: [Highlight] elements=12 chars=328 done in 1ms
+[Client Log] info: [RunFinished] deferring runId=run_mld1e8ka_fbgtziic
+[Client Log] info: [Busy] value=false reason=busy
+[Client Log] info: [Busy] value=false reason=busy
+[Client Log] info: Terminal webview booted
+[Client Log] info: [Modal] Modal script loaded, vscode API: object
+[Client Log] info: [Busy] value=false reason=unknown
+[Client Log] info: [Highlight] elements=0 chars=0
+[Client Log] info: [Highlight] style sample color=null bg=null
+[Client Log] info: [Highlight] elements=0 chars=0 done in 0ms
+[Client Log] info: [Busy] value=true reason=busy
+[Client Log] info: [Busy] value=false reason=taskDone
+[Client Log] info: [Highlight] elements=3 chars=117
+[Client Log] info: [Highlight] style sample color=rgb(201, 209, 217) bg=rgba(0, 0, 0, 0)
+[Client Log] info: [Highlight] elements=3 chars=117 done in 1ms
+[Client Log] info: [Highlight] elements=6 chars=234
+[Client Log] info: [Highlight] style sample color=rgb(201, 209, 217) bg=rgba(0, 0, 0, 0)
+[Client Log] info: [Highlight] elements=6 chars=234 done in 1ms
+[Client Log] info: [RunFinished] deferring runId=run_mld1e8s9_e3bvdbhx
+[Client Log] info: [Busy] value=false reason=busy
+[Client Log] info: [Busy] value=false reason=busy
+PASS test/integration/suite/run-dirty-file.test.js
+
+Test Suites: 3 passed, 3 total
+Tests:       12 passed, 12 total
+Snapshots:   0 total
+Time:        13.493 s
+Ran all test suites within paths "/Users/tom/Library/CloudStorage/Dropbox/projects/stata-workbench/test/integration/suite/integration.test.js", "/Users/tom/Library/CloudStorage/Dropbox/projects/stata-workbench/test/integration/suite/run-dirty-file.test.js", "/Users/tom/Library/CloudStorage/Dropbox/projects/stata-workbench/test/integration/suite/terminal-output.test.js".
+[90m[main 2026-02-08T01:00:44.161Z][0m Extension host with pid 79261 exited with code: 0, signal: unknown.
+Exit code:   0
+Test completed successfully. Dumping logs...
+
+--- MCP log tail: /var/folders/4h/57tv1nhj11g23lnw73k0csm40000gn/T/vscode-test-user-0yYnEN/logs/20260208T010027/window1/exthost/output_logging_20260208T010028/1-Stata Workbench.log ---
+Stata Workbench ready (extension v0.18.0)
+[mcp-stata] setLogger called - logger is now active
+[mcp-stata] Found server config in /Users/tom/Library/Application Support/Code/User/mcp.json
+Using existing, functional MCP configuration
+Ensured latest mcp-stata via uvx --refresh --refresh-package mcp-stata (1.23.3)
+Skipping MCP config update: no home directory or host path could be resolved
+Skipping MCP config update: no user-level mcp.json path resolved
+mcp-stata version: 1.23.3
+[mcp-stata] starting operation: connect (pending: 1)
+[mcp-stata] PyPI versions (latest 5): 1.23.3, 1.23.2, 1.23.1, 1.23.0, 1.22.2
+[mcp-stata] Resolved latest version: 1.23.3
+[mcp-stata] Found server config in /Users/tom/Library/Application Support/Code/User/mcp.json
+Starting mcp-stata via uvx --refresh --refresh-package mcp-stata --from /Users/tom/Library/CloudStorage/Dropbox/projects/stata-workbench/mcp-stata/ mcp-stata (ext v0.18.0)
+[mcp-stata] Creating StdioClientTransport
+[mcp-stata] Config source: /Users/tom/Library/Application Support/Code/User/mcp.json
+[mcp-stata] Command: uvx
+[mcp-stata] Args: ["--refresh","--refresh-package","mcp-stata","--from","/Users/tom/Library/CloudStorage/Dropbox/projects/stata-workbench/mcp-stata/","mcp-stata"]
+mcp-stata connected (pid=79810)
+[mcp-stata] available tools: create_session, stop_session, list_sessions, run_do_file_background, get_task_status, get_task_result, cancel_task, break_session, run_command_background, run_command, read_log, find_in_log, get_data, get_ui_channel, describe, list_graphs, export_graph, get_help, get_stored_results, load_data, codebook, run_do_file, get_variable_list, export_graphs_all
+[mcp-stata] operation connect completed in 4942ms
+[mcp-stata] starting operation: run_selection (pending: 1)
+[mcp-stata] log_path payload={"event": "log_path", "path": "/var/folders/4h/57tv1nhj11g23lnw73k0csm40000gn/T/mcp_stata_9uvzh4uw.log", "smcl_path": "/var/folders/4h/57tv1nhj11g23lnw73k0csm40000gn/T/mcp_session_3ebd3e4a374b45a6a61c8a2cdef523ff.smcl", "task_id": "6b9c0300d5f24c20964d2f8612355095"}
+[mcp-stata] log_path event matched for run run_mld1e7bj_rv56uxzl, path=/var/folders/4h/57tv1nhj11g23lnw73k0csm40000gn/T/mcp_stata_9uvzh4uw.log
+[mcp-stata] tool run_command_background completed in 14ms
+[mcp-stata] starting operation: get_variable_list (pending: 2)
+[mcp-stata] tool get_variable_list completed in 16ms
+[mcp-stata] operation get_variable_list completed in 17ms
+[mcp-stata] operation run_selection completed in 422ms
+[mcp-stata] starting operation: get_ui_channel (pending: 1)
+[mcp-stata] tool get_ui_channel completed in 8ms
+[mcp-stata] operation get_ui_channel completed in 10ms
+[DataBrowser Proxy] Sending GET request to http://127.0.0.1:60340/v1/dataset
+[mcp-stata] starting operation: run_selection (pending: 1)
+[DataBrowser Proxy] Response from /v1/dataset: Status 200, Body length: 119
+[mcp-stata] log_path payload={"event": "log_path", "path": "/var/folders/4h/57tv1nhj11g23lnw73k0csm40000gn/T/mcp_stata_xihq1_5s.log", "smcl_path": "/var/folders/4h/57tv1nhj11g23lnw73k0csm40000gn/T/mcp_session_3ebd3e4a374b45a6a61c8a2cdef523ff.smcl", "task_id": "26fce68702794c918ca0231841948880"}
+[mcp-stata] log_path event matched for run run_mld1e7o2_3bkllyaf, path=/var/folders/4h/57tv1nhj11g23lnw73k0csm40000gn/T/mcp_stata_xihq1_5s.log
+[mcp-stata] tool run_command_background completed in 14ms
+[mcp-stata] operation run_selection completed in 417ms
+[mcp-stata] starting operation: get_ui_channel (pending: 1)
+[mcp-stata] tool get_ui_channel completed in 4ms
+[mcp-stata] operation get_ui_channel completed in 5ms
+[DataBrowser Proxy] Sending GET request to http://127.0.0.1:60340/v1/dataset
+[mcp-stata] starting operation: run_selection (pending: 1)
+[DataBrowser Proxy] Response from /v1/dataset: Status 200, Body length: 119
+[mcp-stata] log_path payload={"event": "log_path", "path": "/var/folders/4h/57tv1nhj11g23lnw73k0csm40000gn/T/mcp_stata_a20p30fz.log", "smcl_path": "/var/folders/4h/57tv1nhj11g23lnw73k0csm40000gn/T/mcp_session_3ebd3e4a374b45a6a61c8a2cdef523ff.smcl", "task_id": "b490eb5882404649a83079e1b557ac6b"}
+[mcp-stata] log_path event matched for run run_mld1e80a_kz69i6gg, path=/var/folders/4h/57tv1nhj11g23lnw73k0csm40000gn/T/mcp_stata_a20p30fz.log
+[mcp-stata] tool run_command_background completed in 25ms
+[mcp-stata] operation run_selection completed in 439ms
+[mcp-stata] starting operation: get_ui_channel (pending: 1)
+[mcp-stata] tool get_ui_channel completed in 217ms
+[mcp-stata] operation get_ui_channel completed in 218ms
+[DataBrowser Proxy] Sending GET request to http://127.0.0.1:60340/v1/dataset
+[mcp-stata] starting operation: run_file (pending: 1)
+[DataBrowser Proxy] Response from /v1/dataset: Status 200, Body length: 119
+[mcp-stata] log_path payload={"event": "log_path", "path": "/var/folders/4h/57tv1nhj11g23lnw73k0csm40000gn/T/mcp_stata_064ewa1l.log", "smcl_path": "/var/folders/4h/57tv1nhj11g23lnw73k0csm40000gn/T/mcp_session_3ebd3e4a374b45a6a61c8a2cdef523ff.smcl", "task_id": "fd7b749dc3274a99a98325a2a80595a8"}
+[mcp-stata] log_path event matched for run run_mld1e8ka_fbgtziic, path=/var/folders/4h/57tv1nhj11g23lnw73k0csm40000gn/T/mcp_stata_064ewa1l.log
+[mcp-stata] tool run_do_file_background completed in 12ms
+[mcp-stata] starting operation: get_variable_list (pending: 2)
+[mcp-stata] tool get_variable_list completed in 5ms
+[mcp-stata] operation get_variable_list completed in 6ms
+[mcp-stata] operation run_file completed in 147ms
+[mcp-stata] starting operation: get_ui_channel (pending: 1)
+[mcp-stata] tool get_ui_channel completed in 4ms
+[mcp-stata] operation get_ui_channel completed in 5ms
+[DataBrowser Proxy] Sending GET request to http://127.0.0.1:60340/v1/dataset
+[mcp-stata] starting operation: run_file (pending: 1)
+[DataBrowser Proxy] Response from /v1/dataset: Status 200, Body length: 119
+[mcp-stata] log_path payload={"event": "log_path", "path": "/var/folders/4h/57tv1nhj11g23lnw73k0csm40000gn/T/mcp_stata_gq0hiym9.log", "smcl_path": "/var/folders/4h/57tv1nhj11g23lnw73k0csm40000gn/T/mcp_session_3ebd3e4a374b45a6a61c8a2cdef523ff.smcl", "task_id": "d1af97843a064e5ca7474d3c68c5479f"}
+[mcp-stata] log_path event matched for run run_mld1e8s9_e3bvdbhx, path=/var/folders/4h/57tv1nhj11g23lnw73k0csm40000gn/T/mcp_stata_gq0hiym9.log
+[mcp-stata] tool run_do_file_background completed in 12ms
+[mcp-stata] starting operation: get_variable_list (pending: 2)
+[mcp-stata] tool get_variable_list completed in 2ms
+[mcp-stata] operation get_variable_list completed in 2ms
+[mcp-stata] operation run_file completed in 148ms
+[mcp-stata] starting operation: get_ui_channel (pending: 1)
+[mcp-stata] tool get_ui_channel completed in 4ms
+[mcp-stata] operation get_ui_channel completed in 4ms
+[DataBrowser Proxy] Sending GET request to http://127.0.0.1:60340/v1/dataset
+[DataBrowser Proxy] Response from /v1/dataset: Status 200, Body length: 119
+
+--- end MCP log tail ---

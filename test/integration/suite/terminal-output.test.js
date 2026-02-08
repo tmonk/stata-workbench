@@ -1,7 +1,7 @@
 const vscode = require('vscode');
 
 describe('Terminal Output E2E', () => {
-    jest.setTimeout(90000);
+    jest.setTimeout(180000);
 
     const enabled = process.env.MCP_STATA_INTEGRATION === '1';
 

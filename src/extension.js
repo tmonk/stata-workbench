@@ -3,16 +3,37 @@
 require("./instrument.js");
 const Sentry = require("@sentry/node");
 const path = require('path');
-const fs = require('fs');
 const os = require('os');
-const vscode = require('vscode');
-const { spawnSync } = require('child_process');
+const { getVscode } = require('./runtime-context');
+const { getEnv, getFs, getChildProcess, getMcpClient } = require('./runtime-context');
 const pkg = require('../package.json');
-const { client: mcpClient } = require('./mcp-client');
 const { TerminalPanel } = require('./terminal-panel');
 const { DataBrowserPanel } = require('./data-browser-panel');
 const { openArtifact } = require('./artifact-utils');
 const { getTmpFilePath, getTmpDir } = require('./fs-utils');
+
+const createDepProxy = (getter) => new Proxy({}, {
+    get(_target, prop) {
+        const target = getter();
+        const value = target?.[prop];
+        const isMockFunction = typeof value === 'function' && (value._isMockFunction || value.mock);
+        if (typeof value === 'function' && !isMockFunction) {
+            return value.bind(target);
+        }
+        return value;
+    },
+    set(_target, prop, value) {
+        const target = getter();
+        if (!target) return false;
+        target[prop] = value;
+        return true;
+    }
+});
+
+const vscode = createDepProxy(getVscode);
+const fs = createDepProxy(getFs);
+const cp = createDepProxy(getChildProcess);
+const mcpClient = createDepProxy(() => getMcpClient() || require('./mcp-client').client);
 
 let outputChannel;
 let statusBarItem;
@@ -233,8 +254,9 @@ function activate(context) {
 
     // Resolve 'uv' binary (system -> bundled fallback)
     uvCommand = findUvBinary();
-    if (uvCommand && (!process.env.MCP_STATA_UVX_CMD || process.env.MCP_STATA_UVX_CMD !== uvCommand)) {
-        process.env.MCP_STATA_UVX_CMD = uvCommand;
+    const env = getEnv();
+    if (uvCommand && (!env.MCP_STATA_UVX_CMD || env.MCP_STATA_UVX_CMD !== uvCommand)) {
+        env.MCP_STATA_UVX_CMD = uvCommand;
     }
 
     // Load existing config and validate
@@ -337,6 +359,7 @@ function activate(context) {
 }
 
 function ensureMcpCliAvailable(context) {
+    const env = getEnv();
     const found = findUvBinary();
     if (found) {
         uvCommand = found;
@@ -344,8 +367,8 @@ function ensureMcpCliAvailable(context) {
         // Only set the env var if it's not already set to this value
         // or if we want to ensure it's propagated to children.
         // For tests, we want to AVOID overwriting a specific path override with "uvx"
-        if (!process.env.MCP_STATA_UVX_CMD || process.env.MCP_STATA_UVX_CMD !== uvCommand) {
-            process.env.MCP_STATA_UVX_CMD = uvCommand;
+        if (!env.MCP_STATA_UVX_CMD || env.MCP_STATA_UVX_CMD !== uvCommand) {
+            env.MCP_STATA_UVX_CMD = uvCommand;
         }
         return true;
     }
@@ -360,14 +383,14 @@ function ensureMcpCliAvailable(context) {
     const installCmd = getUvInstallCommand();
     debugLog('uvx not found on PATH; attempting automatic installation via uv installer.');
     revealOutput();
-    const env = { ...process.env, UV_INSTALL_DIR: installDir };
-    const result = spawnSync(installCmd.command, installCmd.args, { env, encoding: 'utf8' });
+    const installEnv = { ...env, UV_INSTALL_DIR: installDir };
+    const result = cp.spawnSync(installCmd.command, installCmd.args, { env: installEnv, encoding: 'utf8' });
 
     const installed = findUvBinary(installDir);
     if (result.status === 0 && installed) {
         uvCommand = installed;
         debugLog(`Using uv binary at: ${uvCommand} (automatically installed)`);
-        process.env.MCP_STATA_UVX_CMD = uvCommand;
+        env.MCP_STATA_UVX_CMD = uvCommand;
         return true;
     }
 
@@ -387,7 +410,7 @@ function getMcpPackageVersion() {
     // 1) Try invoking the CLI with --version (primary method).
     try {
         const args = [...baseArgs, '--from', MCP_PACKAGE_SPEC, MCP_PACKAGE_NAME, '--version'];
-        const result = spawnSync(cmd, args, {
+        const result = cp.spawnSync(cmd, args, {
             encoding: 'utf8',
             timeout: 5000,
             stdio: ['ignore', 'pipe', 'pipe']
@@ -406,7 +429,7 @@ function getMcpPackageVersion() {
         // We use a marker to pull the exact version out of a potentially polluted stdout.
         const pyCode = "import importlib.metadata; ver = importlib.metadata.version('mcp-stata'); print(f'VERSION_MATCH:{ver}:VERSION_MATCH')";
         const args = [...baseArgs, '--from', MCP_PACKAGE_SPEC, 'python', '-I', '-c', pyCode];
-        const pyResult = spawnSync(cmd, args, {
+        const pyResult = cp.spawnSync(cmd, args, {
             encoding: 'utf8',
             timeout: 5000,
             stdio: ['ignore', 'pipe', 'pipe']
@@ -472,7 +495,7 @@ function refreshMcpPackage() {
     const args = [...baseArgs, '--refresh', '--refresh-package', MCP_PACKAGE_NAME, '--from', MCP_PACKAGE_SPEC, MCP_PACKAGE_NAME, '--version'];
     
     try {
-        const result = spawnSync(cmd, args, { encoding: 'utf8', timeout: 10000 });
+        const result = cp.spawnSync(cmd, args, { encoding: 'utf8', timeout: 10000 });
         const stdout = result?.stdout?.toString?.().trim() || '';
         const stderr = result?.stderr?.toString?.().trim() || '';
         
@@ -533,17 +556,18 @@ function promptInstallMcpCli(context, force = false) {
 }
 
 function findUvBinary(optionalInstallDir) {
+    const env = getEnv();
     const base = ['uvx', 'uvx.exe', 'uv', 'uv.exe'];
 
     // 0. Use environment variable override if specified (e.g. for testing)
-    if (process.env.MCP_STATA_UVX_CMD) {
-        return process.env.MCP_STATA_UVX_CMD;
+    if (env.MCP_STATA_UVX_CMD) {
+        return env.MCP_STATA_UVX_CMD;
     }
 
     // 1. Check system PATH first to respect user-managed installations
     for (const name of base) {
         // Simple test to see if it's on the PATH and executable
-        const result = spawnSync(name, ['--version'], { encoding: 'utf8', shell: process.platform === 'win32' });
+        const result = cp.spawnSync(name, ['--version'], { encoding: 'utf8', shell: process.platform === 'win32' });
         const stderr = (result.stderr || '').toString();
         if (!result.error && result.status === 0 && !stderr.includes('command not found')) {
             return name;
@@ -560,7 +584,7 @@ function findUvBinary(optionalInstallDir) {
             // Try platform-specific subdirectory first
             const platformSpecific = path.join(globalContext.extensionUri.fsPath, 'bin', `${platform}-${arch}`, binName);
             if (fs.existsSync(platformSpecific)) {
-                const result = spawnSync(platformSpecific, ['--version'], { encoding: 'utf8', shell: process.platform === 'win32' });
+                const result = cp.spawnSync(platformSpecific, ['--version'], { encoding: 'utf8', shell: process.platform === 'win32' });
                 const stderr = (result.stderr || '').toString();
                 if (!result.error && result.status === 0 && !stderr.includes('command not found')) {
                     return platformSpecific;
@@ -570,7 +594,7 @@ function findUvBinary(optionalInstallDir) {
             // Fallback to generic bin directory
             const genericBundled = path.join(globalContext.extensionUri.fsPath, 'bin', binName);
             if (fs.existsSync(genericBundled)) {
-                const result = spawnSync(genericBundled, ['--version'], { encoding: 'utf8', shell: process.platform === 'win32' });
+                const result = cp.spawnSync(genericBundled, ['--version'], { encoding: 'utf8', shell: process.platform === 'win32' });
                 const stderr = (result.stderr || '').toString();
                 if (!result.error && result.status === 0 && !stderr.includes('command not found')) {
                     return genericBundled;
@@ -585,7 +609,7 @@ function findUvBinary(optionalInstallDir) {
     const home = typeof os.homedir === 'function' ? os.homedir() : null;
     if (home) {
         defaultDirs.add(path.join(home, '.local', 'bin'));
-        const localApp = process.env.LOCALAPPDATA || path.join(home, 'AppData', 'Local');
+        const localApp = env.LOCALAPPDATA || path.join(home, 'AppData', 'Local');
         defaultDirs.add(path.join(localApp, 'uv'));
         defaultDirs.add(path.join(localApp, 'uv', 'bin'));
     }
@@ -602,7 +626,7 @@ function findUvBinary(optionalInstallDir) {
     }
 
     for (const candidate of candidates) {
-        const result = spawnSync(candidate, ['--version'], { encoding: 'utf8', shell: process.platform === 'win32' });
+        const result = cp.spawnSync(candidate, ['--version'], { encoding: 'utf8', shell: process.platform === 'win32' });
         const stderr = (result.stderr || '').toString();
         if (!result.error && result.status === 0 && !stderr.includes('command not found')) {
             return candidate;
@@ -614,7 +638,7 @@ function findUvBinary(optionalInstallDir) {
 function isMcpConfigWorking(config) {
     if (!config || !config.command) return false;
     try {
-        const result = spawnSync(config.command, ['--version'], { encoding: 'utf8', shell: process.platform === 'win32', timeout: 3000 });
+        const result = cp.spawnSync(config.command, ['--version'], { encoding: 'utf8', shell: process.platform === 'win32', timeout: 3000 });
         const stderr = (result.stderr || '').toString();
         return !result.error && result.status === 0 && !stderr.includes('command not found');
     } catch (_err) {
@@ -624,7 +648,7 @@ function isMcpConfigWorking(config) {
 
 function isClaudeCodeInstalled() {
     try {
-        const result = spawnSync('claude', ['--version'], { encoding: 'utf8', shell: process.platform === 'win32', timeout: 3000 });
+        const result = cp.spawnSync('claude', ['--version'], { encoding: 'utf8', shell: process.platform === 'win32', timeout: 3000 });
         const stderr = (result.stderr || '').toString();
         return !result.error && result.status === 0 && !stderr.includes('command not found');
     } catch (_err) {
@@ -780,6 +804,7 @@ function getMcpConfigTarget(context) {
 }
 
 function resolveHostMcpPath(appName, home, overridePath, platform, _hasHomeOverride = false) {
+    const env = getEnv();
     if (overridePath) {
         return { configPath: overridePath, prefersCursorFormat: true };
     }
@@ -789,8 +814,8 @@ function resolveHostMcpPath(appName, home, overridePath, platform, _hasHomeOverr
     const codePath = (codeDir) => {
         if (platform === 'darwin') return path.join(home, 'Library', 'Application Support', codeDir, 'User', 'mcp.json');
         if (platform === 'win32') {
-            const envAppData = (process.env.APPDATA && process.env.APPDATA !== 'undefined' && process.env.APPDATA !== 'null' && process.env.APPDATA !== '')
-                ? process.env.APPDATA
+            const envAppData = (env.APPDATA && env.APPDATA !== 'undefined' && env.APPDATA !== 'null' && env.APPDATA !== '')
+                ? env.APPDATA
                 : null;
             const roaming = envAppData || (home ? path.join(home, 'AppData', 'Roaming') : null);
             if (!roaming) return null;
@@ -814,7 +839,7 @@ function resolveHostMcpPath(appName, home, overridePath, platform, _hasHomeOverr
             return { configPath: path.join(home, 'Library', 'Application Support', 'Antigravity', 'User', 'mcp.json'), prefersCursorFormat: true };
         }
         if (platform === 'win32') {
-            const roaming = process.env.APPDATA || path.join(home, 'AppData', 'Roaming');
+            const roaming = env.APPDATA || path.join(home, 'AppData', 'Roaming');
             return { configPath: path.join(roaming, 'Antigravity', 'User', 'mcp.json'), prefersCursorFormat: true };
         }
         return { configPath: path.join(home, '.antigravity', 'mcp.json'), prefersCursorFormat: true };

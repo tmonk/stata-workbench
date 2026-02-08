@@ -1,10 +1,15 @@
 const path = require('path');
 const { jest, mock } = require('bun:test');
+const { setDefaultVscode, setDefaultEnv } = require('../src/runtime-context');
+const { createVscodeMock } = require('./mocks/vscode');
 
 globalThis.jest = jest;
 globalThis.mock = mock;
 
-mock.module('vscode', () => require(path.join(__dirname, 'mocks', 'vscode')));
+setDefaultEnv(process.env);
+setDefaultVscode(createVscodeMock());
+
+mock.module('vscode', () => require(path.join(__dirname, 'mocks', 'vscode-proxy')));
 
 // Mock Sentry to avoid native module crashes and telemetry during tests
 mock.module('@sentry/node', () => ({
@@ -19,12 +24,7 @@ mock.module('@sentry/node', () => ({
   startTransaction: jest.fn().mockReturnValue({
     finish: jest.fn(),
     startChild: jest.fn().mockReturnValue({ finish: jest.fn() })
-  }),
-  nodeProfilingIntegration: jest.fn()
-}));
-
-mock.module('@sentry/profiling-node', () => ({
-  nodeProfilingIntegration: jest.fn()
+  })
 }));
 
 mock.module('@sentry/browser', () => ({

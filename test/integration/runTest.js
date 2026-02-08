@@ -1,9 +1,37 @@
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
+const { spawn } = require('child_process');
 const { runTests } = require('@vscode/test-electron');
 
 async function main() {
+    const shardTotal = Math.max(1, parseInt(process.env.TEST_SHARD_TOTAL || '1', 10));
+    const shardIndexEnv = process.env.TEST_SHARD_INDEX;
+
+    if (shardTotal > 1 && (shardIndexEnv === undefined || shardIndexEnv === null || shardIndexEnv === '')) {
+        const shardIndices = Array.from({ length: shardTotal }, (_v, idx) => idx);
+        const scriptPath = __filename;
+
+        const runs = shardIndices.map((idx) => new Promise((resolve, reject) => {
+            const env = { ...process.env, TEST_SHARD_TOTAL: String(shardTotal), TEST_SHARD_INDEX: String(idx) };
+            const child = spawn(process.execPath, [scriptPath], { env, stdio: 'inherit' });
+            child.on('exit', (code) => {
+                if (code === 0) return resolve();
+                reject(new Error(`Shard ${idx + 1}/${shardTotal} exited with code ${code}`));
+            });
+            child.on('error', reject);
+        }));
+
+        try {
+            await Promise.all(runs);
+            process.exit(0);
+        } catch (err) {
+            console.error('Integration shard run failed:', err.message || err);
+            process.exit(1);
+        }
+        return;
+    }
+
     let userDataDir;
     let extDir;
     let workspacePath;

@@ -1,58 +1,41 @@
-const { describe, it, expect, jest, beforeEach, afterEach } = require('bun:test');
+const { describe, it, expect, jest } = require('bun:test');
 const path = require('path');
-const fs = require('fs');
-const cp = require('child_process');
-
-let extension;
-let vscode;
+const { withTestContext } = require('../helpers/test-context');
+const { createExtensionHarness } = require('../helpers/extension-harness');
 
 describe('Bundled Binary Discovery', () => {
-    let originalSpawnSync;
-    let originalExistsSync;
-    let originalWriteFileSync;
-    let originalMkdirSync;
-    let oldEnv;
-
-    beforeEach(() => {
-        // Reset cache to reload extension with mocks
-        for (const key of Object.keys(require.cache)) {
-            delete require.cache[key];
-        }
-
-        oldEnv = { ...process.env };
-        delete process.env.MCP_STATA_UVX_CMD;
-
-        originalSpawnSync = cp.spawnSync;
-        originalExistsSync = fs.existsSync;
-        originalWriteFileSync = fs.writeFileSync;
-        originalMkdirSync = fs.mkdirSync;
-
-        cp.spawnSync = jest.fn();
-        fs.existsSync = jest.fn();
-        fs.writeFileSync = jest.fn();
-        fs.mkdirSync = jest.fn();
-
-        // Basic VS Code mock
-        vscode = require('vscode');
-        
-        // Load extension
-        extension = require('../../src/extension');
-    });
-
-    afterEach(() => {
-        cp.spawnSync = originalSpawnSync;
-        fs.existsSync = originalExistsSync;
-        fs.writeFileSync = originalWriteFileSync;
-        fs.mkdirSync = originalMkdirSync;
-        process.env = oldEnv;
-        jest.clearAllMocks();
-    });
-
     it('finds bundled binary when system uv is missing', () => {
+        const fs = {
+            existsSync: jest.fn(),
+            writeFileSync: jest.fn(),
+            mkdirSync: jest.fn()
+        };
+        const cp = { spawnSync: jest.fn() };
+        const mcpClientMock = {
+            setLogger: jest.fn(),
+            onStatusChanged: jest.fn().mockReturnValue({ dispose: jest.fn() }),
+            dispose: jest.fn(),
+            connect: jest.fn().mockResolvedValue({}),
+            runSelection: jest.fn().mockResolvedValue({}),
+            getUiChannel: jest.fn().mockResolvedValue(null),
+            hasConfig: jest.fn().mockReturnValue(false),
+            getServerConfig: jest.fn().mockReturnValue({ command: null, args: null, env: {}, configPath: null })
+        };
+
+        const { extension, vscode } = createExtensionHarness({ fs, cp });
+        return withTestContext({
+            vscode: vscode,
+            fs,
+            childProcess: cp,
+            mcpClient: mcpClientMock
+        }, (ctx) => {
+            const env = ctx.env;
+            delete env.MCP_STATA_UVX_CMD;
+
         const platform = process.platform;
         const arch = process.arch;
         const binName = platform === 'win32' ? 'uvx.exe' : 'uvx';
-        
+
         // 1. System calls fail
         cp.spawnSync.mockImplementation((cmd, args) => {
             if (['uvx', 'uvx.exe', 'uv', 'uv.exe'].includes(cmd)) {
@@ -73,7 +56,6 @@ describe('Bundled Binary Discovery', () => {
             return false;
         });
 
-        // We need a mock context with extensionUri
         const mockContext = {
             extensionUri: { fsPath: '/mock/extension' },
             globalStoragePath: '/mock/storage',
@@ -82,23 +64,12 @@ describe('Bundled Binary Discovery', () => {
             extensionMode: vscode.ExtensionMode.Test
         };
 
-        // Re-inject globalContext which is set in activate
-        // But findUvBinary is not exported, it's used inside activate.
-        // Wait, activate calls ensureMcpCliAvailable which calls findUvBinary.
+        // Activate extension to trigger uv discovery
+            const api = extension.activate(mockContext);
 
-        // Actually, let's test ensureMcpCliAvailable via activate
-        // We need to mock more things for activate to pass
-        const mcpClient = require('../../src/mcp-client').client;
-        mcpClient.onStatusChanged = jest.fn().mockReturnValue({ dispose: jest.fn() });
-        mcpClient.setLogger = jest.fn();
-        mcpClient.setTaskDoneHandler = jest.fn();
-
-        extension.activate(mockContext);
-
-        // It should have found the bundled binary
-        // Based on the logic in extension.js:
-        // process.env.MCP_STATA_UVX_CMD = uvCommand;
         const expectedPrefix = path.join('/mock/extension', 'bin', `${platform}-${arch}`, binName);
-        expect(process.env.MCP_STATA_UVX_CMD).toContain(expectedPrefix);
+            expect(env.MCP_STATA_UVX_CMD).toContain(expectedPrefix);
+            expect(api).toBeTruthy();
+        });
     });
 });
