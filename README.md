@@ -29,7 +29,7 @@ Install directly from the marketplace listings by searching for **Stata Workbenc
 - VS Code Marketplace: [tmonk.stata-workbench](https://marketplace.visualstudio.com/items?itemName=tmonk.stata-workbench)
 - Open VSX: [tmonk/stata-workbench](https://open-vsx.org/extension/tmonk/stata-workbench)
 
-Offline/VSIX fallback:
+Offline fallback:
 1. Download the latest extension .vsix from the [releases page](https://github.com/tmonk/stata-workbench/releases/latest).
 2. In your VS Code/Cursor/Antigravity/Windsurf IDE, open the command palette (`Ctrl+Shift+P` or `Cmd+Shift+P` on Mac) and select `Extensions: Install from VSIX...`.
 3. Select the downloaded .vsix file and install.
