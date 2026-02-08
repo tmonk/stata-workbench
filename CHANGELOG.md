@@ -1,3 +1,10 @@
+## [0.18.4](https://github.com/tmonk/stata-workbench/compare/v0.18.3...v0.18.4) (2026-02-08)
+
+
+### Bug Fixes
+
+* update Sentry span names to include 'stata.' prefix for better tracking ([5481a3e](https://github.com/tmonk/stata-workbench/commit/5481a3e8ea5b89263a720a0ee7ce56b566ae9c56))
+
 ## [0.18.3](https://github.com/tmonk/stata-workbench/compare/v0.18.2...v0.18.3) (2026-02-08)
 
 
