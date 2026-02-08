@@ -1,3 +1,10 @@
+## [0.18.1](https://github.com/tmonk/stata-workbench/compare/v0.18.0...v0.18.1) (2026-02-08)
+
+
+### Bug Fixes
+
+* testing fixes ([d476f6b](https://github.com/tmonk/stata-workbench/commit/d476f6b00c7591f14c5986044152d992f005a371))
+
 # [0.18.0](https://github.com/tmonk/stata-workbench/compare/v0.17.3...v0.18.0) (2026-02-07)
 
 
