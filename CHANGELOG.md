@@ -1,3 +1,10 @@
+## [0.18.2](https://github.com/tmonk/stata-workbench/compare/v0.18.1...v0.18.2) (2026-02-08)
+
+
+### Bug Fixes
+
+* ensure runner isn't polling, uses notifications only ([ec90b4e](https://github.com/tmonk/stata-workbench/commit/ec90b4ee3f93508e8007d6971cf910bc821fee23))
+
 ## [0.18.1](https://github.com/tmonk/stata-workbench/compare/v0.18.0...v0.18.1) (2026-02-08)
 
 
