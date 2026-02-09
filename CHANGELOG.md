@@ -1,3 +1,15 @@
+# [0.19.0](https://github.com/tmonk/stata-workbench/compare/v0.18.4...v0.19.0) (2026-02-09)
+
+
+### Bug Fixes
+
+* add mcp-stata/ to .gitignore to prevent tracking of build artifacts ([b1259ed](https://github.com/tmonk/stata-workbench/commit/b1259ed02b836a61c1cffff409fdf4d3fd1f9a67))
+
+
+### Features
+
+* add noReloadOnClear setting to control reloading of startup/profile do files ([4fd2e88](https://github.com/tmonk/stata-workbench/commit/4fd2e8859ca3ff917f459134915e50d27ff5c539))
+
 ## [0.18.4](https://github.com/tmonk/stata-workbench/compare/v0.18.3...v0.18.4) (2026-02-08)
 
 
