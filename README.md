@@ -7,6 +7,8 @@ A VS Code compatible extension (Cursor, Windsurf, Antigravity etc.) that allows 
 
 Built by [Thomas Monk](https://tdmonk.com), London School of Economics.
 
+![Open VSX Downloads](https://img.shields.io/open-vsx/dt/tmonk/stata-workbench?style=flat-square&logo=cursor&label=extension%20downloads&color=black&link=https%3A%2F%2Fopen-vsx.org%2Fextension%2Ftmonk%2Fstata-workbench)
+
 ## Why use this?
 
 **Run Stata without leaving your editor.** Execute code, see output, and view graphs - all within VS Code. No switching windows, no copying and pasting between your do-file editor and an AI chat.
