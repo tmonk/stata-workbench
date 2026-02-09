@@ -35,7 +35,15 @@ async function main() {
     let userDataDir;
     let extDir;
     let workspacePath;
+    let restoredEnv = null;
     try {
+        // Integration tests may run from a VS Code extension-host environment
+        // (for example when launched from Codex/IDE terminals). Those inherited
+        // vars can force spawned Electron binaries into Node mode and break
+        // argument parsing (e.g. "--user-data-dir" rejected as an unknown flag).
+        // Sanitize them for the duration of this test process.
+        restoredEnv = sanitizeHostElectronEnv();
+
         const extensionDevelopmentPath = path.resolve(__dirname, '../../');
         const extensionTestsPath = path.resolve(__dirname, './suite/index');
 
@@ -101,6 +109,34 @@ async function main() {
         } catch (_err) {
         }
     }
+    if (typeof restoredEnv === 'function') {
+        restoredEnv();
+    }
+}
+
+function sanitizeHostElectronEnv() {
+    const previous = {
+        ELECTRON_RUN_AS_NODE: process.env.ELECTRON_RUN_AS_NODE
+    };
+    const removed = {};
+
+    delete process.env.ELECTRON_RUN_AS_NODE;
+
+    for (const key of Object.keys(process.env)) {
+        if (key.startsWith('VSCODE_')) {
+            removed[key] = process.env[key];
+            delete process.env[key];
+        }
+    }
+
+    return () => {
+        if (previous.ELECTRON_RUN_AS_NODE !== undefined) {
+            process.env.ELECTRON_RUN_AS_NODE = previous.ELECTRON_RUN_AS_NODE;
+        }
+        for (const [key, value] of Object.entries(removed)) {
+            process.env[key] = value;
+        }
+    };
 }
 
 function dumpMcpLogs(userDataDir) {

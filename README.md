@@ -95,6 +95,7 @@ Offline fallback:
 - `stataMcp.claudeCodeConfigScope` (default `user`): write Claude Code CLI config to `~/.claude.json` (user) or project `.mcp.json` (project).
 - `stataMcp.runFileWorkingDirectory` (default empty): working directory when running .do files. Supports an absolute path, ~, ${workspaceFolder} or ${fileDir}; empty uses the .do file's folder.
 - `stataMcp.setupTimeoutSeconds` (default `60`): timeout (seconds) for Stata initialization.
+- `stataMcp.noReloadOnClear` (default `false`): disable reloading startup/profile do files after clear all/program drop.
 - `stataMcp.maxOutputLines` (default `0`): limit Stata output to N lines (0 = unlimited). Useful for reducing token usage with AI agents.
 - `stataMcp.runFileBehavior` (default `runDirtyFile`): choose whether 'Run File' should run the current editor content (including unsaved changes) or the version saved on disk.
 - `stataMcp.defaultVariableLimit` (default `100`): default number of variables to select when opening the Data Browser (0 = all). Useful for huge datasets.

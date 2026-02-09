@@ -110,6 +110,15 @@ function getOutputLogHandler() {
     };
 }
 
+function applyNoReloadOnClearSetting(enabled) {
+    const env = getEnv();
+    if (enabled) {
+        env.MCP_STATA_NO_RELOAD_ON_CLEAR = '1';
+    } else {
+        delete env.MCP_STATA_NO_RELOAD_ON_CLEAR;
+    }
+}
+
 function getUvInstallCommand(platform = process.platform) {
     if (platform === 'win32') {
         const display = 'powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -Command "iwr https://astral.sh/uv/install.ps1 -useb | iex"';
@@ -149,6 +158,7 @@ function activate(context) {
     outputChannel = vscode.window.createOutputChannel('Stata Workbench');
 
     const settings = vscode.workspace.getConfiguration('stataMcp');
+    applyNoReloadOnClearSetting(!!settings.get('noReloadOnClear', false));
     const version = pkg?.version || 'unknown';
     appendLine(`Stata Workbench ready (extension v${version})`);
     missingCliPrompted = !!context.globalState?.get?.(MISSING_CLI_PROMPT_KEY);
@@ -333,6 +343,9 @@ function activate(context) {
                 mcpClient.updateConfig({
                     logStataCode: config.get('logStataCode', false)
                 });
+                if (e.affectsConfiguration('stataMcp.noReloadOnClear')) {
+                    applyNoReloadOnClearSetting(!!config.get('noReloadOnClear', false));
+                }
             }
         })
     );
@@ -870,6 +883,18 @@ function writeMcpConfig(target) {
         }
         const json = parsed.data && typeof parsed.data === 'object' ? parsed.data : {};
 
+        const config = vscode.workspace.getConfiguration('stataMcp');
+        const noReloadOnClear = !!config.get('noReloadOnClear', false);
+        const applyNoReloadEnv = (env) => {
+            const next = { ...(env || {}) };
+            if (noReloadOnClear) {
+                next.MCP_STATA_NO_RELOAD_ON_CLEAR = '1';
+            } else {
+                delete next.MCP_STATA_NO_RELOAD_ON_CLEAR;
+            }
+            return next;
+        };
+
         // Only write the format appropriate for the host app.
         const shouldWriteCursor = !!writeCursor;
         const shouldWriteVscode = !!writeVscode;
@@ -896,14 +921,14 @@ function writeMcpConfig(target) {
         const existingCursor = json.mcpServers?.[MCP_SERVER_ID];
         const existingVscode = json.servers?.[MCP_SERVER_ID];
 
-        const mergedEnvForCursor = {
+        const mergedEnvForCursor = applyNoReloadEnv({
             ...(existingVscode?.env || {}),
             ...(existingCursor?.env || {})
-        };
-        const mergedEnvForVscode = {
+        });
+        const mergedEnvForVscode = applyNoReloadEnv({
             ...(existingCursor?.env || {}),
             ...(existingVscode?.env || {})
-        };
+        });
 
         if (shouldWriteCursor) {
             json.mcpServers = json.mcpServers || {};

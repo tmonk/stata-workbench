@@ -173,6 +173,11 @@
           "default": 60,
           "description": "Timeout (seconds) for Stata initialization (stata_setup.config preflight). Passed to STATA_SETUP_TIMEOUT for mcp-stata."
         },
+        "stataMcp.noReloadOnClear": {
+          "type": "boolean",
+          "default": false,
+          "description": "Disable reloading startup/profile do files after clear all/program drop. Maps to MCP_STATA_NO_RELOAD_ON_CLEAR."
+        },
         "stataMcp.maxOutputLines": {
           "type": "number",
           "default": 0,

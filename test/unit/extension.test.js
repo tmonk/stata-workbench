@@ -184,6 +184,67 @@ describe('extension unit tests', () => {
             });
         });
 
+        itWithHarness('writeMcpConfig sets MCP_STATA_NO_RELOAD_ON_CLEAR when enabled', () => {
+            const config = vscode.workspace.getConfiguration();
+            config.get.mockImplementation((key, def) => {
+                if (key === 'noReloadOnClear') return true;
+                return def;
+            });
+
+            fs.existsSync.mockReturnValue(true);
+            fs.readFileSync.mockReturnValue(JSON.stringify({
+                servers: {
+                    mcp_stata: {
+                        type: 'stdio',
+                        command: 'uvx',
+                        args: ['--from', 'mcp-stata@latest', 'mcp-stata'],
+                        env: { STATA_HOME: '/opt/stata' }
+                    }
+                }
+            }));
+
+            extension.writeMcpConfig({
+                configPath: '/tmp/test.json',
+                writeVscode: true,
+                writeCursor: false
+            });
+
+            const updated = JSON.parse(fs.writeFileSync.mock.calls[0][1]);
+            expect(updated.servers.mcp_stata.env).toEqual({
+                STATA_HOME: '/opt/stata',
+                MCP_STATA_NO_RELOAD_ON_CLEAR: '1'
+            });
+        });
+
+        itWithHarness('writeMcpConfig removes MCP_STATA_NO_RELOAD_ON_CLEAR when disabled', () => {
+            const config = vscode.workspace.getConfiguration();
+            config.get.mockImplementation((key, def) => {
+                if (key === 'noReloadOnClear') return false;
+                return def;
+            });
+
+            fs.existsSync.mockReturnValue(true);
+            fs.readFileSync.mockReturnValue(JSON.stringify({
+                servers: {
+                    mcp_stata: {
+                        type: 'stdio',
+                        command: 'uvx',
+                        args: ['--from', 'mcp-stata@latest', 'mcp-stata'],
+                        env: { MCP_STATA_NO_RELOAD_ON_CLEAR: '1', STATA_HOME: '/opt/stata' }
+                    }
+                }
+            }));
+
+            extension.writeMcpConfig({
+                configPath: '/tmp/test.json',
+                writeVscode: true,
+                writeCursor: false
+            });
+
+            const updated = JSON.parse(fs.writeFileSync.mock.calls[0][1]);
+            expect(updated.servers.mcp_stata.env).toEqual({ STATA_HOME: '/opt/stata' });
+        });
+
         itWithHarness('writeMcpConfig (Cursor host) writes only mcpServers entry, merges env, and removes VS Code mcp_stata', () => {
             fs.existsSync.mockReturnValue(true);
             fs.readFileSync.mockReturnValue(JSON.stringify({
