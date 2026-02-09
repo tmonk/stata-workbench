@@ -1,0 +1,3 @@
+[submodule "mcp-stata"]
+	path = mcp-stata
+	url = https://github.com/tmonk/mcp-stata.git
