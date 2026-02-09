@@ -7,7 +7,7 @@ A VS Code compatible extension (Cursor, Windsurf, Antigravity etc.) that allows 
 
 Built by [Thomas Monk](https://tdmonk.com), London School of Economics.
 
-![Open VSX Downloads](https://img.shields.io/open-vsx/dt/tmonk/stata-workbench?style=flat-square&logo=cursor&label=extension%20downloads&color=black&link=https%3A%2F%2Fopen-vsx.org%2Fextension%2Ftmonk%2Fstata-workbench)
+[![Open VSX Downloads](https://img.shields.io/open-vsx/dt/tmonk/stata-workbench?style=flat-square&logo=cursor&label=extension%20downloads&color=black&link=https%3A%2F%2Fopen-vsx.org%2Fextension%2Ftmonk%2Fstata-workbench)](https://open-vsx.org/extension/tmonk/stata-workbench)
 
 ## Why use this?
 
