@@ -725,6 +725,10 @@ class StataMcpClient {
 
         const configuredEnv = serverConfig.env || {};
 
+        // Resolve startup do file path if configured
+        const startupDoFileRaw = config.get('startupDoFile', '');
+        const resolvedStartupDoFile = this._resolvePath(startupDoFileRaw);
+
         // Log that we're creating the transport
         this._log(`[mcp-stata] Creating StdioClientTransport`);
         const configSource = serverConfig.configPath || 'defaults (uvx --refresh --refresh-package)';
@@ -744,6 +748,7 @@ class StataMcpClient {
                 ...env,
                 ...configuredEnv,
                 STATA_SETUP_TIMEOUT: setupTimeoutSeconds,
+                MCP_STATA_STARTUP_DO_FILE: resolvedStartupDoFile || undefined,
                 // Force Python to not buffer output
                 PYTHONUNBUFFERED: '1'
             }
@@ -1967,18 +1972,16 @@ class StataMcpClient {
         return undefined;
     }
 
-    _resolveRunFileCwd(filePath) {
-        const fileDir = path.dirname(filePath);
-        const config = vscode.workspace.getConfiguration('stataMcp');
-        const rawTemplate = config.get('runFileWorkingDirectory', '');
-        const template = typeof rawTemplate === 'string' ? rawTemplate : '';
-        if (!template.trim()) return path.normalize(fileDir);
+    _resolvePath(template, extraReplacements = {}) {
+        if (!template || typeof template !== 'string' || !template.trim()) {
+            return '';
+        }
 
         const workspaceRoot = this._resolveWorkspaceRoot() || '';
         const replacements = {
             workspaceFolder: workspaceRoot,
-            workspaceRoot,
-            fileDir
+            workspaceRoot: workspaceRoot,
+            ...extraReplacements
         };
 
         const expanded = template.replace(/\$\{([^}]+)\}/g, (_m, key) => {
@@ -1988,7 +1991,7 @@ class StataMcpClient {
             return '';
         }).trim();
 
-        if (!expanded) return path.normalize(fileDir);
+        if (!expanded) return '';
 
         const env = getEnv();
         const homeExpanded = expanded.startsWith('~')
@@ -2004,6 +2007,15 @@ class StataMcpClient {
         }
 
         return path.normalize(path.resolve(homeExpanded));
+    }
+
+    _resolveRunFileCwd(filePath) {
+        const fileDir = path.dirname(filePath);
+        const config = vscode.workspace.getConfiguration('stataMcp');
+        const rawTemplate = config.get('runFileWorkingDirectory', '');
+        const template = typeof rawTemplate === 'string' ? rawTemplate : '';
+        
+        return this._resolvePath(template, { fileDir }) || path.normalize(fileDir);
     }
 
     async _collectGraphArtifacts(client, meta = {}) {

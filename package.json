@@ -187,6 +187,11 @@
           "default": "runDirtyFile",
           "description": "Choose whether 'Run File' should run the current editor content (including unsaved changes) or the version saved on disk."
         },
+        "stataMcp.startupDoFile": {
+          "type": "string",
+          "default": "",
+          "description": "Path to a Stata .do file to load automatically for every session. Supports workspace variables like ${workspaceFolder} and ~."
+        },
         "stataMcp.defaultVariableLimit": {
           "type": "number",
           "default": 100,
