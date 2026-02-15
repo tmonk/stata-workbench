@@ -108,5 +108,32 @@ describe('McpClient PyPI Versioning (Sinon Stubbing)', () => {
             expect(client._fetchLatestVersion.calledOnce).toBe(true);
             expect(client._pypiVersion).toBeNull();
         });
+
+        it('should only spawn one process when multiple callers invoke _ensureClient concurrently (race fix)', async () => {
+            // Simulate slow PyPI fetch so concurrent callers can enter before _createClient runs
+            let resolveFetch;
+            client._fetchLatestVersion = sinon.stub().returns(new Promise(r => { resolveFetch = r; }));
+            const mockClient = { connect: sinon.stub().resolves() };
+            client._createClient = sinon.stub().resolves({ 
+                client: mockClient, 
+                transport: {}, 
+                setupTimeoutSeconds: '60' 
+            });
+            client._refreshToolList = sinon.stub().resolves();
+
+            // Fire two _ensureClient calls concurrently (before any await completes)
+            const p1 = client._ensureClient();
+            const p2 = client._ensureClient();
+
+            // Both should resolve to the same client (shared _clientPromise)
+            // Let the fetch resolve so _createClient runs
+            resolveFetch({ latest: '1.0.0', all: ['1.0.0'] });
+
+            const [c1, c2] = await Promise.all([p1, p2]);
+            expect(c1).toBe(c2);
+
+            // _createClient must be called only once (no duplicate mcp-stata spawns)
+            expect(client._createClient.calledOnce).toBe(true);
+        });
     });
 });

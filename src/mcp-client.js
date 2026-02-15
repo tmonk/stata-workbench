@@ -498,25 +498,27 @@ class StataMcpClient {
     async _ensureClient() {
         if (this._clientPromise) return this._clientPromise;
 
-        // Try to fetch latest version from PyPI before connecting, if not already fetched.
-        // We do this here so it only happens once per client lifecycle.
-        const env = getEnv();
-        if (!this._pypiVersion && !env.MCP_STATA_PACKAGE_SPEC) {
-            try {
-                const { latest, all } = await this._fetchLatestVersion();
-                this._pypiVersion = latest;
-
-                // Log top 5 versions found on PyPI
-                const top5 = this._sortVersions(all).slice(0, 5);
-                this._log(`[mcp-stata] PyPI versions (latest 5): ${top5.join(', ')}`);
-                this._log(`[mcp-stata] Resolved latest version: ${this._pypiVersion}`);
-            } catch (err) {
-                Sentry.captureException(err);
-                this._log(`[mcp-stata] PyPI version fetch failed, using fallback: ${err.message}`);
-            }
-        }
-
+        // Assign the promise IMMEDIATELY (synchronously) before any await.
+        // This prevents a race where multiple callers (e.g. startup connect + Do button
+        // before init completes) could each spawn a separate mcp-stata process.
         this._clientPromise = (async () => {
+            // Try to fetch latest version from PyPI before connecting, if not already fetched.
+            const env = getEnv();
+            if (!this._pypiVersion && !env.MCP_STATA_PACKAGE_SPEC) {
+                try {
+                    const { latest, all } = await this._fetchLatestVersion();
+                    this._pypiVersion = latest;
+
+                    // Log top 5 versions found on PyPI
+                    const top5 = this._sortVersions(all).slice(0, 5);
+                    this._log(`[mcp-stata] PyPI versions (latest 5): ${top5.join(', ')}`);
+                    this._log(`[mcp-stata] Resolved latest version: ${this._pypiVersion}`);
+                } catch (err) {
+                    Sentry.captureException(err);
+                    this._log(`[mcp-stata] PyPI version fetch failed, using fallback: ${err.message}`);
+                }
+            }
+
             const { client, transport, setupTimeoutSeconds } = await this._createClient();
             
             try {
