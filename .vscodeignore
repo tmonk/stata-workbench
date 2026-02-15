@@ -56,3 +56,4 @@ dist/**
 img/*.psd
 img/screenshot*
 *.vsix
+mcp-stata/
