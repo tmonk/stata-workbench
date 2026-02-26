@@ -2405,12 +2405,12 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
     }
 
     // Debounce mutation observer to automatically save state periodically
-    let saveTimer;
-    const observer = new MutationObserver(() => {
-        clearTimeout(saveTimer);
-        saveTimer = setTimeout(saveState, 500);
+    let stateSaveTimer;
+    const stateObserver = new MutationObserver(() => {
+        clearTimeout(stateSaveTimer);
+        stateSaveTimer = setTimeout(saveState, 500);
     });
-    observer.observe(chatStream, { childList: true, subtree: true, characterData: true });
+    stateObserver.observe(chatStream, { childList: true, subtree: true, characterData: true });
 
     // Dynamic spacer for fixed input area
     const inputArea = document.querySelector('.input-area');
@@ -2544,11 +2544,11 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
     });
     
     // Also update when content changes
-    const observer = new MutationObserver(() => {
+    const spacerObserver = new MutationObserver(() => {
         updateSpacer();
     });
     if (inputArea) {
-        observer.observe(inputArea, { attributes: true, childList: true, subtree: true });
+        spacerObserver.observe(inputArea, { attributes: true, childList: true, subtree: true });
     }
 
     function isAtBottom() {

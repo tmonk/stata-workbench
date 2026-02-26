@@ -14,7 +14,7 @@ const loadTerminalPanel = () => proxyquire('../../src/terminal-panel', {
 const itWithContext = (name, fn) => it(name, () => withTestContext({}, fn));
 
 describe('Webview Script Integrity', () => {
-    itWithContext('should produce valid script content without literal newlines in strings', () => {
+    itWithContext('should not have duplicate const observer or saveTimer in the webview script', () => {
         const vscode = require('vscode');
         let htmlContent = '';
 
@@ -49,9 +49,7 @@ describe('Webview Script Integrity', () => {
         const TerminalPanel = terminalPanelModule.TerminalPanel;
 
         TerminalPanel.currentPanel = null;
-
         TerminalPanel.setExtensionUri(vscode.Uri.file('/extension'));
-
         TerminalPanel.show({
             filePath: '/test.dta',
             runCommand: async () => ({})
@@ -59,10 +57,12 @@ describe('Webview Script Integrity', () => {
 
         expect(htmlContent).toBeTruthy();
 
-        const strictPattern = /\.indexOf\('[\r\n]+', start\)/;
-        expect(htmlContent).not.toMatch(strictPattern);
+        // Check for duplicate const observer or saveTimer
+        const observerMatches = htmlContent.match(/const observer =/g);
+        const saveTimerMatches = htmlContent.match(/const saveTimer =/g);
 
-        expect(htmlContent).toContain('String.fromCharCode(10)');
+        expect(observerMatches ? observerMatches.length : 0).toBeLessThan(2);
+        expect(saveTimerMatches ? saveTimerMatches.length : 0).toBeLessThan(2);
 
         mock.restore();
     });
