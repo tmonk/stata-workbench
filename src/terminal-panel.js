@@ -934,7 +934,7 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
   <!--Floating Input Area -->
   <footer class="input-area">
     <div class="input-container">
-      <textarea id="command-input" placeholder="Run Stata command..." rows="1" autofocus></textarea>
+      <textarea id="command-input" placeholder="Run Stata command..." rows="1"></textarea>
       <div class="input-footer">
         <div class="key-hint">
           <span class="kbd">Enter</span><span>run</span>
