@@ -196,9 +196,13 @@ class DataBrowserPanel {
                         DataBrowserPanel._log(`[DataBrowser Proxy] Sending ${options.method} request to ${url.toString()}`);
                     }
 
+                    // Force close connection so single-threaded python server doesn't hang in keep-alive
+                    headers['Connection'] = 'close';
+
                     const opts = {
                         method: options.method,
-                        headers: headers
+                        headers: headers,
+                        timeout: 30000
                     };
 
                     const req = http.request(url, opts, (res) => {
@@ -222,6 +226,11 @@ class DataBrowserPanel {
                                 reject(new Error(`API Request Failed (${res.statusCode}): ${buffer.toString()}`));
                             }
                         });
+                    });
+
+                    req.on('timeout', () => {
+                        req.destroy();
+                        reject(new Error('Proxy request timed out from Stata server'));
                     });
 
                     req.on('error', (e) => {

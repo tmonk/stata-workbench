@@ -125,6 +125,10 @@ window.addEventListener('message', (event) => {
     switch (message.type) {
         case 'init':
             console.log('[DataBrowser Webview] Received init message. BaseURL:', message.baseUrl);
+            if (isInitialized && state.baseUrl === message.baseUrl && state.token === message.token) {
+                console.log('[DataBrowser Webview] Already initialized with same credentials. Ignoring duplicate init.');
+                return;
+            }
             isInitialized = true;
             if (message.baseUrl && message.token) {
                 // Store config if provided
