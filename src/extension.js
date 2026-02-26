@@ -1449,7 +1449,17 @@ async function runSelection() {
                         if (runId) TerminalPanel.appendStreamingLog(runId, chunk);
                     },
                     onGraphReady: (artifact) => {
-                        if (runId) TerminalPanel.appendRunArtifact(runId, artifact);
+                        if (artifact?.type === 'help') {
+                            try {
+                                const content = fs.readFileSync(artifact.path, 'utf8');
+                                HelpPanel.show(globalExtensionUri, artifact.label || 'Stata Help', content);
+                            } catch (err) {
+                                debugLog(`[Extension] Failed to open help panel: ${err.message}`);
+                                if (runId) TerminalPanel.appendRunArtifact(runId, artifact);
+                            }
+                        } else if (runId) {
+                            TerminalPanel.appendRunArtifact(runId, artifact);
+                        }
                     },
                     onProgress: (progress, total, message) => {
                         if (runId) TerminalPanel.updateStreamingProgress(runId, progress, total, message);
@@ -1537,7 +1547,17 @@ async function runFile() {
                             if (runId) TerminalPanel.appendStreamingLog(runId, chunk);
                         },
                         onGraphReady: (artifact) => {
-                            if (runId) TerminalPanel.appendRunArtifact(runId, artifact);
+                            if (artifact?.type === 'help') {
+                                try {
+                                    const content = fs.readFileSync(artifact.path, 'utf8');
+                                    HelpPanel.show(globalExtensionUri, artifact.label || 'Stata Help', content);
+                                } catch (err) {
+                                    debugLog(`[Extension] Failed to open help panel: ${err.message}`);
+                                    if (runId) TerminalPanel.appendRunArtifact(runId, artifact);
+                                }
+                            } else if (runId) {
+                                TerminalPanel.appendRunArtifact(runId, artifact);
+                            }
                         },
                         onTaskDone: (payload) => {
                             taskDoneSeen = true;
@@ -1636,7 +1656,17 @@ const terminalRunCommand = async (code, hooks) => {
             onRawLog: rawLogHandler,
             onLog: hooks?.onLog,
             onGraphReady: (artifact) => {
-                if (hooks?.runId) TerminalPanel.appendRunArtifact(hooks.runId, artifact);
+                if (artifact?.type === 'help') {
+                    try {
+                        const content = fs.readFileSync(artifact.path, 'utf8');
+                        HelpPanel.show(globalExtensionUri, artifact.label || 'Stata Help', content);
+                    } catch (err) {
+                        debugLog(`[Extension] Failed to open help panel: ${err.message}`);
+                        if (hooks?.runId) TerminalPanel.appendRunArtifact(hooks.runId, artifact);
+                    }
+                } else if (hooks?.runId) {
+                    TerminalPanel.appendRunArtifact(hooks.runId, artifact);
+                }
             },
             onTaskDone: (payload) => {
                 if (hooks?.onTaskDone) hooks.onTaskDone(payload);
@@ -1724,6 +1754,14 @@ async function showTerminal() {
         runCommand: terminalRunCommand,
         variableProvider: variableListProvider,
         downloadGraphPdf: downloadGraphAsPdf,
+        openHelpPanel: (helpPath, helpLabel) => {
+            try {
+                const content = fs.readFileSync(helpPath, 'utf8');
+                HelpPanel.show(globalExtensionUri, helpLabel || 'Stata Help', content);
+            } catch (err) {
+                debugLog(`[Extension] openHelpPanel failed: ${err.message}`);
+            }
+        },
         cancelRun: cancelRequest,
         cancelTask: cancelTask,
         clearAll: clearAllCommand

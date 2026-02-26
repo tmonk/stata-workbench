@@ -2601,6 +2601,29 @@ class StataMcpClient {
             return;
         }
 
+        // Help artifacts are emitted after the log_path is set, so handle them
+        // before the logPath guard below.
+        if (event === 'help_ready') {
+            const artifact = {
+                type: 'help',
+                label: parsed.label || 'Stata Help',
+                path: parsed.path || parsed.file_path || null,
+                baseDir: parsed.base_dir || parsed.baseDir || null
+            };
+            if (artifact.path) {
+                run._graphArtifacts.push(artifact);
+                if (typeof run.onGraphReady === 'function') {
+                    try {
+                        run.onGraphReady(artifact);
+                    } catch (err) {
+                        this._log(`[mcp-stata notification] onGraphReady (help) error for run ${run._runId || 'unknown'}: ${err.message}`);
+                        Sentry.captureException(err);
+                    }
+                }
+            }
+            return;
+        }
+
         // Stream exclusively from the log file once available; ignore logMessage output
         // to avoid duplicate streaming and reduce latency variance.
         if (run.logPath) return;

@@ -110,6 +110,7 @@ class TerminalPanel {
   static variableProvider = null;
   static _defaultRunCommand = null;
   static _downloadGraphPdf = null;
+  static _openHelpPanel = null;
   static _cancelHandler = null;
   static _cancelTaskHandler = null;
   static _clearHandler = null;
@@ -137,7 +138,7 @@ class TerminalPanel {
    * @param {() => Promise<void>} [options.clearAll]
    * @param {vscode.ViewColumn} [options.column]
    */
-  static show({ filePath, initialCode, initialResult, runCommand, variableProvider, downloadGraphPdf, cancelRun, cancelTask, clearAll, column }) {
+  static show({ filePath, initialCode, initialResult, runCommand, variableProvider, downloadGraphPdf, openHelpPanel, cancelRun, cancelTask, clearAll, column }) {
     const targetColumn = column || (TerminalPanel.currentPanel ? TerminalPanel.currentPanel.viewColumn : vscode.ViewColumn.Beside);
     TerminalPanel._activeFilePath = filePath || null;
     if (typeof variableProvider === 'function') {
@@ -148,6 +149,9 @@ class TerminalPanel {
     }
     if (typeof downloadGraphPdf === 'function') {
       TerminalPanel._downloadGraphPdf = downloadGraphPdf;
+    }
+    if (typeof openHelpPanel === 'function') {
+      TerminalPanel._openHelpPanel = openHelpPanel;
     }
     if (typeof cancelRun === 'function') {
       TerminalPanel._cancelHandler = cancelRun;
@@ -265,8 +269,12 @@ class TerminalPanel {
       if (message.type === 'clearAll') {
         await TerminalPanel._handleClearAll();
       }
-      if (message.type === 'openArtifact' && message.path) {
-        openArtifact(message.path, message.baseDir);
+      if (message.type === 'openArtifact') {
+        if ((message.artifactType === 'help' || message.type_hint === 'help') && message.path && typeof TerminalPanel._openHelpPanel === 'function') {
+          TerminalPanel._openHelpPanel(message.path, message.label);
+        } else if (message.path) {
+          openArtifact(message.path, message.baseDir);
+        }
       }
       if (message.type === 'revealArtifact' && message.path) {
         await revealArtifact(message.path, message.baseDir);
@@ -533,6 +541,7 @@ class TerminalPanel {
         runCommand: runCommand || TerminalPanel._defaultRunCommand || (async () => { throw new Error('Session not fully initialized'); }),
         variableProvider: variableProvider || TerminalPanel.variableProvider,
         downloadGraphPdf: TerminalPanel._downloadGraphPdf,
+        openHelpPanel: TerminalPanel._openHelpPanel,
         cancelRun: TerminalPanel._cancelHandler,
         cancelTask: TerminalPanel._cancelTaskHandler,
         clearAll: TerminalPanel._clearHandler
@@ -721,6 +730,7 @@ class TerminalPanel {
           runCommand: runCommand || (async () => { throw new Error('Session not fully initialized'); }),
           variableProvider: variableProvider || TerminalPanel.variableProvider,
           downloadGraphPdf: TerminalPanel._downloadGraphPdf,
+          openHelpPanel: TerminalPanel._openHelpPanel,
           cancelRun: TerminalPanel._cancelHandler,
           clearAll: TerminalPanel._clearHandler
         });
@@ -1717,6 +1727,7 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
                 + ' data-path="' + window.stataUI.escapeHtml(a.path || '') + '"'
                 + ' data-basedir="' + window.stataUI.escapeHtml(a.baseDir || '') + '"'
                 + ' data-label="' + label + '"'
+                + (a.type ? ' data-artifacttype="' + window.stataUI.escapeHtml(a.type) + '"' : '')
                 + ' data-index="' + idx + '">' 
                 +   '<div class="artifact-thumb">'
                 +     '<button class="artifact-tile-close" type="button" data-action="remove-artifact" data-key="' + closeKey + '" title="Remove">×</button>'

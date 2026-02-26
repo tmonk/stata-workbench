@@ -585,12 +585,14 @@ window.stataUI = {
                 const path = target.getAttribute('data-path');
                 const baseDir = target.getAttribute('data-basedir');
                 const label = target.getAttribute('data-label');
+                const artifactType = target.getAttribute('data-artifacttype') || null;
                 if (path) {
                     vscode.postMessage({
                         type: 'openArtifact', // unified message type
                         path,
                         baseDir,
-                        label
+                        label,
+                        artifactType
                     });
                 }
             }
