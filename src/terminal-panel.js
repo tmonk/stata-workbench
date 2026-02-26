@@ -130,9 +130,10 @@ class TerminalPanel {
    * @param {() => Promise<void>} [options.cancelRun]
    * @param {(runId: string) => Promise<void>} [options.cancelTask]
    * @param {() => Promise<void>} [options.clearAll]
+   * @param {vscode.ViewColumn} [options.column]
    */
-  static show({ filePath, initialCode, initialResult, runCommand, variableProvider, downloadGraphPdf, cancelRun, cancelTask, clearAll }) {
-    const column = vscode.ViewColumn.Beside;
+  static show({ filePath, initialCode, initialResult, runCommand, variableProvider, downloadGraphPdf, cancelRun, cancelTask, clearAll, column }) {
+    const targetColumn = column || (TerminalPanel.currentPanel ? TerminalPanel.currentPanel.viewColumn : vscode.ViewColumn.Beside);
     TerminalPanel._activeFilePath = filePath || null;
     if (typeof variableProvider === 'function') {
       TerminalPanel.variableProvider = variableProvider;
@@ -156,7 +157,7 @@ class TerminalPanel {
       TerminalPanel.currentPanel = vscode.window.createWebviewPanel(
         'stataTerminal',
         'Stata Terminal',
-        column,
+        targetColumn,
         {
           enableScripts: true,
           retainContextWhenHidden: true,
@@ -194,7 +195,7 @@ class TerminalPanel {
     TerminalPanel._webviewReady = false;
     TerminalPanel._pendingWebviewMessages = [];
 
-    TerminalPanel.currentPanel.reveal(column);
+    TerminalPanel.currentPanel.reveal(targetColumn, true);
   }
 
   static restorePanel(webviewPanel, state) {
@@ -537,7 +538,8 @@ class TerminalPanel {
     const runId = TerminalPanel._generateRunId();
     TerminalPanel._postMessage({ type: 'busy', value: true });
     TerminalPanel._postMessage({ type: 'runStarted', runId, code: trimmed });
-    TerminalPanel.currentPanel.reveal(vscode.ViewColumn.Beside);
+    const targetColumn = TerminalPanel.currentPanel.viewColumn || vscode.ViewColumn.Beside;
+    TerminalPanel.currentPanel.reveal(targetColumn, true);
     return runId;
   }
 
@@ -729,7 +731,8 @@ class TerminalPanel {
       });
 
       // Explicitly reveal it
-      TerminalPanel.currentPanel.reveal(vscode.ViewColumn.Beside);
+      const targetColumn = TerminalPanel.currentPanel.viewColumn || vscode.ViewColumn.Beside;
+      TerminalPanel.currentPanel.reveal(targetColumn, true);
     });
   }
 

@@ -27,7 +27,8 @@ class DataBrowserPanel {
 
         // If we already have a panel, show it.
         if (DataBrowserPanel.currentPanel) {
-            DataBrowserPanel.currentPanel._panel.reveal(column);
+            const targetColumn = DataBrowserPanel.currentPanel._panel.viewColumn || vscode.ViewColumn.Beside;
+            DataBrowserPanel.currentPanel._panel.reveal(targetColumn);
             return;
         }
 

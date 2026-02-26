@@ -11,6 +11,14 @@ const loadTerminalPanel = () => proxyquire('../../src/terminal-panel', {
     }
 });
 
+const loadDataBrowserPanel = () => proxyquire('../../src/data-browser-panel', {
+    './mcp-client': {
+        client: {
+            getUiChannel: () => Promise.resolve({ baseUrl: 'http://test', token: 'token' })
+        }
+    }
+});
+
 const itWithContext = (name, fn) => it(name, () => withTestContext({}, fn));
 
 describe('Panels', () => {
@@ -148,16 +156,64 @@ describe('Panels', () => {
     });
 
     describe('TerminalPanel Class', () => {
-        itWithContext('should reveal panel if exists on addEntry', () => {
+        itWithContext('should reveal panel in current viewColumn and preserve focus on addEntry', () => {
             const { TerminalPanel } = loadTerminalPanel();
-            let revealed = false;
+            let revealArgs = [];
             TerminalPanel.currentPanel = {
+                viewColumn: 2,
                 webview: { postMessage: () => { } },
-                reveal: () => { revealed = true; }
+                reveal: (col, preserveFocus) => {
+                    revealArgs = [col, preserveFocus];
+                }
             };
             TerminalPanel.addEntry('code', { stdout: '' }, '/path');
-            expect(revealed).toBe(true);
+            expect(revealArgs).toEqual([2, true]);
             TerminalPanel.currentPanel = null;
+        });
+
+        itWithContext('should reveal panel in current viewColumn and preserve focus on startStreamingEntry', () => {
+            const { TerminalPanel } = loadTerminalPanel();
+            let revealArgs = [];
+            TerminalPanel.currentPanel = {
+                viewColumn: 3,
+                webview: { postMessage: () => { } },
+                reveal: (col, preserveFocus) => {
+                    revealArgs = [col, preserveFocus];
+                }
+            };
+            TerminalPanel.startStreamingEntry('code', '/path', () => { });
+            expect(revealArgs).toEqual([3, true]);
+            TerminalPanel.currentPanel = null;
+        });
+
+        itWithContext('should reveal panel with preserveFocus in show()', () => {
+            const { TerminalPanel } = loadTerminalPanel();
+            let revealArgs = [];
+            const mockPanel = {
+                viewColumn: 1,
+                webview: {
+                    postMessage: () => { },
+                    html: '',
+                    onDidReceiveMessage: () => ({ dispose: () => { } }),
+                    asWebviewUri: (u) => u
+                },
+                onDidDispose: () => ({ dispose: () => { } }),
+                reveal: (col, preserveFocus) => {
+                    revealArgs = [col, preserveFocus];
+                }
+            };
+
+            const vscode = require('vscode');
+            const originalCreate = vscode.window.createWebviewPanel;
+            vscode.window.createWebviewPanel = () => mockPanel;
+
+            TerminalPanel.show({ runCommand: () => { } });
+            // By default show reveals in Beside (2) and preserves focus (true)
+            // But if it's new, it uses targetColumn = vscode.ViewColumn.Beside
+            expect(revealArgs).toEqual([vscode.ViewColumn.Beside, true]);
+
+            TerminalPanel.currentPanel = null;
+            vscode.window.createWebviewPanel = originalCreate;
         });
 
         itWithContext('should store handlers on show', () => {
@@ -202,6 +258,27 @@ describe('Panels', () => {
 
             TerminalPanel.currentPanel = null;
             vscode.window.createWebviewPanel = originalCreate;
+        });
+    });
+
+    describe('DataBrowserPanel', () => {
+        itWithContext('should reveal panel in current viewColumn on createOrShow if exists', async () => {
+            const { DataBrowserPanel } = loadDataBrowserPanel();
+            let revealArgs = [];
+            DataBrowserPanel.currentPanel = {
+                _panel: {
+                    viewColumn: 3,
+                    reveal: (col) => {
+                        revealArgs = [col];
+                    }
+                },
+                _fetchCredentials: () => { }
+            };
+
+            await DataBrowserPanel.createOrShow({ fsPath: '/path' });
+            expect(revealArgs).toEqual([3]);
+
+            DataBrowserPanel.currentPanel = null;
         });
     });
 });
