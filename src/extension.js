@@ -10,6 +10,7 @@ const pkg = require('../package.json');
 const { TerminalPanel } = require('./terminal-panel');
 const { DataBrowserPanel } = require('./data-browser-panel');
 const { openArtifact } = require('./artifact-utils');
+const { HelpPanel } = require('./help-panel');
 const { getTmpFilePath, getTmpDir } = require('./fs-utils');
 
 const createDepProxy = (getter) => new Proxy({}, {
@@ -1845,7 +1846,17 @@ function openGraphPanel(graphDetails) {
                     await downloadGraphAsPdf(message.graphName);
                 } else if (message.type === 'openArtifact' && message.path) {
                     debugLog(`[Graph Panel] Opening artifact: ${message.path}`);
-                    openArtifact(message.path, message.baseDir);
+                    if (message.artifactType === 'help' || message.label?.toLowerCase().startsWith('help:')) {
+                        try {
+                            const content = fs.readFileSync(message.path, 'utf8');
+                            HelpPanel.show(globalExtensionUri, message.label || 'Stata Help', content);
+                        } catch (err) {
+                            debugLog(`[Extension] Failed to read help artifact: ${err.message}`);
+                            openArtifact(message.path, message.baseDir);
+                        }
+                    } else {
+                        openArtifact(message.path, message.baseDir);
+                    }
                 } else {
                     debugLog(`[Graph Panel] Unknown message type: ${message.command || message.type}`);
                 }
@@ -1892,7 +1903,7 @@ function renderGraphHtml(graphDetails, webview, extensionUri, nonce) {
         const dataPath = escapeHtml(preview);
         const baseDir = g.baseDir || '';
 
-        return `<div class="artifact-tile" data-action="open-modal" data-path="${dataPath}" data-basedir="${escapeHtml(baseDir)}" data-label="${name}">
+        return `<div class="artifact-tile" data-action="open-modal" data-path="${dataPath}" data-basedir="${escapeHtml(baseDir)}" data-label="${name}" data-type="${escapeHtml(g.type || "")}">
           ${thumbHtml}
           <div class="artifact-tile-label">${name}</div>
           ${error}
@@ -1987,6 +1998,14 @@ function renderGraphHtml(graphDetails, webview, extensionUri, nonce) {
              modal.classList.remove('hidden');
              modal.setAttribute('aria-hidden', 'false');
          }
+
+         if (modalDownloadBtn) {
+             if (artifact.type === 'help') {
+                 modalDownloadBtn.textContent = 'View Help';
+             } else {
+                 modalDownloadBtn.textContent = 'Download PDF';
+             }
+         }
      }
 
      function closeArtifactModal() {
@@ -2021,11 +2040,21 @@ function renderGraphHtml(graphDetails, webview, extensionUri, nonce) {
                  modalDownloadBtn.disabled = true;
                  modalDownloadBtn.textContent = 'Downloading...';
                  
-                 console.log('[Modal] Sending download-graph-pdf message:', graphName);
-                 vscode.postMessage({
-                     command: 'download-graph-pdf',
-                     graphName: graphName
-                 });
+                 console.log('[Modal] Sending message for:', graphName, 'type:', activeModalArtifact.type);
+                 if (activeModalArtifact.type === 'help') {
+                     vscode.postMessage({
+                         type: 'openArtifact',
+                         path: activeModalArtifact.path,
+                         label: activeModalArtifact.label,
+                         baseDir: activeModalArtifact.baseDir,
+                         artifactType: 'help'
+                     });
+                 } else {
+                     vscode.postMessage({
+                         command: 'download-graph-pdf',
+                         graphName: graphName
+                     });
+                 }
                  console.log('[Modal] Message sent successfully');
                  
                  setTimeout(() => {
@@ -2070,10 +2099,12 @@ function renderGraphHtml(graphDetails, webview, extensionUri, nonce) {
          tile.addEventListener('click', () => {
              const label = tile.getAttribute('data-label');
              const path = tile.getAttribute('data-path');
+             const baseDir = tile.getAttribute('data-basedir');
+             const type = tile.getAttribute('data-type');
              const src = tile.querySelector('img')?.src || path;
              
-             console.log('[Modal] Opening modal for:', label);
-             openArtifactModal({ label, name: label, src, path });
+             console.log('[Modal] Opening modal for:', label, 'type:', type);
+             openArtifactModal({ label, name: label, src, path, baseDir, type });
          });
      });
 

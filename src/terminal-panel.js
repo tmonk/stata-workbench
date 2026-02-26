@@ -2489,7 +2489,8 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
                 type: 'openArtifact',
                 path: activeModalArtifact.path,
                 baseDir: activeModalArtifact.baseDir,
-                label: activeModalArtifact.label
+                label: activeModalArtifact.label,
+                artifactType: activeModalArtifact.type
             });
         });
     }
@@ -2957,7 +2958,8 @@ function normalizeArtifacts(result) {
       path: a.path || '',
       previewPath,
       error: a.error || null,
-      baseDir
+      baseDir,
+      type: a.type || null
     };
   }).filter(Boolean);
 
