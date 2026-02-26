@@ -14,8 +14,9 @@ const loadTerminalPanel = () => proxyquire('../../src/terminal-panel', {
 const itWithContext = (name, fn) => it(name, () => withTestContext({}, fn));
 
 describe('Webview Script Integrity', () => {
-    itWithContext('should not have duplicate const observer or saveTimer in the webview script', () => {
+    itWithContext('should produce syntactically valid JavaScript in the webview script tags', () => {
         const vscode = require('vscode');
+        const vm = require('vm');
         let htmlContent = '';
 
         vscode.window.createWebviewPanel.mockImplementation(() => {
@@ -57,13 +58,25 @@ describe('Webview Script Integrity', () => {
 
         expect(htmlContent).toBeTruthy();
 
-        // Check for duplicate const observer or saveTimer
-        const observerMatches = htmlContent.match(/const observer =/g);
-        const saveTimerMatches = htmlContent.match(/const saveTimer =/g);
+        // Extract all script contents from <script> tags that aren't sourcing a file
+        const scriptRegex = /<script\b[^>]*>([\s\S]*?)<\/script>/gm;
+        let match;
+        let scriptsFound = 0;
 
-        expect(observerMatches ? observerMatches.length : 0).toBeLessThan(2);
-        expect(saveTimerMatches ? saveTimerMatches.length : 0).toBeLessThan(2);
+        while ((match = scriptRegex.exec(htmlContent)) !== null) {
+            const scriptContent = match[1].trim();
+            if (scriptContent) {
+                scriptsFound++;
+                try {
+                    // Try to compile the script. This will throw if there's a SyntaxError (like duplicate const).
+                    new vm.Script(scriptContent);
+                } catch (err) {
+                    throw new Error(`Syntax error in webview script: ${err.message}\n\nScript content:\n${scriptContent}`);
+                }
+            }
+        }
 
+        expect(scriptsFound).toBeGreaterThan(0);
         mock.restore();
     });
 });
