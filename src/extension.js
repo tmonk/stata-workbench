@@ -794,14 +794,11 @@ function syncMcpConfigsFromSettings(context) {
     const configureCodex = config.get('configureCodex', false);
 
     // Host mcp.json (VS Code, Cursor, Windsurf, Antigravity)
+    // When autoConfigureMcp is disabled, leave the file untouched entirely.
     const hostTarget = getMcpConfigTarget(context);
-    if (hostTarget) {
-        if (autoConfigureMcp) {
-            const isCurrent = mcpClient.getServerConfig && isMcpConfigCurrent(mcpClient.getServerConfig(), uvCommand, mcpPackageVersion);
-            if (!isCurrent) ensureMcpConfigs(context);
-        } else {
-            removeFromMcpConfig(hostTarget);
-        }
+    if (hostTarget && autoConfigureMcp) {
+        const isCurrent = mcpClient.getServerConfig && isMcpConfigCurrent(mcpClient.getServerConfig(), uvCommand, mcpPackageVersion);
+        if (!isCurrent) ensureMcpConfigs(context);
     }
 
     // Claude Code (via claude mcp add-json / remove - ensures CLI and extension both see it)
