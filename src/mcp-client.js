@@ -4,7 +4,12 @@ const Sentry = require("@sentry/node");
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
-const vscode = require('vscode');
+const { getVscode } = require('./runtime-context');
+const vscode = new Proxy({}, {
+    get(_target, prop) {
+        return getVscode()?.[prop];
+    }
+});
 const { getEnv } = require('./runtime-context');
 const pkg = require('../package.json');
 const https = require('https');
@@ -152,7 +157,7 @@ class StataMcpClient {
                 ? onTaskDone
                 : (typeof this._onTaskDone === 'function' ? this._onTaskDone : null);
             const runState = { onLog, onRawLog, onProgress, onGraphReady, onTaskDone: resolvedOnTaskDone, progressToken, baseDir: cwd, _startMs: nowMs, _createdAt: nowMs, _runId: runId || null };
-            
+
             // Mark the run as started in the UI if we have a callback
             if (typeof options.onStarted === 'function') {
                 options.onStarted();
@@ -219,7 +224,7 @@ class StataMcpClient {
                 ? onTaskDone
                 : (typeof this._onTaskDone === 'function' ? this._onTaskDone : null);
             const runState = { onLog, onRawLog, onProgress, onGraphReady, onTaskDone: resolvedOnTaskDone, progressToken, baseDir: cwd, _startMs: nowMs, _createdAt: nowMs, _runId: runId || null };
-            
+
             // Mark the run as started in the UI if we have a callback
             if (typeof options.onStarted === 'function') {
                 options.onStarted();
@@ -273,7 +278,7 @@ class StataMcpClient {
                 : null;
 
             const runState = { onLog, onRawLog, onProgress, onGraphReady, progressToken, baseDir: cwd };
-            
+
             if (typeof options.onStarted === 'function') {
                 options.onStarted();
             }
@@ -419,7 +424,7 @@ class StataMcpClient {
         } catch (err) {
             this._log(`[mcp-stata] break_session failed: ${err?.message || err}`);
         }
-        
+
         this._statusEmitter.emit('status', this._pending > 0 ? 'queued' : 'connected');
         return true;
     }
@@ -435,7 +440,7 @@ class StataMcpClient {
             }
             return true;
         }
-        
+
         // If it's already the active run, cancel it via the active source
         if (this._activeRun && String(this._activeRun._runId) === String(runId)) {
             this._activeRun._cancelled = true;
@@ -444,7 +449,7 @@ class StataMcpClient {
                 return true;
             }
         }
-        
+
         return false;
     }
 
@@ -520,7 +525,7 @@ class StataMcpClient {
             }
 
             const { client, transport, setupTimeoutSeconds } = await this._createClient();
-            
+
             try {
                 const connectTimeoutMs = (parseInt(setupTimeoutSeconds, 10) || 60) * 1000;
                 let timeoutId;
@@ -681,19 +686,19 @@ class StataMcpClient {
         // On Windows, spawnSync handles .cmd/.exe suffixing when shell is not used if the command is on PATH.
         try {
             let check = spawnSync(finalCommand, ['--version'], { encoding: 'utf8', shell: process.platform === 'win32' });
-            
+
             // Check if the initial command choice is broken
             let stderr = (check.stderr || '').toString();
             const isBroken = !!(check.error || check.status !== 0 || stderr.includes('command not found'));
 
             if (isBroken && serverConfig.command && serverConfig.command !== uvCommand) {
-                 // The user's configured command is broken. Try falling back to the extension's detected uvCommand.
-                 this._log(`[mcp-stata] Configured command failed pre-flight: ${serverConfig.command}. Falling back to extension-detected command: ${uvCommand}`);
-                 finalCommand = uvCommand;
-                 finalArgs = ['--refresh', '--refresh-package', MCP_PACKAGE_NAME, '--from', currentSpec, MCP_PACKAGE_NAME];
-                 // Re-run pre-flight for the fallback
-                 check = spawnSync(finalCommand, ['--version'], { encoding: 'utf8', shell: process.platform === 'win32' });
-                 stderr = (check.stderr || '').toString();
+                // The user's configured command is broken. Try falling back to the extension's detected uvCommand.
+                this._log(`[mcp-stata] Configured command failed pre-flight: ${serverConfig.command}. Falling back to extension-detected command: ${uvCommand}`);
+                finalCommand = uvCommand;
+                finalArgs = ['--refresh', '--refresh-package', MCP_PACKAGE_NAME, '--from', currentSpec, MCP_PACKAGE_NAME];
+                // Re-run pre-flight for the fallback
+                check = spawnSync(finalCommand, ['--version'], { encoding: 'utf8', shell: process.platform === 'win32' });
+                stderr = (check.stderr || '').toString();
             }
 
             if (check.error) {
@@ -707,7 +712,7 @@ class StataMcpClient {
             if (check.status !== 0 || stderr.includes('command not found')) {
                 let message = `Command failed to execute: ${finalCommand}`;
                 if (check.status !== 0) message += ` (exit ${check.status})`;
-                
+
                 if (stderr.includes('realpath: command not found')) {
                     message += ". It appears your 'uv' installation is broken or missing 'realpath' (common on some macOS setups). Try installing 'uv' via Homebrew ('brew install uv').";
                 } else if (stderr) {
@@ -935,12 +940,12 @@ class StataMcpClient {
                     this._statusEmitter.emit('status', 'connected');
                     throw new Error('Request cancelled');
                 }
-                
+
                 const detail = error?.message || String(error);
                 this._log(`[mcp-stata] tool ${name} failed after ${durationMs}ms: ${detail}`);
                 this._captureMcpError(error);
                 this._statusEmitter.emit('status', 'error');
-                
+
                 let hint = '';
                 if (detail.includes('-32000') || detail.includes('Connection closed') || detail.includes('ECONNRESET')) {
                     this._resetClientState();
@@ -1251,17 +1256,17 @@ class StataMcpClient {
 
             const safeOffset = Math.max(0, Number.isFinite(offset) ? offset : 0);
             const maxRead = Math.max(0, Number.isFinite(maxBytes) ? maxBytes : 262144);
-            
+
             // Avoid statSync - just try reading. Most OS/FS will handle this faster.
             const fd = fs.openSync(logPath, 'r');
             try {
                 const buffer = Buffer.allocUnsafe(maxRead);
                 const bytesRead = fs.readSync(fd, buffer, 0, maxRead, safeOffset);
-                
+
                 if (bytesRead <= 0) {
                     return { data: '', next_offset: safeOffset };
                 }
-                
+
                 const data = buffer.slice(0, bytesRead).toString('utf8');
                 return { data, next_offset: safeOffset + bytesRead };
             } finally {
@@ -1349,7 +1354,7 @@ class StataMcpClient {
         runState._fastDrain = true;
         if (runState?._tailPromise) {
             runState._tailCancelled = true;
-            await runState._tailPromise.catch(() => {});
+            await runState._tailPromise.catch(() => { });
         }
         const taskPayload = taskDone?.result ?? taskDone;
         const parsedTask = this._parseToolJson(taskPayload);
@@ -1536,7 +1541,7 @@ class StataMcpClient {
                 // which often happens with sequential runSelection calls in tests.
                 Promise.resolve().then(() => {
                     r(new Error(`${reason || 'Request cancelled'}`));
-                }).catch(() => {}); // ignore if already handled
+                }).catch(() => { }); // ignore if already handled
             }
         };
 
@@ -1571,7 +1576,7 @@ class StataMcpClient {
                 if (config.get('logStataCode', false) && meta.command) {
                     this._log(`[mcp-stata code] ${meta.command}`);
                 }
-                
+
                 try {
                     const client = await this._ensureClient();
                     const result = await this._withTimeout(task(client), timeoutMs, label, source.token);
@@ -2502,14 +2507,14 @@ class StataMcpClient {
         const event = parsed?.event;
         this._log(`[${timestamp}] Notification received: ${event || 'logMessage'}`);
         const taskId = parsed?.task_id || parsed?.taskId || parsed?.request_id || parsed?.requestId || parsed?.run_id || parsed?.runId;
-        
+
         let run = null;
         if (taskId) {
             run = this._runsByTaskId.get(String(taskId)) || null;
             // If we found a run by ID but it's not the "active" run (e.g. it's a tail from 
             // a just-cancelled run), that's fine, we still associate it.
         }
-        
+
         // Falling back to _activeRun if no taskId is present
         if (!run && this._activeRun) {
             // If the active run has an assigned taskId, we should be VERY careful 

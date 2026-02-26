@@ -2,7 +2,12 @@ const { openArtifact, revealArtifact, copyToClipboard, resolveArtifactUri } = re
 const Sentry = require("@sentry/node");
 const path = require('path');
 const os = require('os');
-const vscode = require('vscode');
+const { getVscode } = require('./runtime-context');
+const vscode = new Proxy({}, {
+  get(_target, prop) {
+    return getVscode()?.[prop];
+  }
+});
 const fs = require('fs');
 const { filterMcpLogs } = require('./log-utils');
 const { getTmpDir } = require('./fs-utils');

@@ -14,8 +14,7 @@ const loadTerminalPanel = () => proxyquire('../../src/terminal-panel', {
 const itWithContext = (name, fn) => it(name, () => withTestContext({}, fn));
 
 describe('Webview Script Integrity', () => {
-    itWithContext('should produce syntactically valid JavaScript in the webview script tags', () => {
-        const vscode = require('vscode');
+    itWithContext('should produce syntactically valid JavaScript in the webview script tags', ({ vscode }) => {
         const vm = require('vm');
         let htmlContent = '';
 

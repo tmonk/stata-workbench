@@ -161,7 +161,9 @@ function activate(context) {
     const settings = vscode.workspace.getConfiguration('stataMcp');
     applyNoReloadOnClearSetting(!!settings.get('noReloadOnClear', false));
     const version = pkg?.version || 'unknown';
-    appendLine(`Stata Workbench ready (extension v${version})`);
+    const isLocal = context.extensionMode === vscode.ExtensionMode.Development ||
+        (context.extensionUri?.fsPath && context.extensionUri.fsPath.includes('stata-workbench-debug'));
+    appendLine(`Stata Workbench ready (extension v${version}${isLocal ? ' (local)' : ''})`);
     missingCliPrompted = !!context.globalState?.get?.(MISSING_CLI_PROMPT_KEY);
     if (!missingCliPrompted && mcpClient.hasConfig()) {
         missingCliPrompted = true;

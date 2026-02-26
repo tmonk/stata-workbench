@@ -1,5 +1,10 @@
 const path = require('path');
-const vscode = require('vscode');
+const { getVscode } = require('./runtime-context');
+const vscode = new Proxy({}, {
+    get(_target, prop) {
+        return getVscode()?.[prop];
+    }
+});
 const fs = require('fs');
 const Sentry = require("@sentry/node");
 

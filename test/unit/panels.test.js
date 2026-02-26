@@ -186,7 +186,7 @@ describe('Panels', () => {
             TerminalPanel.currentPanel = null;
         });
 
-        itWithContext('should reveal panel with preserveFocus in show()', () => {
+        itWithContext('should reveal panel with preserveFocus in show()', ({ vscode }) => {
             const { TerminalPanel } = loadTerminalPanel();
             let revealArgs = [];
             const mockPanel = {
@@ -203,7 +203,6 @@ describe('Panels', () => {
                 }
             };
 
-            const vscode = require('vscode');
             const originalCreate = vscode.window.createWebviewPanel;
             vscode.window.createWebviewPanel = () => mockPanel;
 
@@ -225,7 +224,7 @@ describe('Panels', () => {
             TerminalPanel.currentPanel = null;
         });
 
-        itWithContext('should call cancelTaskHandler when receiving cancelTask message', async () => {
+        itWithContext('should call cancelTaskHandler when receiving cancelTask message', async ({ vscode }) => {
             const { TerminalPanel } = loadTerminalPanel();
             let receivedRunId = null;
             const cancelTaskHandler = (runId) => { receivedRunId = runId; };
@@ -243,7 +242,6 @@ describe('Panels', () => {
                 onDidDispose: () => { return { dispose: () => { } }; }
             };
 
-            const vscode = require('vscode');
             const originalCreate = vscode.window.createWebviewPanel;
             vscode.window.createWebviewPanel = () => mockPanel;
 
