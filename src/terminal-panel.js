@@ -137,6 +137,9 @@ class TerminalPanel {
     if (typeof variableProvider === 'function') {
       TerminalPanel.variableProvider = variableProvider;
     }
+    if (typeof runCommand === 'function') {
+      TerminalPanel._runCommand = runCommand;
+    }
     if (typeof downloadGraphPdf === 'function') {
       TerminalPanel._downloadGraphPdf = downloadGraphPdf;
     }
@@ -173,95 +176,7 @@ class TerminalPanel {
         TerminalPanel._pendingWebviewMessages = [];
       });
 
-      TerminalPanel.currentPanel.webview.onDidReceiveMessage(async (message) => {
-        if (!message || typeof message !== 'object') return;
-
-        // Test hook
-        if (TerminalPanel._testCapture) {
-          TerminalPanel._testCapture(message);
-        }
-
-        if (message.type === 'ready') {
-          TerminalPanel._webviewReady = true;
-          TerminalPanel._flushPendingMessages();
-          return;
-        }
-
-        if (message.type === 'openDataBrowser') {
-          vscode.commands.executeCommand('stata-workbench.viewData');
-          return;
-        }
-
-
-        if (message.type === 'run' && typeof message.code === 'string') {
-          await TerminalPanel.handleRun(message.code, runCommand);
-        }
-        if ((message.command === 'download-graph-pdf' || message.type === 'downloadGraphPdf') && message.graphName) {
-          await TerminalPanel._handleDownloadGraphPdf(message.graphName);
-        }
-        if (message.type === 'cancelRun') {
-          await TerminalPanel._handleCancelRun();
-        }
-        if (message.type === 'cancelTask' && message.runId) {
-          await TerminalPanel._handleCancelTask(message.runId);
-        }
-        if (message.type === 'clearAll') {
-          await TerminalPanel._handleClearAll();
-        }
-        if (message.type === 'openArtifact' && message.path) {
-          openArtifact(message.path, message.baseDir);
-        }
-        if (message.type === 'revealArtifact' && message.path) {
-          await revealArtifact(message.path, message.baseDir);
-        }
-        if (message.type === 'copyArtifactPath' && message.path) {
-          const uri = resolveArtifactUri(message.path, message.baseDir);
-          if (uri?.scheme === 'file') {
-            await copyToClipboard(uri.fsPath);
-          } else if (uri) {
-            await copyToClipboard(uri.toString());
-          } else {
-            await copyToClipboard(message.path);
-          }
-        }
-        if (message.type === 'requestVariables') {
-          const provider = TerminalPanel.variableProvider;
-          if (typeof provider === 'function') {
-            try {
-              const vars = await provider();
-              webview.postMessage({ type: 'variables', variables: vars || [] });
-            } catch (error) {
-              webview.postMessage({ type: 'variables', variables: [], error: error?.message || String(error) });
-            }
-          } else {
-            webview.postMessage({ type: 'variables', variables: [] });
-          }
-        }
-        if (message.type === 'log') {
-          if (message.level === 'error') {
-            Sentry.captureException(new Error(`Webview Error: ${message.message}`));
-          }
-          console.log(`[Client Log] ${message.level || 'info'}: ${message.message}`);
-        }
-        if (message.type === 'fetchLog') {
-          await TerminalPanel._handleFetchLog(message.runId, message.path, message.offset, message.maxBytes);
-        }
-      });
-
-      const webview = TerminalPanel.currentPanel.webview;
-      if (webview && typeof webview.postMessage === 'function' && !webview.__stataWorkbenchWrapped) {
-        const originalPostMessage = webview.postMessage.bind(webview);
-        webview.postMessage = (msg) => {
-          try {
-            if (TerminalPanel._testOutgoingCapture) {
-              TerminalPanel._testOutgoingCapture(msg);
-            }
-          } catch (_err) {
-          }
-          return originalPostMessage(msg);
-        };
-        webview.__stataWorkbenchWrapped = true;
-      }
+      TerminalPanel._setupWebviewHandlers();
     }
 
     const webview = TerminalPanel.currentPanel.webview;
@@ -274,13 +189,131 @@ class TerminalPanel {
     const initialHistory = (initialCode && initialResult)
       ? [toEntry(initialCode, initialResult)]
       : [];
+    TerminalPanel.currentPanel.webview.html = renderHtml(webview, TerminalPanel.extensionUri, nonce, TerminalPanel._activeFilePath, initialHistory);
 
-    TerminalPanel.currentPanel.webview.html = renderHtml(webview, TerminalPanel.extensionUri, nonce, filePath, initialHistory);
     TerminalPanel._webviewReady = false;
     TerminalPanel._pendingWebviewMessages = [];
-    TerminalPanel.currentPanel.reveal(column);
 
+    TerminalPanel.currentPanel.reveal(column);
   }
+
+  static restorePanel(webviewPanel, state) {
+    TerminalPanel.currentPanel = webviewPanel;
+    TerminalPanel._panelInstanceId += 1;
+    TerminalPanel.currentPanel.__stataPanelId = TerminalPanel._panelInstanceId;
+
+    TerminalPanel._webviewReady = false;
+    TerminalPanel._pendingWebviewMessages = [];
+
+    TerminalPanel.currentPanel.onDidDispose(() => {
+      TerminalPanel.currentPanel = null;
+      TerminalPanel._webviewReady = true;
+      TerminalPanel._pendingWebviewMessages = [];
+    });
+
+    TerminalPanel._setupWebviewHandlers();
+
+    const nonce = getNonce();
+    TerminalPanel.currentPanel.webview.html = renderHtml(
+      TerminalPanel.currentPanel.webview,
+      TerminalPanel.extensionUri,
+      nonce,
+      TerminalPanel._activeFilePath,
+      []
+    );
+  }
+
+  static _setupWebviewHandlers() {
+    if (!TerminalPanel.currentPanel) return;
+    const webview = TerminalPanel.currentPanel.webview;
+    webview.onDidReceiveMessage(async (message) => {
+      if (!message || typeof message !== 'object') return;
+
+      if (TerminalPanel._testCapture) {
+        TerminalPanel._testCapture(message);
+      }
+
+      if (message.type === 'ready') {
+        TerminalPanel._webviewReady = true;
+        TerminalPanel._flushPendingMessages();
+        return;
+      }
+
+      if (message.type === 'openDataBrowser') {
+        vscode.commands.executeCommand('stata-workbench.viewData');
+        return;
+      }
+
+      if (message.type === 'run' && typeof message.code === 'string') {
+        await TerminalPanel.handleRun(message.code, TerminalPanel._runCommand);
+      }
+      if ((message.command === 'download-graph-pdf' || message.type === 'downloadGraphPdf') && message.graphName) {
+        await TerminalPanel._handleDownloadGraphPdf(message.graphName);
+      }
+      if (message.type === 'cancelRun') {
+        await TerminalPanel._handleCancelRun();
+      }
+      if (message.type === 'cancelTask' && message.runId) {
+        await TerminalPanel._handleCancelTask(message.runId);
+      }
+      if (message.type === 'clearAll') {
+        await TerminalPanel._handleClearAll();
+      }
+      if (message.type === 'openArtifact' && message.path) {
+        openArtifact(message.path, message.baseDir);
+      }
+      if (message.type === 'revealArtifact' && message.path) {
+        await revealArtifact(message.path, message.baseDir);
+      }
+      if (message.type === 'copyArtifactPath' && message.path) {
+        const uri = resolveArtifactUri(message.path, message.baseDir);
+        if (uri?.scheme === 'file') {
+          await copyToClipboard(uri.fsPath);
+        } else if (uri) {
+          await copyToClipboard(uri.toString());
+        } else {
+          await copyToClipboard(message.path);
+        }
+      }
+      if (message.type === 'requestVariables') {
+        const provider = TerminalPanel.variableProvider;
+        if (typeof provider === 'function') {
+          try {
+            const vars = await provider();
+            webview.postMessage({ type: 'variables', variables: vars || [] });
+          } catch (error) {
+            webview.postMessage({ type: 'variables', variables: [], error: error?.message || String(error) });
+          }
+        } else {
+          webview.postMessage({ type: 'variables', variables: [] });
+        }
+      }
+      if (message.type === 'log') {
+        if (message.level === 'error') {
+          Sentry.captureException(new Error(`Webview Error: ${message.message}`));
+        }
+        console.log(`[Client Log] ${message.level || 'info'}: ${message.message}`);
+      }
+      if (message.type === 'fetchLog') {
+        await TerminalPanel._handleFetchLog(message.runId, message.path, message.offset, message.maxBytes);
+      }
+    });
+
+    if (webview && typeof webview.postMessage === 'function' && !webview.__stataWorkbenchWrapped) {
+      const originalPostMessage = webview.postMessage.bind(webview);
+      webview.postMessage = (msg) => {
+        try {
+          if (TerminalPanel._testOutgoingCapture) {
+            TerminalPanel._testOutgoingCapture(msg);
+          }
+        } catch (_err) {
+        }
+        return originalPostMessage(msg);
+      };
+      webview.__stataWorkbenchWrapped = true;
+    }
+  }
+
 
   static _postMessage(msg) {
     if (!TerminalPanel.currentPanel) return;
@@ -1639,6 +1672,7 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
         div.innerHTML = userHtml + systemHtml;
         chatStream.appendChild(div);
         if (autoScrollPinned) scrollToBottom();
+        saveState();
     }
 
     function renderArtifacts(artifacts, id) {
@@ -2305,15 +2339,75 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
 
     // Render initial entries if any
     try {
-        initialEntries.forEach(appendEntry);
+        const savedState = vscode.getState();
+        if (savedState && savedState.chatHtml) {
+            chatStream.innerHTML = savedState.chatHtml;
+            // Restore runs tracking references
+            const entryDivs = chatStream.querySelectorAll('.message-group.entry');
+            entryDivs.forEach(group => {
+                const runId = group.dataset.runId;
+                if (runId) {
+                    runs[runId] = {
+                        group: group,
+                        stdoutEl: document.getElementById('run-stdout-' + runId),
+                        stderrEl: document.getElementById('run-stderr-' + runId),
+                        progressWrap: document.getElementById('run-progress-wrap-' + runId),
+                        progressText: document.getElementById('run-progress-text-' + runId),
+                        progressMeta: document.getElementById('run-progress-meta-' + runId),
+                        progressFill: document.getElementById('run-progress-fill-' + runId),
+                        statusDot: document.getElementById('run-status-dot-' + runId),
+                        statusTitle: document.getElementById('run-status-title-' + runId),
+                        rcEl: document.getElementById('run-rc-' + runId),
+                        durationEl: document.getElementById('run-duration-' + runId),
+                        logLinkEl: document.getElementById('run-log-link-' + runId),
+                        logEl: document.getElementById('run-log-' + runId),
+                        tabsContainer: document.getElementById('run-tabs-' + runId),
+                        artifacts: [] // Handled separately if restored
+                    };
+                    // Re-bind highlighting state
+                    if (document.getElementById('run-search-' + runId)) {
+                        // Resurrect search if it active... handled globally
+                    }
+                }
+            });
+            // Also restore session artifacts
+            if (savedState.sessionArtifacts) {
+                savedState.sessionArtifacts.forEach(a => addSessionArtifact(a));
+                renderSessionArtifacts();
+            }
+            if (savedState.history) {
+                 history.push(...savedState.history);
+            }
+        } else if (initialEntries && initialEntries.length > 0) {
+            initialEntries.forEach(appendEntry);
+        }
+
         // Notify ready
         vscode.postMessage({ type: 'ready' });
-      requestVariables();
+        requestVariables();
     } catch (err) {
         Sentry.captureException(err);
         console.error('Failed to render initial entries', err);
         vscode.postMessage({ type: 'log', level: 'error', message: err.message });
     }
+
+    // Capture state repeatedly for seamless tab moves
+    function saveState() {
+        if (!chatStream) return;
+        vscode.setState({
+            chatHtml: chatStream.innerHTML,
+            sessionArtifacts: sessionArtifacts,
+            history: history
+        });
+    }
+
+    // Debounce mutation observer to automatically save state periodically
+    let saveTimer;
+    const observer = new MutationObserver(() => {
+        clearTimeout(saveTimer);
+        saveTimer = setTimeout(saveState, 500);
+    });
+    observer.observe(chatStream, { childList: true, subtree: true, characterData: true });
 
     // Dynamic spacer for fixed input area
     const inputArea = document.querySelector('.input-area');

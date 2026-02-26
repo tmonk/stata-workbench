@@ -148,8 +148,8 @@ function activate(context) {
         Sentry.setTag("os.platform", process.platform);
         Sentry.setContext("extension", {
             installSource: context.extensionUri.fsPath.includes('.vscode-insiders') ? 'insiders' : 'stable',
-            mode: context.extensionMode === vscode.ExtensionMode.Development ? 'development' : 
-                  context.extensionMode === vscode.ExtensionMode.Test ? 'test' : 'production'
+            mode: context.extensionMode === vscode.ExtensionMode.Development ? 'development' :
+                context.extensionMode === vscode.ExtensionMode.Test ? 'test' : 'production'
         });
     } catch (_err) {
         // Telemetry should never crash the extension
@@ -171,7 +171,7 @@ function activate(context) {
             const config = vscode.workspace.getConfiguration('stataMcp');
             const showAll = config.get('showAllLogsInOutput', false);
             const logCode = config.get('logStataCode', false);
-            
+
             // Always show our explicit code logs if they are enabled via the opt-in setting
             if (msg.includes('[mcp-stata code]')) {
                 if (logCode) {
@@ -190,7 +190,7 @@ function activate(context) {
                 if (typeof global.addLogToSentryBuffer === 'function') {
                     global.addLogToSentryBuffer(msg + '\n');
                 }
-                
+
                 // We show connection/starting events and mcp-stata diagnostic logs by default.
                 // But we suppress 'stderr' noise from the server process unless showAll is on.
                 if (msg.startsWith('[mcp-stata]') && !msg.includes('stderr')) {
@@ -224,6 +224,14 @@ function activate(context) {
         vscode.commands.registerCommand('stata-workbench.cancelRequest', cancelRequest),
         mcpClient.onStatusChanged(updateStatusBar)
     ];
+
+    if (vscode.window.registerWebviewPanelSerializer) {
+        vscode.window.registerWebviewPanelSerializer('stataTerminal', {
+            async deserializeWebviewPanel(webviewPanel, state) {
+                TerminalPanel.restorePanel(webviewPanel, state);
+            }
+        });
+    }
 
     context.subscriptions.push(...subscriptions, statusBarItem, outputChannel);
     globalExtensionUri = context.extensionUri;
@@ -289,7 +297,7 @@ function activate(context) {
         mcpPackageVersion = refreshed || getMcpPackageVersion();
 
         syncMcpConfigsFromSettings(context);
-        
+
         appendLine(`mcp-stata version: ${mcpPackageVersion}`);
         try {
             Sentry.setTag("mcp.version", mcpPackageVersion);
@@ -485,12 +493,12 @@ function refreshMcpPackage() {
     const isUv = cmd.endsWith('uv') || cmd.endsWith('uv.exe');
     const baseArgs = isUv ? ['tool', 'run'] : [];
     const args = [...baseArgs, '--refresh', '--refresh-package', MCP_PACKAGE_NAME, '--from', MCP_PACKAGE_SPEC, MCP_PACKAGE_NAME, '--version'];
-    
+
     try {
         const result = cp.spawnSync(cmd, args, { encoding: 'utf8', timeout: 10000 });
         const stdout = result?.stdout?.toString?.().trim() || '';
         const stderr = result?.stderr?.toString?.().trim() || '';
-        
+
         const sanitized = sanitizeVersion(stdout) || sanitizeVersion(stderr);
 
         if (result.status === 0) {
@@ -741,7 +749,7 @@ function removeClaudeMcpViaCli(context) {
  */
 function isMcpConfigCurrent(config, expectedUv, expectedVersion) {
     if (!config || !config.command || !config.args) return false;
-    
+
     // Check if the command matches our resolved uv command (or is a valid equivalent)
     if (config.command !== expectedUv) {
         // If we expect 'uvx' and they have an absolute path to it, that's fine.
@@ -752,7 +760,7 @@ function isMcpConfigCurrent(config, expectedUv, expectedVersion) {
     // Check args for at least the package and version.
     const argsStr = config.args.join(' ');
     if (!argsStr.includes(MCP_PACKAGE_NAME)) return false;
-    
+
     // If we have a specific version we expect, check for it.
     if (expectedVersion && expectedVersion !== 'unknown') {
         if (!argsStr.includes(expectedVersion) && !argsStr.includes('@latest')) return false;
@@ -1081,7 +1089,7 @@ function hasExistingMcpConfig(context) {
 function getMcpConfigTarget(context) {
     const appName = (context?.mcpAppNameOverride || vscode.env?.appName || '').toLowerCase();
     const hasHomeOverride = context && Object.prototype.hasOwnProperty.call(context, 'mcpHomeOverride');
-    
+
     // In tests, we must not default to the real home directory unless explicitly requested.
     // This prevents unit tests from accidentally writing to the user's real mcp.json.
     let home;
@@ -1210,7 +1218,7 @@ function writeMcpConfig(target) {
             : MCP_PACKAGE_SPEC;
 
         const isRunUv = resolvedCommand.endsWith('uv') || resolvedCommand.endsWith('uv.exe');
-        const expectedArgs = isRunUv 
+        const expectedArgs = isRunUv
             ? ['tool', 'run', '--refresh', '--refresh-package', MCP_PACKAGE_NAME, '--from', activeSpec, MCP_PACKAGE_NAME]
             : ['--refresh', '--refresh-package', MCP_PACKAGE_NAME, '--from', activeSpec, MCP_PACKAGE_NAME];
 
