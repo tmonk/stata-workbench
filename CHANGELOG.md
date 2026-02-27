@@ -1,3 +1,10 @@
+# [0.21.0](https://github.com/tmonk/stata-workbench/compare/v0.20.0...v0.21.0) (2026-02-27)
+
+
+### Features
+
+* implement autocomplete functionality for Stata terminal ([bc422e9](https://github.com/tmonk/stata-workbench/commit/bc422e9063f31d23871ad8ab1432d148064ea9e3))
+
 # [0.20.0](https://github.com/tmonk/stata-workbench/compare/v0.19.0...v0.20.0) (2026-02-27)
 
 
