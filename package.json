@@ -147,21 +147,22 @@
         "stataMcp.autoConfigureMcp": {
           "type": "boolean",
           "default": true,
-          "description": "Automatically add/update the mcp-stata server entry in your host MCP config (mcp.json). Disable if you manage MCP servers manually."
+          "description": "On extension load and when toggled: add/update mcp-stata in host MCP config (mcp.json). When disabled: remove mcp-stata from host config."
         },
         "stataMcp.configureClaudeCode": {
           "type": "boolean",
           "default": false,
-          "description": "Also configure Claude Code CLI MCP settings when installed. Writes to ~/.claude.json or project .mcp.json based on scope."
+          "description": "On load and when toggled: register mcp-stata via 'claude mcp add-json' (CLI). Ensures both Claude Code CLI and VS Code extension see the server. When disabled: runs 'claude mcp remove mcp_stata'."
         },
-        "stataMcp.claudeCodeConfigScope": {
+        "stataMcp.configureCodex": {
+          "type": "boolean",
+          "default": false,
+          "description": "On load and when toggled: add/update mcp-stata in Codex config. When disabled: remove mcp_stata from the configured path."
+        },
+        "stataMcp.codexConfigPath": {
           "type": "string",
-          "enum": [
-            "user",
-            "project"
-          ],
-          "default": "user",
-          "description": "Where to configure Claude Code CLI MCP server: user (~/.claude.json) or project (.mcp.json at workspace root)."
+          "default": "~/.codex/config.toml",
+          "description": "Path to Codex MCP config file. Supports ~ for home and ${workspaceFolder} for project root."
         },
         "stataMcp.runFileWorkingDirectory": {
           "type": "string",
@@ -269,6 +270,7 @@
     "watch": "bun ./build/esbuild.js --watch",
     "download-uv": "node ./scripts/download-uv.js",
     "test": "bun test --concurrent --preload ./test/bun-preload.js test/unit",
+    "test:mcp-config": "bun test --concurrent --preload ./test/bun-preload.js test/unit --testPathPattern='mcp-config|extension.test'",
     "test:full": "bun test --concurrent --preload ./test/bun-preload.js test/unit && bun run test:integration:parallel",
     "pretest:integration": "bun run compile",
     "test:integration": "bun -e \"process.env.MCP_STATA_INTEGRATION='1'; require('./test/integration/runTest');\"",

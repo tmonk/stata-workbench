@@ -10,6 +10,7 @@ const pkg = require('../package.json');
 const { TerminalPanel } = require('./terminal-panel');
 const { DataBrowserPanel } = require('./data-browser-panel');
 const { openArtifact } = require('./artifact-utils');
+const { HelpPanel } = require('./help-panel');
 const { getTmpFilePath, getTmpDir } = require('./fs-utils');
 
 const createDepProxy = (getter) => new Proxy({}, {
@@ -148,8 +149,8 @@ function activate(context) {
         Sentry.setTag("os.platform", process.platform);
         Sentry.setContext("extension", {
             installSource: context.extensionUri.fsPath.includes('.vscode-insiders') ? 'insiders' : 'stable',
-            mode: context.extensionMode === vscode.ExtensionMode.Development ? 'development' : 
-                  context.extensionMode === vscode.ExtensionMode.Test ? 'test' : 'production'
+            mode: context.extensionMode === vscode.ExtensionMode.Development ? 'development' :
+                context.extensionMode === vscode.ExtensionMode.Test ? 'test' : 'production'
         });
     } catch (_err) {
         // Telemetry should never crash the extension
@@ -160,7 +161,9 @@ function activate(context) {
     const settings = vscode.workspace.getConfiguration('stataMcp');
     applyNoReloadOnClearSetting(!!settings.get('noReloadOnClear', false));
     const version = pkg?.version || 'unknown';
-    appendLine(`Stata Workbench ready (extension v${version})`);
+    const isLocal = context.extensionMode === vscode.ExtensionMode.Development ||
+        (context.extensionUri?.fsPath && context.extensionUri.fsPath.includes('stata-workbench-debug'));
+    appendLine(`Stata Workbench ready (extension v${version}${isLocal ? ' (local)' : ''})`);
     missingCliPrompted = !!context.globalState?.get?.(MISSING_CLI_PROMPT_KEY);
     if (!missingCliPrompted && mcpClient.hasConfig()) {
         missingCliPrompted = true;
@@ -171,7 +174,7 @@ function activate(context) {
             const config = vscode.workspace.getConfiguration('stataMcp');
             const showAll = config.get('showAllLogsInOutput', false);
             const logCode = config.get('logStataCode', false);
-            
+
             // Always show our explicit code logs if they are enabled via the opt-in setting
             if (msg.includes('[mcp-stata code]')) {
                 if (logCode) {
@@ -190,7 +193,7 @@ function activate(context) {
                 if (typeof global.addLogToSentryBuffer === 'function') {
                     global.addLogToSentryBuffer(msg + '\n');
                 }
-                
+
                 // We show connection/starting events and mcp-stata diagnostic logs by default.
                 // But we suppress 'stderr' noise from the server process unless showAll is on.
                 if (msg.startsWith('[mcp-stata]') && !msg.includes('stderr')) {
@@ -224,6 +227,31 @@ function activate(context) {
         vscode.commands.registerCommand('stata-workbench.cancelRequest', cancelRequest),
         mcpClient.onStatusChanged(updateStatusBar)
     ];
+
+    TerminalPanel.setHandlersFactory(() => ({
+        runCommand: terminalRunCommand,
+        variableProvider: variableListProvider,
+        downloadGraphPdf: downloadGraphAsPdf,
+        openHelpPanel: (helpPath, helpLabel) => {
+            try {
+                const content = fs.readFileSync(helpPath, 'utf8');
+                HelpPanel.show(globalExtensionUri, helpLabel || 'Stata Help', content);
+            } catch (err) {
+                debugLog(`[Extension] openHelpPanel failed: ${err.message}`);
+            }
+        },
+        cancelRun: cancelRequest,
+        cancelTask: cancelTask,
+        clearAll: clearAllCommand
+    }));
+
+    if (vscode.window.registerWebviewPanelSerializer) {
+        vscode.window.registerWebviewPanelSerializer('stataTerminal', {
+            async deserializeWebviewPanel(webviewPanel, state) {
+                TerminalPanel.restorePanel(webviewPanel, state);
+            }
+        });
+    }
 
     context.subscriptions.push(...subscriptions, statusBarItem, outputChannel);
     globalExtensionUri = context.extensionUri;
@@ -288,37 +316,8 @@ function activate(context) {
         const refreshed = refreshMcpPackage();
         mcpPackageVersion = refreshed || getMcpPackageVersion();
 
-        const autoConfigureMcp = settings.get('autoConfigureMcp', true);
-        if (autoConfigureMcp) {
-            // Even if it was "working" before, check if it's still "current" after refresh.
-            // If not current, we update the config file to point to the new version/path.
-            const isCurrent = isWorking && isMcpConfigCurrent(existingServerConfig, uvCommand, mcpPackageVersion);
-            if (!isCurrent) {
-                ensureMcpConfigs(context);
-            }
+        syncMcpConfigsFromSettings(context);
 
-            const configureClaudeCode = settings.get('configureClaudeCode', false);
-            if (configureClaudeCode) {
-                const scope = settings.get('claudeCodeConfigScope', 'user');
-                if (isClaudeCodeInstalled()) {
-                    const claudeTarget = getClaudeMcpConfigTarget(context, scope);
-                    if (!claudeTarget) {
-                        appendLine('Skipping Claude Code MCP config update: no target path resolved');
-                    } else {
-                        const existingClaude = loadMcpConfigFromPath(claudeTarget.configPath);
-                        const claudeCurrent = isMcpConfigCurrent(existingClaude, uvCommand, mcpPackageVersion);
-                        if (!claudeCurrent) {
-                            writeMcpConfig(claudeTarget);
-                        }
-                    }
-                } else {
-                    appendLine('Skipping Claude Code MCP config update: claude CLI not detected');
-                }
-            }
-        } else {
-            appendLine('Skipping MCP config update: stataMcp.autoConfigureMcp is disabled');
-        }
-        
         appendLine(`mcp-stata version: ${mcpPackageVersion}`);
         try {
             Sentry.setTag("mcp.version", mcpPackageVersion);
@@ -345,6 +344,14 @@ function activate(context) {
                 });
                 if (e.affectsConfiguration('stataMcp.noReloadOnClear')) {
                     applyNoReloadOnClearSetting(!!config.get('noReloadOnClear', false));
+                }
+                if (
+                    e.affectsConfiguration('stataMcp.autoConfigureMcp') ||
+                    e.affectsConfiguration('stataMcp.configureClaudeCode') ||
+                    e.affectsConfiguration('stataMcp.configureCodex') ||
+                    e.affectsConfiguration('stataMcp.codexConfigPath')
+                ) {
+                    if (!missingCli) syncMcpConfigsFromSettings(context);
                 }
             }
         })
@@ -506,12 +513,12 @@ function refreshMcpPackage() {
     const isUv = cmd.endsWith('uv') || cmd.endsWith('uv.exe');
     const baseArgs = isUv ? ['tool', 'run'] : [];
     const args = [...baseArgs, '--refresh', '--refresh-package', MCP_PACKAGE_NAME, '--from', MCP_PACKAGE_SPEC, MCP_PACKAGE_NAME, '--version'];
-    
+
     try {
         const result = cp.spawnSync(cmd, args, { encoding: 'utf8', timeout: 10000 });
         const stdout = result?.stdout?.toString?.().trim() || '';
         const stderr = result?.stderr?.toString?.().trim() || '';
-        
+
         const sanitized = sanitizeVersion(stdout) || sanitizeVersion(stderr);
 
         if (result.status === 0) {
@@ -670,12 +677,100 @@ function isClaudeCodeInstalled() {
 }
 
 /**
+ * Register mcp_stata with Claude Code via `claude mcp add-json`. Uses Claude's official
+ * mechanism so both CLI and VS Code extension see the server. Per https://code.claude.com/docs/en/mcp
+ * Removes first if already exists (add-json fails with "already exists").
+ */
+function addClaudeMcpViaCli(context) {
+    const config = vscode.workspace.getConfiguration('stataMcp');
+    const noReloadOnClear = !!config.get('noReloadOnClear', false);
+
+    const resolvedCommand = uvCommand || 'uvx';
+    const isDevVersion = mcpPackageVersion && /\.dev\d+$|\.post\d+$|[ab]\d+$/.test(mcpPackageVersion);
+    const activeSpec = (mcpPackageVersion && mcpPackageVersion !== 'unknown' && !isDevVersion)
+        ? `${MCP_PACKAGE_NAME}==${mcpPackageVersion}`
+        : MCP_PACKAGE_SPEC;
+    const isRunUv = resolvedCommand.endsWith('uv') || resolvedCommand.endsWith('uv.exe');
+    const args = isRunUv
+        ? ['tool', 'run', '--refresh', '--refresh-package', MCP_PACKAGE_NAME, '--from', activeSpec, MCP_PACKAGE_NAME]
+        : ['--refresh', '--refresh-package', MCP_PACKAGE_NAME, '--from', activeSpec, MCP_PACKAGE_NAME];
+
+    const payload = {
+        type: 'stdio',
+        command: resolvedCommand,
+        args,
+        ...(noReloadOnClear && { env: { MCP_STATA_NO_RELOAD_ON_CLEAR: '1' } })
+    };
+    const jsonArg = JSON.stringify(payload);
+
+    try {
+        // Remove first to avoid "MCP server mcp_stata already exists" error (add-json does not overwrite)
+        cp.spawnSync('claude', ['mcp', 'remove', MCP_SERVER_ID], {
+            encoding: 'utf8',
+            shell: process.platform === 'win32',
+            timeout: 5000
+        });
+        // Ignore remove failures (e.g. not found) - we'll add regardless
+
+        const result = cp.spawnSync('claude', ['mcp', 'add-json', MCP_SERVER_ID, jsonArg, '--scope', 'user'], {
+            encoding: 'utf8',
+            shell: process.platform === 'win32',
+            timeout: 15000
+        });
+        const out = (result.stdout || '').trim();
+        const err = (result.stderr || '').trim();
+        if (result.status !== 0) {
+            outputChannel?.appendLine?.(`claude mcp add-json failed (${result.status}): ${err || out}`);
+            return;
+        }
+        outputChannel?.appendLine?.(`Registered ${MCP_SERVER_ID} with Claude Code via CLI (user scope)`);
+    } catch (err) {
+        outputChannel?.appendLine?.(`Failed to run claude mcp add-json: ${err.message || err}`);
+    }
+}
+
+/**
+ * Remove mcp_stata from Claude Code. Runs `claude mcp remove` and also cleans config files directly,
+ * since the CLI only removes from global scope (per anthropics/claude-code#7936).
+ */
+function removeClaudeMcpViaCli(context) {
+    const home = os.homedir();
+    const workspaceRoot = resolveWorkspaceRoot(context);
+
+    // 1. CLI remove - user scope, works from anywhere (no cwd needed)
+    try {
+        const result = cp.spawnSync('claude', ['mcp', 'remove', MCP_SERVER_ID], {
+            encoding: 'utf8',
+            shell: process.platform === 'win32',
+            timeout: 5000
+        });
+        const err = (result.stderr || '').trim();
+        if (result.status !== 0 && !err.includes('not found') && !err.includes('No MCP servers')) {
+            outputChannel?.appendLine?.(`claude mcp remove: ${err}`);
+        }
+    } catch (err) {
+        outputChannel?.appendLine?.(`claude mcp remove failed: ${err.message || err}`);
+    }
+
+    // 2. Direct file cleanup - CLI only removes from global; project/local scopes persist (anthropics/claude-code#7936)
+    const cursorTarget = { configPath: null, writeVscode: false, writeCursor: true, cleanClaudeProjects: true };
+    if (home) {
+        removeFromMcpConfig({ ...cursorTarget, configPath: path.join(home, '.claude.json') });
+        removeFromMcpConfig({ ...cursorTarget, configPath: path.join(home, '.claude', '.claude.json') });
+    }
+    if (workspaceRoot) {
+        removeFromMcpConfig({ configPath: path.join(workspaceRoot, '.mcp.json'), writeVscode: false, writeCursor: true });
+    }
+    outputChannel?.appendLine?.(`Removed ${MCP_SERVER_ID} from Claude Code config`);
+}
+
+/**
  * Checks if the existing MCP config matches what we expect to be "current".
  * If mcp-stata has released a new version, the config might be "working" but not "current".
  */
 function isMcpConfigCurrent(config, expectedUv, expectedVersion) {
     if (!config || !config.command || !config.args) return false;
-    
+
     // Check if the command matches our resolved uv command (or is a valid equivalent)
     if (config.command !== expectedUv) {
         // If we expect 'uvx' and they have an absolute path to it, that's fine.
@@ -686,7 +781,7 @@ function isMcpConfigCurrent(config, expectedUv, expectedVersion) {
     // Check args for at least the package and version.
     const argsStr = config.args.join(' ');
     if (!argsStr.includes(MCP_PACKAGE_NAME)) return false;
-    
+
     // If we have a specific version we expect, check for it.
     if (expectedVersion && expectedVersion !== 'unknown') {
         if (!argsStr.includes(expectedVersion) && !argsStr.includes('@latest')) return false;
@@ -705,40 +800,268 @@ function ensureMcpConfigs(context) {
     writeMcpConfig(target);
 }
 
+/**
+ * Sync all MCP configs to match current settings. Adds or updates entries when settings
+ * are enabled; removes entries cleanly when settings are disabled. Runs on extension load
+ * and when autoConfigureMcp, configureClaudeCode, or configureCodex are toggled.
+ */
+function syncMcpConfigsFromSettings(context) {
+    const config = vscode.workspace.getConfiguration('stataMcp');
+    const autoConfigureMcp = config.get('autoConfigureMcp', true);
+    const configureClaudeCode = config.get('configureClaudeCode', false);
+    const configureCodex = config.get('configureCodex', false);
+
+    // Host mcp.json (VS Code, Cursor, Windsurf, Antigravity)
+    // When autoConfigureMcp is disabled, leave the file untouched entirely.
+    const hostTarget = getMcpConfigTarget(context);
+    if (hostTarget && autoConfigureMcp) {
+        const isCurrent = mcpClient.getServerConfig && isMcpConfigCurrent(mcpClient.getServerConfig(), uvCommand, mcpPackageVersion);
+        if (!isCurrent) ensureMcpConfigs(context);
+    }
+
+    // Claude Code (via claude mcp add-json / remove - ensures CLI and extension both see it)
+    if (configureClaudeCode && isClaudeCodeInstalled()) {
+        addClaudeMcpViaCli(context);
+    } else {
+        removeClaudeMcpViaCli(context);
+    }
+
+    // Codex (~/.codex/config.toml)
+    const codexTarget = getCodexMcpConfigTarget(context);
+    if (codexTarget) {
+        if (configureCodex) {
+            const existing = loadCodexMcpConfigFromPath(codexTarget);
+            if (!isMcpConfigCurrent(existing, uvCommand, mcpPackageVersion)) {
+                writeCodexMcpConfig(codexTarget);
+            }
+        } else {
+            removeFromCodexMcpConfig(codexTarget);
+        }
+    }
+}
+
+/**
+ * Remove mcp_stata entry from JSON MCP config (host or Claude).
+ * @param {object} target - { configPath, writeVscode, writeCursor, cleanClaudeProjects? }
+ * @param {boolean} target.cleanClaudeProjects - when true, also remove from projects[path].mcpServers (Claude ~/.claude.json)
+ */
+function removeFromMcpConfig(target) {
+    const { configPath, writeVscode, writeCursor, cleanClaudeProjects } = target || {};
+    if (!configPath || (!writeVscode && !writeCursor)) return;
+    try {
+        if (!fs.existsSync(configPath)) return;
+        const raw = fs.readFileSync(configPath, 'utf8');
+        const parsed = safeParseJson(raw);
+        if (parsed.error) return;
+        const json = parsed.data && typeof parsed.data === 'object' ? parsed.data : {};
+        let changed = false;
+        if (json.servers?.[MCP_SERVER_ID]) {
+            delete json.servers[MCP_SERVER_ID];
+            changed = true;
+        }
+        if (json.mcpServers?.[MCP_SERVER_ID]) {
+            delete json.mcpServers[MCP_SERVER_ID];
+            changed = true;
+        }
+        if (cleanClaudeProjects && json.projects && typeof json.projects === 'object') {
+            for (const proj of Object.values(json.projects)) {
+                if (proj?.mcpServers?.[MCP_SERVER_ID]) {
+                    delete proj.mcpServers[MCP_SERVER_ID];
+                    changed = true;
+                }
+                if (proj.mcpServers && Object.keys(proj.mcpServers).length === 0) delete proj.mcpServers;
+            }
+        }
+        if (json.servers && Object.keys(json.servers).length === 0) delete json.servers;
+        if (json.mcpServers && Object.keys(json.mcpServers).length === 0) delete json.mcpServers;
+        if (changed) {
+            fs.writeFileSync(configPath, JSON.stringify(json, null, 2));
+            outputChannel?.appendLine?.(`Removed ${MCP_SERVER_ID} from ${configPath}`);
+        }
+    } catch (err) {
+        console.error('Failed to remove from MCP config', configPath, err.message);
+    }
+}
+
+/**
+ * Remove mcp_stata entry from Codex config.toml.
+ */
+function removeFromCodexMcpConfig(target) {
+    const configPath = target?.configPath;
+    if (!configPath) return;
+    try {
+        if (!fs.existsSync(configPath)) return;
+        let raw = fs.readFileSync(configPath, 'utf8');
+        const escapedId = MCP_SERVER_ID.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const mainSectionRegex = new RegExp(
+            `\\n?\\[mcp_servers\\.${escapedId}\\][\\s\\S]*?(?=\\n\\[mcp_servers\\.|\\n\\[\\w|\\n\\[[\\w.]|$)`,
+            'i'
+        );
+        const envSectionRegex = new RegExp(
+            `\\n?\\[mcp_servers\\.${escapedId}\\.env\\][\\s\\S]*?(?=\\n\\[|$)`,
+            'i'
+        );
+        const hadMain = mainSectionRegex.test(raw);
+        mainSectionRegex.lastIndex = 0;
+        raw = raw.replace(mainSectionRegex, '');
+        raw = raw.replace(envSectionRegex, '');
+        if (hadMain) {
+            raw = raw.replace(/\n{3,}/g, '\n\n').trimEnd();
+            fs.writeFileSync(configPath, raw + (raw && !raw.endsWith('\n') ? '\n' : ''));
+            outputChannel?.appendLine?.(`Removed ${MCP_SERVER_ID} from ${configPath}`);
+        }
+    } catch (err) {
+        console.error('Failed to remove from Codex MCP config', configPath, err.message);
+    }
+}
+
 function resolveWorkspaceRoot(context) {
     if (context?.mcpWorkspaceOverride) return context.mcpWorkspaceOverride;
     return vscode.workspace.workspaceFolders?.[0]?.uri?.fsPath || null;
 }
 
-function getClaudeMcpConfigTarget(context, scopeOverride) {
-    const scope = scopeOverride || 'user';
+/**
+ * Resolves a config path from settings: expands ~ to home and ${workspaceFolder} to workspace root.
+ * @param {string} rawPath - Path from settings (e.g. ~/.claude/.claude.json, ${workspaceFolder}/.mcp.json)
+ * @param {object} context - Extension context (for test overrides)
+ * @returns {string} Absolute path, or original path if expansions cannot be applied
+ */
+function resolveConfigPath(rawPath, context) {
+    if (!rawPath || typeof rawPath !== 'string') return '';
     const hasHomeOverride = context && Object.prototype.hasOwnProperty.call(context, 'mcpHomeOverride');
-
-    let home;
-    if (hasHomeOverride) {
-        home = context.mcpHomeOverride;
-    } else if (context && context.extensionMode === vscode.ExtensionMode.Test) {
-        home = null;
-    } else {
-        home = os.homedir();
+    const home = hasHomeOverride ? context.mcpHomeOverride : (context?.extensionMode === vscode.ExtensionMode.Test ? null : os.homedir());
+    const workspaceRoot = resolveWorkspaceRoot(context) || '';
+    let resolved = rawPath.replace(/\$\{workspaceFolder\}/g, workspaceRoot);
+    if (resolved.startsWith('~/') && home) {
+        resolved = path.join(home, resolved.slice(2));
+    } else if (resolved.startsWith('~') && home) {
+        resolved = path.join(home, resolved.slice(1));
+    } else if (resolved.startsWith('~')) {
+        return ''; // cannot expand ~ without home (e.g. in test mode)
     }
+    return resolved;
+}
 
-    if (scope === 'project') {
-        const workspaceRoot = resolveWorkspaceRoot(context);
-        if (!workspaceRoot) return null;
+/**
+ * Returns Codex MCP config target from user-configured path.
+ * Default: ~/.codex/config.toml
+ */
+function getCodexMcpConfigTarget(context) {
+    const config = vscode.workspace.getConfiguration('stataMcp');
+    const rawPath = config.get('codexConfigPath', '~/.codex/config.toml');
+    const resolved = resolveConfigPath(rawPath, context);
+    if (!resolved) return null;
+    return { configPath: resolved };
+}
+
+/**
+ * Parse Codex config.toml and extract mcp_stata entry. Returns { command, args, env, configPath }.
+ */
+function loadCodexMcpConfigFromPath(target) {
+    const configPath = target?.configPath;
+    if (!configPath) return { command: null, args: null, env: {}, configPath: null };
+    try {
+        if (!fs.existsSync(configPath)) {
+            return { command: null, args: null, env: {}, configPath };
+        }
+        const raw = fs.readFileSync(configPath, 'utf8');
+        const escapedId = MCP_SERVER_ID.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const sectionRegex = new RegExp(
+            `\\[mcp_servers\\.${escapedId}\\]([\\s\\S]*?)(?=\\n\\[mcp_servers\\.|\\n\\[\\w|$)`,
+            'i'
+        );
+        const match = raw.match(sectionRegex);
+        if (!match) return { command: null, args: null, env: {}, configPath };
+
+        const block = match[1];
+        const commandMatch = block.match(/command\s*=\s*"((?:[^"\\\\]|\\\\["\\\\])*)"/);
+        const argsMatch = block.match(/args\s*=\s*(\[[^\]]*\])/);
+        const envSectionRegex = new RegExp(`\\[mcp_servers\\.${escapedId}\\.env\\]([\\s\\S]*?)(?=\\n\\[|$)`, 'im');
+        const envBlockMatch = raw.match(envSectionRegex);
+        let env = {};
+        if (envBlockMatch) {
+            const envLines = envBlockMatch[1].split('\n');
+            for (const line of envLines) {
+                const kv = line.trim().match(/^"?([^"=\s]+)"?\s*=\s*"([^"]*)"$/);
+                if (kv) env[kv[1]] = kv[2];
+            }
+        }
+        let args = null;
+        if (argsMatch) {
+            try {
+                const decoded = argsMatch[1].replace(/\\"/g, '"');
+                args = JSON.parse(decoded);
+            } catch (_e) {
+                const inner = argsMatch[1].slice(1, -1).replace(/"/g, '');
+                args = inner ? inner.split(',').map((s) => s.trim()).filter(Boolean) : [];
+            }
+        }
+        const cmd = commandMatch ? commandMatch[1].replace(/\\\\/g, '\\').replace(/\\"/g, '"') : null;
         return {
-            configPath: path.join(workspaceRoot, '.mcp.json'),
-            writeVscode: false,
-            writeCursor: true
+            command: cmd,
+            args: Array.isArray(args) ? args : null,
+            env,
+            configPath
         };
+    } catch (_err) {
+        return { command: null, args: null, env: {}, configPath };
+    }
+}
+
+/**
+ * Write or merge mcp_stata entry into Codex config.toml (TOML format).
+ */
+function writeCodexMcpConfig(target) {
+    const configPath = target?.configPath;
+    if (!configPath) return;
+    const config = vscode.workspace.getConfiguration('stataMcp');
+    const noReloadOnClear = !!config.get('noReloadOnClear', false);
+    const resolvedCommand = uvCommand || 'uvx';
+    const isTest = globalContext?.extensionMode === vscode.ExtensionMode.Test;
+    if (resolvedCommand.includes('/mock/') && !isTest) {
+        outputChannel?.appendLine?.('Skipping Codex MCP config write: resolved command appears to be a mock path');
+        return;
+    }
+    const isDevVersion = mcpPackageVersion && /\.dev\d+$|\.post\d+$|[ab]\d+$/.test(mcpPackageVersion);
+    const activeSpec = (mcpPackageVersion && mcpPackageVersion !== 'unknown' && !isDevVersion)
+        ? `${MCP_PACKAGE_NAME}==${mcpPackageVersion}`
+        : MCP_PACKAGE_SPEC;
+    const expectedArgs = (resolvedCommand.endsWith('uv') || resolvedCommand.endsWith('uv.exe'))
+        ? ['tool', 'run', '--refresh', '--refresh-package', MCP_PACKAGE_NAME, '--from', activeSpec, MCP_PACKAGE_NAME]
+        : ['--refresh', '--refresh-package', MCP_PACKAGE_NAME, '--from', activeSpec, MCP_PACKAGE_NAME];
+
+    const argsStr = JSON.stringify(expectedArgs);
+    let tomlBlock = `[mcp_servers.${MCP_SERVER_ID}]\ncommand = "${resolvedCommand.replace(/"/g, '\\"')}"\nargs = ${argsStr}\n`;
+    if (noReloadOnClear) {
+        tomlBlock += `[mcp_servers.${MCP_SERVER_ID}.env]\nMCP_STATA_NO_RELOAD_ON_CLEAR = "1"\n`;
     }
 
-    if (!home) return null;
-    return {
-        configPath: path.join(home, '.claude.json'),
-        writeVscode: false,
-        writeCursor: true
-    };
+    try {
+        const dir = path.dirname(configPath);
+        fs.mkdirSync(dir, { recursive: true });
+        let raw = fs.existsSync(configPath) ? fs.readFileSync(configPath, 'utf8') : '';
+        const escapedId = MCP_SERVER_ID.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        // Use non-multiline regex so $ matches only end of string, not before newlines
+        const mainSectionRegex = new RegExp(
+            `\\n?\\[mcp_servers\\.${escapedId}\\][\\s\\S]*?(?=\\n\\[mcp_servers\\.|\\n\\[\\w|\\n\\[[\\w.]|$)`,
+            'i'
+        );
+        const envSectionRegex = new RegExp(
+            `\\n?\\[mcp_servers\\.${escapedId}\\.env\\][\\s\\S]*?(?=\\n\\[|$)`,
+            'i'
+        );
+        const hadMain = mainSectionRegex.test(raw);
+        mainSectionRegex.lastIndex = 0;
+        raw = raw.replace(mainSectionRegex, '');
+        raw = raw.replace(envSectionRegex, '');
+        raw = raw.replace(/\n{3,}/g, '\n\n').trimEnd();
+        if (raw && !raw.endsWith('\n')) raw += '\n';
+        raw += (hadMain ? '' : '\n') + tomlBlock;
+        fs.writeFileSync(configPath, raw);
+        outputChannel?.appendLine?.(`Updated Codex MCP config at ${configPath} for ${MCP_SERVER_ID}`);
+    } catch (err) {
+        console.error('Failed to write Codex MCP config', configPath, err.message);
+    }
 }
 
 function loadMcpConfigFromPath(configPath) {
@@ -785,7 +1108,7 @@ function hasExistingMcpConfig(context) {
 function getMcpConfigTarget(context) {
     const appName = (context?.mcpAppNameOverride || vscode.env?.appName || '').toLowerCase();
     const hasHomeOverride = context && Object.prototype.hasOwnProperty.call(context, 'mcpHomeOverride');
-    
+
     // In tests, we must not default to the real home directory unless explicitly requested.
     // This prevents unit tests from accidentally writing to the user's real mcp.json.
     let home;
@@ -908,13 +1231,16 @@ function writeMcpConfig(target) {
             return;
         }
 
-        // Use the most current version we've resolved, or fallback to @latest
-        const activeSpec = (mcpPackageVersion && mcpPackageVersion !== 'unknown')
+        // Use the most current version we've resolved, or fallback to @latest.
+        // Dev/pre-release versions (e.g. 1.25.1.dev0) should not be pinned into
+        // the config because they don't exist on PyPI.
+        const isDevVersion = mcpPackageVersion && /\.dev\d+$|\.post\d+$|[ab]\d+$/.test(mcpPackageVersion);
+        const activeSpec = (mcpPackageVersion && mcpPackageVersion !== 'unknown' && !isDevVersion)
             ? `${MCP_PACKAGE_NAME}==${mcpPackageVersion}`
             : MCP_PACKAGE_SPEC;
 
         const isRunUv = resolvedCommand.endsWith('uv') || resolvedCommand.endsWith('uv.exe');
-        const expectedArgs = isRunUv 
+        const expectedArgs = isRunUv
             ? ['tool', 'run', '--refresh', '--refresh-package', MCP_PACKAGE_NAME, '--from', activeSpec, MCP_PACKAGE_NAME]
             : ['--refresh', '--refresh-package', MCP_PACKAGE_NAME, '--from', activeSpec, MCP_PACKAGE_NAME];
 
@@ -1145,7 +1471,17 @@ async function runSelection() {
                         if (runId) TerminalPanel.appendStreamingLog(runId, chunk);
                     },
                     onGraphReady: (artifact) => {
-                        if (runId) TerminalPanel.appendRunArtifact(runId, artifact);
+                        if (artifact?.type === 'help') {
+                            try {
+                                const content = fs.readFileSync(artifact.path, 'utf8');
+                                HelpPanel.show(globalExtensionUri, artifact.label || 'Stata Help', content);
+                            } catch (err) {
+                                debugLog(`[Extension] Failed to open help panel: ${err.message}`);
+                                if (runId) TerminalPanel.appendRunArtifact(runId, artifact);
+                            }
+                        } else if (runId) {
+                            TerminalPanel.appendRunArtifact(runId, artifact);
+                        }
                     },
                     onProgress: (progress, total, message) => {
                         if (runId) TerminalPanel.updateStreamingProgress(runId, progress, total, message);
@@ -1233,7 +1569,17 @@ async function runFile() {
                             if (runId) TerminalPanel.appendStreamingLog(runId, chunk);
                         },
                         onGraphReady: (artifact) => {
-                            if (runId) TerminalPanel.appendRunArtifact(runId, artifact);
+                            if (artifact?.type === 'help') {
+                                try {
+                                    const content = fs.readFileSync(artifact.path, 'utf8');
+                                    HelpPanel.show(globalExtensionUri, artifact.label || 'Stata Help', content);
+                                } catch (err) {
+                                    debugLog(`[Extension] Failed to open help panel: ${err.message}`);
+                                    if (runId) TerminalPanel.appendRunArtifact(runId, artifact);
+                                }
+                            } else if (runId) {
+                                TerminalPanel.appendRunArtifact(runId, artifact);
+                            }
                         },
                         onTaskDone: (payload) => {
                             taskDoneSeen = true;
@@ -1332,7 +1678,17 @@ const terminalRunCommand = async (code, hooks) => {
             onRawLog: rawLogHandler,
             onLog: hooks?.onLog,
             onGraphReady: (artifact) => {
-                if (hooks?.runId) TerminalPanel.appendRunArtifact(hooks.runId, artifact);
+                if (artifact?.type === 'help') {
+                    try {
+                        const content = fs.readFileSync(artifact.path, 'utf8');
+                        HelpPanel.show(globalExtensionUri, artifact.label || 'Stata Help', content);
+                    } catch (err) {
+                        debugLog(`[Extension] Failed to open help panel: ${err.message}`);
+                        if (hooks?.runId) TerminalPanel.appendRunArtifact(hooks.runId, artifact);
+                    }
+                } else if (hooks?.runId) {
+                    TerminalPanel.appendRunArtifact(hooks.runId, artifact);
+                }
             },
             onTaskDone: (payload) => {
                 if (hooks?.onTaskDone) hooks.onTaskDone(payload);
@@ -1420,6 +1776,14 @@ async function showTerminal() {
         runCommand: terminalRunCommand,
         variableProvider: variableListProvider,
         downloadGraphPdf: downloadGraphAsPdf,
+        openHelpPanel: (helpPath, helpLabel) => {
+            try {
+                const content = fs.readFileSync(helpPath, 'utf8');
+                HelpPanel.show(globalExtensionUri, helpLabel || 'Stata Help', content);
+            } catch (err) {
+                debugLog(`[Extension] openHelpPanel failed: ${err.message}`);
+            }
+        },
         cancelRun: cancelRequest,
         cancelTask: cancelTask,
         clearAll: clearAllCommand
@@ -1541,7 +1905,17 @@ function openGraphPanel(graphDetails) {
                     await downloadGraphAsPdf(message.graphName);
                 } else if (message.type === 'openArtifact' && message.path) {
                     debugLog(`[Graph Panel] Opening artifact: ${message.path}`);
-                    openArtifact(message.path, message.baseDir);
+                    if (message.artifactType === 'help' || message.label?.toLowerCase().startsWith('help:')) {
+                        try {
+                            const content = fs.readFileSync(message.path, 'utf8');
+                            HelpPanel.show(globalExtensionUri, message.label || 'Stata Help', content);
+                        } catch (err) {
+                            debugLog(`[Extension] Failed to read help artifact: ${err.message}`);
+                            openArtifact(message.path, message.baseDir);
+                        }
+                    } else {
+                        openArtifact(message.path, message.baseDir);
+                    }
                 } else {
                     debugLog(`[Graph Panel] Unknown message type: ${message.command || message.type}`);
                 }
@@ -1588,7 +1962,7 @@ function renderGraphHtml(graphDetails, webview, extensionUri, nonce) {
         const dataPath = escapeHtml(preview);
         const baseDir = g.baseDir || '';
 
-        return `<div class="artifact-tile" data-action="open-modal" data-path="${dataPath}" data-basedir="${escapeHtml(baseDir)}" data-label="${name}">
+        return `<div class="artifact-tile" data-action="open-modal" data-path="${dataPath}" data-basedir="${escapeHtml(baseDir)}" data-label="${name}" data-type="${escapeHtml(g.type || "")}">
           ${thumbHtml}
           <div class="artifact-tile-label">${name}</div>
           ${error}
@@ -1683,6 +2057,14 @@ function renderGraphHtml(graphDetails, webview, extensionUri, nonce) {
              modal.classList.remove('hidden');
              modal.setAttribute('aria-hidden', 'false');
          }
+
+         if (modalDownloadBtn) {
+             if (artifact.type === 'help') {
+                 modalDownloadBtn.textContent = 'View Help';
+             } else {
+                 modalDownloadBtn.textContent = 'Download PDF';
+             }
+         }
      }
 
      function closeArtifactModal() {
@@ -1717,11 +2099,21 @@ function renderGraphHtml(graphDetails, webview, extensionUri, nonce) {
                  modalDownloadBtn.disabled = true;
                  modalDownloadBtn.textContent = 'Downloading...';
                  
-                 console.log('[Modal] Sending download-graph-pdf message:', graphName);
-                 vscode.postMessage({
-                     command: 'download-graph-pdf',
-                     graphName: graphName
-                 });
+                 console.log('[Modal] Sending message for:', graphName, 'type:', activeModalArtifact.type);
+                 if (activeModalArtifact.type === 'help') {
+                     vscode.postMessage({
+                         type: 'openArtifact',
+                         path: activeModalArtifact.path,
+                         label: activeModalArtifact.label,
+                         baseDir: activeModalArtifact.baseDir,
+                         artifactType: 'help'
+                     });
+                 } else {
+                     vscode.postMessage({
+                         command: 'download-graph-pdf',
+                         graphName: graphName
+                     });
+                 }
                  console.log('[Modal] Message sent successfully');
                  
                  setTimeout(() => {
@@ -1766,10 +2158,12 @@ function renderGraphHtml(graphDetails, webview, extensionUri, nonce) {
          tile.addEventListener('click', () => {
              const label = tile.getAttribute('data-label');
              const path = tile.getAttribute('data-path');
+             const baseDir = tile.getAttribute('data-basedir');
+             const type = tile.getAttribute('data-type');
              const src = tile.querySelector('img')?.src || path;
              
-             console.log('[Modal] Opening modal for:', label);
-             openArtifactModal({ label, name: label, src, path });
+             console.log('[Modal] Opening modal for:', label, 'type:', type);
+             openArtifactModal({ label, name: label, src, path, baseDir, type });
          });
      });
 
@@ -1946,10 +2340,18 @@ module.exports = {
     promptInstallMcpCli,
     hasExistingMcpConfig,
     getMcpConfigTarget,
-    getClaudeMcpConfigTarget,
+    addClaudeMcpViaCli,
+    removeClaudeMcpViaCli,
+    getCodexMcpConfigTarget,
+    resolveConfigPath,
+    syncMcpConfigsFromSettings,
+    removeFromMcpConfig,
+    removeFromCodexMcpConfig,
+    writeCodexMcpConfig,
     downloadGraphAsPdf,
     mcpClient,
     DataBrowserPanel,
+    TerminalPanel,
     findUvBinary,
     isMcpConfigWorking,
     isMcpConfigCurrent

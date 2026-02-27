@@ -14,8 +14,8 @@ const loadTerminalPanel = () => proxyquire('../../src/terminal-panel', {
 const itWithContext = (name, fn) => it(name, () => withTestContext({}, fn));
 
 describe('Webview Script Integrity', () => {
-    itWithContext('should produce valid script content without literal newlines in strings', () => {
-        const vscode = require('vscode');
+    itWithContext('should produce syntactically valid JavaScript in the webview script tags', ({ vscode }) => {
+        const vm = require('vm');
         let htmlContent = '';
 
         vscode.window.createWebviewPanel.mockImplementation(() => {
@@ -49,9 +49,7 @@ describe('Webview Script Integrity', () => {
         const TerminalPanel = terminalPanelModule.TerminalPanel;
 
         TerminalPanel.currentPanel = null;
-
         TerminalPanel.setExtensionUri(vscode.Uri.file('/extension'));
-
         TerminalPanel.show({
             filePath: '/test.dta',
             runCommand: async () => ({})
@@ -59,11 +57,25 @@ describe('Webview Script Integrity', () => {
 
         expect(htmlContent).toBeTruthy();
 
-        const strictPattern = /\.indexOf\('[\r\n]+', start\)/;
-        expect(htmlContent).not.toMatch(strictPattern);
+        // Extract all script contents from <script> tags that aren't sourcing a file
+        const scriptRegex = /<script\b[^>]*>([\s\S]*?)<\/script>/gm;
+        let match;
+        let scriptsFound = 0;
 
-        expect(htmlContent).toContain('String.fromCharCode(10)');
+        while ((match = scriptRegex.exec(htmlContent)) !== null) {
+            const scriptContent = match[1].trim();
+            if (scriptContent) {
+                scriptsFound++;
+                try {
+                    // Try to compile the script. This will throw if there's a SyntaxError (like duplicate const).
+                    new vm.Script(scriptContent);
+                } catch (err) {
+                    throw new Error(`Syntax error in webview script: ${err.message}\n\nScript content:\n${scriptContent}`);
+                }
+            }
+        }
 
+        expect(scriptsFound).toBeGreaterThan(0);
         mock.restore();
     });
 });

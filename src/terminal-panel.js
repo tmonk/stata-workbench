@@ -2,7 +2,12 @@ const { openArtifact, revealArtifact, copyToClipboard, resolveArtifactUri } = re
 const Sentry = require("@sentry/node");
 const path = require('path');
 const os = require('os');
-const vscode = require('vscode');
+const { getVscode } = require('./runtime-context');
+const vscode = new Proxy({}, {
+  get(_target, prop) {
+    return getVscode()?.[prop];
+  }
+});
 const fs = require('fs');
 const { filterMcpLogs } = require('./log-utils');
 const { getTmpDir } = require('./fs-utils');
@@ -103,11 +108,15 @@ class TerminalPanel {
   static _testCapture = null;
   static _testOutgoingCapture = null;
   static variableProvider = null;
+  static _runCommand = null;
   static _defaultRunCommand = null;
   static _downloadGraphPdf = null;
+  static _openHelpPanel = null;
   static _cancelHandler = null;
   static _cancelTaskHandler = null;
   static _clearHandler = null;
+  /** @type {(() => object) | null} Registered by extension.js; returns the full set of handler callbacks. */
+  static _handlersFactory = null;
   static _activeRunId = null;
   static _activeFilePath = null;
   static _webviewReady = true;
@@ -116,6 +125,46 @@ class TerminalPanel {
 
   static setExtensionUri(uri) {
     TerminalPanel.extensionUri = uri;
+  }
+
+  /**
+   * Register a zero-argument factory that returns the full handler options object.
+   * Called once by the extension host during activation. Any code path that needs
+   * to (re-)bind handlers — including the panel serializer — will call this factory
+   * so that adding a new handler only requires updating one place in extension.js.
+   * @param {() => object} fn
+   */
+  static setHandlersFactory(fn) {
+    TerminalPanel._handlersFactory = fn;
+  }
+
+  /**
+   * Bind all handler callbacks from an options object (same shape as show()).
+   * Every field is optional; existing values are only overwritten when a function is supplied.
+   */
+  static _bindHandlers({ runCommand, variableProvider, downloadGraphPdf, openHelpPanel, cancelRun, cancelTask, clearAll } = {}) {
+    if (typeof runCommand === 'function') {
+      TerminalPanel._runCommand = runCommand;
+      TerminalPanel._defaultRunCommand = runCommand;
+    }
+    if (typeof variableProvider === 'function') {
+      TerminalPanel.variableProvider = variableProvider;
+    }
+    if (typeof downloadGraphPdf === 'function') {
+      TerminalPanel._downloadGraphPdf = downloadGraphPdf;
+    }
+    if (typeof openHelpPanel === 'function') {
+      TerminalPanel._openHelpPanel = openHelpPanel;
+    }
+    if (typeof cancelRun === 'function') {
+      TerminalPanel._cancelHandler = cancelRun;
+    }
+    if (typeof cancelTask === 'function') {
+      TerminalPanel._cancelTaskHandler = cancelTask;
+    }
+    if (typeof clearAll === 'function') {
+      TerminalPanel._clearHandler = clearAll;
+    }
   }
 
 
@@ -130,30 +179,17 @@ class TerminalPanel {
    * @param {() => Promise<void>} [options.cancelRun]
    * @param {(runId: string) => Promise<void>} [options.cancelTask]
    * @param {() => Promise<void>} [options.clearAll]
+   * @param {vscode.ViewColumn} [options.column]
    */
-  static show({ filePath, initialCode, initialResult, runCommand, variableProvider, downloadGraphPdf, cancelRun, cancelTask, clearAll }) {
-    const column = vscode.ViewColumn.Beside;
+  static show({ filePath, initialCode, initialResult, runCommand, variableProvider, downloadGraphPdf, openHelpPanel, cancelRun, cancelTask, clearAll, column }) {
+    const targetColumn = column || (TerminalPanel.currentPanel ? TerminalPanel.currentPanel.viewColumn : vscode.ViewColumn.Beside);
     TerminalPanel._activeFilePath = filePath || null;
-    if (typeof variableProvider === 'function') {
-      TerminalPanel.variableProvider = variableProvider;
-    }
-    if (typeof downloadGraphPdf === 'function') {
-      TerminalPanel._downloadGraphPdf = downloadGraphPdf;
-    }
-    if (typeof cancelRun === 'function') {
-      TerminalPanel._cancelHandler = cancelRun;
-    }
-    if (typeof cancelTask === 'function') {
-      TerminalPanel._cancelTaskHandler = cancelTask;
-    }
-    if (typeof clearAll === 'function') {
-      TerminalPanel._clearHandler = clearAll;
-    }
+    TerminalPanel._bindHandlers({ runCommand, variableProvider, downloadGraphPdf, openHelpPanel, cancelRun, cancelTask, clearAll });
     if (!TerminalPanel.currentPanel) {
       TerminalPanel.currentPanel = vscode.window.createWebviewPanel(
         'stataTerminal',
         'Stata Terminal',
-        column,
+        targetColumn,
         {
           enableScripts: true,
           retainContextWhenHidden: true,
@@ -173,114 +209,150 @@ class TerminalPanel {
         TerminalPanel._pendingWebviewMessages = [];
       });
 
-      TerminalPanel.currentPanel.webview.onDidReceiveMessage(async (message) => {
-        if (!message || typeof message !== 'object') return;
-
-        // Test hook
-        if (TerminalPanel._testCapture) {
-          TerminalPanel._testCapture(message);
-        }
-
-        if (message.type === 'ready') {
-          TerminalPanel._webviewReady = true;
-          TerminalPanel._flushPendingMessages();
-          return;
-        }
-
-        if (message.type === 'openDataBrowser') {
-          vscode.commands.executeCommand('stata-workbench.viewData');
-          return;
-        }
-
-
-        if (message.type === 'run' && typeof message.code === 'string') {
-          await TerminalPanel.handleRun(message.code, runCommand);
-        }
-        if ((message.command === 'download-graph-pdf' || message.type === 'downloadGraphPdf') && message.graphName) {
-          await TerminalPanel._handleDownloadGraphPdf(message.graphName);
-        }
-        if (message.type === 'cancelRun') {
-          await TerminalPanel._handleCancelRun();
-        }
-        if (message.type === 'cancelTask' && message.runId) {
-          await TerminalPanel._handleCancelTask(message.runId);
-        }
-        if (message.type === 'clearAll') {
-          await TerminalPanel._handleClearAll();
-        }
-        if (message.type === 'openArtifact' && message.path) {
-          openArtifact(message.path, message.baseDir);
-        }
-        if (message.type === 'revealArtifact' && message.path) {
-          await revealArtifact(message.path, message.baseDir);
-        }
-        if (message.type === 'copyArtifactPath' && message.path) {
-          const uri = resolveArtifactUri(message.path, message.baseDir);
-          if (uri?.scheme === 'file') {
-            await copyToClipboard(uri.fsPath);
-          } else if (uri) {
-            await copyToClipboard(uri.toString());
-          } else {
-            await copyToClipboard(message.path);
-          }
-        }
-        if (message.type === 'requestVariables') {
-          const provider = TerminalPanel.variableProvider;
-          if (typeof provider === 'function') {
-            try {
-              const vars = await provider();
-              webview.postMessage({ type: 'variables', variables: vars || [] });
-            } catch (error) {
-              webview.postMessage({ type: 'variables', variables: [], error: error?.message || String(error) });
-            }
-          } else {
-            webview.postMessage({ type: 'variables', variables: [] });
-          }
-        }
-        if (message.type === 'log') {
-          if (message.level === 'error') {
-            Sentry.captureException(new Error(`Webview Error: ${message.message}`));
-          }
-          console.log(`[Client Log] ${message.level || 'info'}: ${message.message}`);
-        }
-        if (message.type === 'fetchLog') {
-          await TerminalPanel._handleFetchLog(message.runId, message.path, message.offset, message.maxBytes);
-        }
-      });
-
-      const webview = TerminalPanel.currentPanel.webview;
-      if (webview && typeof webview.postMessage === 'function' && !webview.__stataWorkbenchWrapped) {
-        const originalPostMessage = webview.postMessage.bind(webview);
-        webview.postMessage = (msg) => {
-          try {
-            if (TerminalPanel._testOutgoingCapture) {
-              TerminalPanel._testOutgoingCapture(msg);
-            }
-          } catch (_err) {
-          }
-          return originalPostMessage(msg);
-        };
-        webview.__stataWorkbenchWrapped = true;
-      }
+      TerminalPanel._setupWebviewHandlers();
     }
 
     const webview = TerminalPanel.currentPanel.webview;
-    if (typeof runCommand === 'function') {
-      TerminalPanel._defaultRunCommand = runCommand;
-    }
     const nonce = getNonce();
 
     // Convert initial data to history entry format for embedding
     const initialHistory = (initialCode && initialResult)
       ? [toEntry(initialCode, initialResult)]
       : [];
+    TerminalPanel.currentPanel.webview.html = renderHtml(webview, TerminalPanel.extensionUri, nonce, TerminalPanel._activeFilePath, initialHistory);
 
-    TerminalPanel.currentPanel.webview.html = renderHtml(webview, TerminalPanel.extensionUri, nonce, filePath, initialHistory);
     TerminalPanel._webviewReady = false;
     TerminalPanel._pendingWebviewMessages = [];
-    TerminalPanel.currentPanel.reveal(column);
 
+    TerminalPanel.currentPanel.reveal(targetColumn, true);
   }
+
+  static restorePanel(webviewPanel, state) {
+    TerminalPanel.currentPanel = webviewPanel;
+    TerminalPanel._panelInstanceId += 1;
+    TerminalPanel.currentPanel.__stataPanelId = TerminalPanel._panelInstanceId;
+
+    TerminalPanel._webviewReady = false;
+    TerminalPanel._pendingWebviewMessages = [];
+
+    TerminalPanel.currentPanel.onDidDispose(() => {
+      TerminalPanel.currentPanel = null;
+      TerminalPanel._webviewReady = true;
+      TerminalPanel._pendingWebviewMessages = [];
+    });
+
+    TerminalPanel._setupWebviewHandlers();
+    if (TerminalPanel._handlersFactory) {
+      TerminalPanel._bindHandlers(TerminalPanel._handlersFactory());
+    }
+
+    if (!TerminalPanel.extensionUri) return; // extensionUri set by activate(); skip renderHtml if not yet ready
+
+    const nonce = getNonce();
+    TerminalPanel.currentPanel.webview.html = renderHtml(
+      TerminalPanel.currentPanel.webview,
+      TerminalPanel.extensionUri,
+      nonce,
+      TerminalPanel._activeFilePath,
+      []
+    );
+  }
+
+  static _setupWebviewHandlers() {
+    if (!TerminalPanel.currentPanel) return;
+    const webview = TerminalPanel.currentPanel.webview;
+    webview.onDidReceiveMessage(async (message) => {
+      if (!message || typeof message !== 'object') return;
+
+      if (TerminalPanel._testCapture) {
+        TerminalPanel._testCapture(message);
+      }
+
+      if (message.type === 'ready') {
+        TerminalPanel._webviewReady = true;
+        TerminalPanel._flushPendingMessages();
+        return;
+      }
+
+      if (message.type === 'openDataBrowser') {
+        vscode.commands.executeCommand('stata-workbench.viewData');
+        return;
+      }
+
+      if (message.type === 'run' && typeof message.code === 'string') {
+        await TerminalPanel.handleRun(message.code, TerminalPanel._runCommand);
+      }
+      if ((message.command === 'download-graph-pdf' || message.type === 'downloadGraphPdf') && message.graphName) {
+        await TerminalPanel._handleDownloadGraphPdf(message.graphName);
+      }
+      if (message.type === 'cancelRun') {
+        await TerminalPanel._handleCancelRun();
+      }
+      if (message.type === 'cancelTask' && message.runId) {
+        await TerminalPanel._handleCancelTask(message.runId);
+      }
+      if (message.type === 'clearAll') {
+        await TerminalPanel._handleClearAll();
+      }
+      if (message.type === 'openArtifact') {
+        if ((message.artifactType === 'help' || message.type_hint === 'help') && message.path && typeof TerminalPanel._openHelpPanel === 'function') {
+          TerminalPanel._openHelpPanel(message.path, message.label);
+        } else if (message.path) {
+          openArtifact(message.path, message.baseDir);
+        }
+      }
+      if (message.type === 'revealArtifact' && message.path) {
+        await revealArtifact(message.path, message.baseDir);
+      }
+      if (message.type === 'copyArtifactPath' && message.path) {
+        const uri = resolveArtifactUri(message.path, message.baseDir);
+        if (uri?.scheme === 'file') {
+          await copyToClipboard(uri.fsPath);
+        } else if (uri) {
+          await copyToClipboard(uri.toString());
+        } else {
+          await copyToClipboard(message.path);
+        }
+      }
+      if (message.type === 'requestVariables') {
+        const provider = TerminalPanel.variableProvider;
+        if (typeof provider === 'function') {
+          try {
+            const vars = await provider();
+            webview.postMessage({ type: 'variables', variables: vars || [] });
+          } catch (error) {
+            webview.postMessage({ type: 'variables', variables: [], error: error?.message || String(error) });
+          }
+        } else {
+          webview.postMessage({ type: 'variables', variables: [] });
+        }
+      }
+      if (message.type === 'log') {
+        if (message.level === 'error') {
+          Sentry.captureException(new Error(`Webview Error: ${message.message}`));
+        }
+        console.log(`[Client Log] ${message.level || 'info'}: ${message.message}`);
+      }
+      if (message.type === 'fetchLog') {
+        await TerminalPanel._handleFetchLog(message.runId, message.path, message.offset, message.maxBytes);
+      }
+    });
+
+    if (webview && typeof webview.postMessage === 'function' && !webview.__stataWorkbenchWrapped) {
+      const originalPostMessage = webview.postMessage.bind(webview);
+      webview.postMessage = (msg) => {
+        try {
+          if (TerminalPanel._testOutgoingCapture) {
+            TerminalPanel._testOutgoingCapture(msg);
+          }
+        } catch (_err) {
+        }
+        return originalPostMessage(msg);
+      };
+      webview.__stataWorkbenchWrapped = true;
+    }
+  }
+
 
   static _postMessage(msg) {
     if (!TerminalPanel.currentPanel) return;
@@ -494,6 +566,7 @@ class TerminalPanel {
         runCommand: runCommand || TerminalPanel._defaultRunCommand || (async () => { throw new Error('Session not fully initialized'); }),
         variableProvider: variableProvider || TerminalPanel.variableProvider,
         downloadGraphPdf: TerminalPanel._downloadGraphPdf,
+        openHelpPanel: TerminalPanel._openHelpPanel,
         cancelRun: TerminalPanel._cancelHandler,
         cancelTask: TerminalPanel._cancelTaskHandler,
         clearAll: TerminalPanel._clearHandler
@@ -504,7 +577,8 @@ class TerminalPanel {
     const runId = TerminalPanel._generateRunId();
     TerminalPanel._postMessage({ type: 'busy', value: true });
     TerminalPanel._postMessage({ type: 'runStarted', runId, code: trimmed });
-    TerminalPanel.currentPanel.reveal(vscode.ViewColumn.Beside);
+    const targetColumn = TerminalPanel.currentPanel.viewColumn || vscode.ViewColumn.Beside;
+    TerminalPanel.currentPanel.reveal(targetColumn, true);
     return runId;
   }
 
@@ -681,6 +755,7 @@ class TerminalPanel {
           runCommand: runCommand || (async () => { throw new Error('Session not fully initialized'); }),
           variableProvider: variableProvider || TerminalPanel.variableProvider,
           downloadGraphPdf: TerminalPanel._downloadGraphPdf,
+          openHelpPanel: TerminalPanel._openHelpPanel,
           cancelRun: TerminalPanel._cancelHandler,
           clearAll: TerminalPanel._clearHandler
         });
@@ -696,7 +771,8 @@ class TerminalPanel {
       });
 
       // Explicitly reveal it
-      TerminalPanel.currentPanel.reveal(vscode.ViewColumn.Beside);
+      const targetColumn = TerminalPanel.currentPanel.viewColumn || vscode.ViewColumn.Beside;
+      TerminalPanel.currentPanel.reveal(targetColumn, true);
     });
   }
 
@@ -893,7 +969,7 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
   <!--Floating Input Area -->
   <footer class="input-area">
     <div class="input-container">
-      <textarea id="command-input" placeholder="Run Stata command..." rows="1" autofocus></textarea>
+      <textarea id="command-input" placeholder="Run Stata command..." rows="1"></textarea>
       <div class="input-footer">
         <div class="key-hint">
           <span class="kbd">Enter</span><span>run</span>
@@ -1639,6 +1715,7 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
         div.innerHTML = userHtml + systemHtml;
         chatStream.appendChild(div);
         if (autoScrollPinned) scrollToBottom();
+        saveState();
     }
 
     function renderArtifacts(artifacts, id) {
@@ -1675,6 +1752,7 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
                 + ' data-path="' + window.stataUI.escapeHtml(a.path || '') + '"'
                 + ' data-basedir="' + window.stataUI.escapeHtml(a.baseDir || '') + '"'
                 + ' data-label="' + label + '"'
+                + (a.type ? ' data-artifacttype="' + window.stataUI.escapeHtml(a.type) + '"' : '')
                 + ' data-index="' + idx + '">' 
                 +   '<div class="artifact-thumb">'
                 +     '<button class="artifact-tile-close" type="button" data-action="remove-artifact" data-key="' + closeKey + '" title="Remove">×</button>'
@@ -2305,15 +2383,75 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
 
     // Render initial entries if any
     try {
-        initialEntries.forEach(appendEntry);
+        const savedState = vscode.getState();
+        if (savedState && savedState.chatHtml) {
+            chatStream.innerHTML = savedState.chatHtml;
+            // Restore runs tracking references
+            const entryDivs = chatStream.querySelectorAll('.message-group.entry');
+            entryDivs.forEach(group => {
+                const runId = group.dataset.runId;
+                if (runId) {
+                    runs[runId] = {
+                        group: group,
+                        stdoutEl: document.getElementById('run-stdout-' + runId),
+                        stderrEl: document.getElementById('run-stderr-' + runId),
+                        progressWrap: document.getElementById('run-progress-wrap-' + runId),
+                        progressText: document.getElementById('run-progress-text-' + runId),
+                        progressMeta: document.getElementById('run-progress-meta-' + runId),
+                        progressFill: document.getElementById('run-progress-fill-' + runId),
+                        statusDot: document.getElementById('run-status-dot-' + runId),
+                        statusTitle: document.getElementById('run-status-title-' + runId),
+                        rcEl: document.getElementById('run-rc-' + runId),
+                        durationEl: document.getElementById('run-duration-' + runId),
+                        logLinkEl: document.getElementById('run-log-link-' + runId),
+                        logEl: document.getElementById('run-log-' + runId),
+                        tabsContainer: document.getElementById('run-tabs-' + runId),
+                        artifacts: [] // Handled separately if restored
+                    };
+                    // Re-bind highlighting state
+                    if (document.getElementById('run-search-' + runId)) {
+                        // Resurrect search if it active... handled globally
+                    }
+                }
+            });
+            // Also restore session artifacts
+            if (savedState.sessionArtifacts) {
+                savedState.sessionArtifacts.forEach(a => addSessionArtifact(a));
+                renderSessionArtifacts();
+            }
+            if (savedState.history) {
+                 history.push(...savedState.history);
+            }
+        } else if (initialEntries && initialEntries.length > 0) {
+            initialEntries.forEach(appendEntry);
+        }
+
         // Notify ready
         vscode.postMessage({ type: 'ready' });
-      requestVariables();
+        requestVariables();
     } catch (err) {
         Sentry.captureException(err);
         console.error('Failed to render initial entries', err);
         vscode.postMessage({ type: 'log', level: 'error', message: err.message });
     }
+
+    // Capture state repeatedly for seamless tab moves
+    function saveState() {
+        if (!chatStream) return;
+        vscode.setState({
+            chatHtml: chatStream.innerHTML,
+            sessionArtifacts: sessionArtifacts,
+            history: history
+        });
+    }
+
+    // Debounce mutation observer to automatically save state periodically
+    let stateSaveTimer;
+    const stateObserver = new MutationObserver(() => {
+        clearTimeout(stateSaveTimer);
+        stateSaveTimer = setTimeout(saveState, 500);
+    });
+    stateObserver.observe(chatStream, { childList: true, subtree: true, characterData: true });
 
     // Dynamic spacer for fixed input area
     const inputArea = document.querySelector('.input-area');
@@ -2392,7 +2530,8 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
                 type: 'openArtifact',
                 path: activeModalArtifact.path,
                 baseDir: activeModalArtifact.baseDir,
-                label: activeModalArtifact.label
+                label: activeModalArtifact.label,
+                artifactType: activeModalArtifact.type
             });
         });
     }
@@ -2446,11 +2585,11 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
     });
     
     // Also update when content changes
-    const observer = new MutationObserver(() => {
+    const spacerObserver = new MutationObserver(() => {
         updateSpacer();
     });
     if (inputArea) {
-        observer.observe(inputArea, { attributes: true, childList: true, subtree: true });
+        spacerObserver.observe(inputArea, { attributes: true, childList: true, subtree: true });
     }
 
     function isAtBottom() {
@@ -2860,7 +2999,8 @@ function normalizeArtifacts(result) {
       path: a.path || '',
       previewPath,
       error: a.error || null,
-      baseDir
+      baseDir,
+      type: a.type || null
     };
   }).filter(Boolean);
 

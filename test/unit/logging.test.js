@@ -4,8 +4,6 @@ const { createExtensionHarness } = require('../helpers/extension-harness');
 const { createVscodeMock } = require('../mocks/vscode');
 
 const setupHarness = (overrides = {}) => {
-    global.addLogToSentryBuffer = jest.fn();
-
     const outputChannelMock = {
         appendLine: jest.fn(),
         append: jest.fn(),
@@ -48,6 +46,10 @@ const setupHarness = (overrides = {}) => {
         terminalPanel: { setExtensionUri: jest.fn(), setLogProvider: jest.fn() },
         dataBrowserPanel: { setLogger: jest.fn() }
     });
+
+    // Must be set AFTER createExtensionHarness(), since loading extension.js triggers
+    // require('./instrument.js') which overwrites global.addLogToSentryBuffer with the real fn.
+    global.addLogToSentryBuffer = jest.fn();
 
     return { ...harness, outputChannelMock, mcpClientMock, fs, cp, vscode };
 };

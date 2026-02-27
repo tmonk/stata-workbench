@@ -93,8 +93,9 @@ Offline fallback:
 - `stataMcp.requestTimeoutMs` (default `100000`): timeout for MCP requests.
 - `stataMcp.autoRevealOutput` (default `false`): automatically show the output channel after runs.
 - `stataMcp.autoConfigureMcp` (default `true`): automatically add/update the mcp-stata server entry in your host MCP config (`mcp.json`).
-- `stataMcp.configureClaudeCode` (default `false`): also configure Claude Code CLI MCP settings when installed.
-- `stataMcp.claudeCodeConfigScope` (default `user`): write Claude Code CLI config to `~/.claude.json` (user) or project `.mcp.json` (project).
+- `stataMcp.configureClaudeCode` (default `false`): register mcp-stata via `claude mcp add-json` at user scope. Ensures both Claude Code CLI and VS Code extension see the server. Requires `claude` on PATH.
+- `stataMcp.configureCodex` (default `false`): also configure Codex CLI and VS Code extension MCP settings.
+- `stataMcp.codexConfigPath` (default `~/.codex/config.toml`): path to Codex MCP config. Supports `~` and `${workspaceFolder}`.
 - `stataMcp.runFileWorkingDirectory` (default empty): working directory when running .do files. Supports an absolute path, ~, ${workspaceFolder} or ${fileDir}; empty uses the .do file's folder.
 - `stataMcp.setupTimeoutSeconds` (default `60`): timeout (seconds) for Stata initialization.
 - `stataMcp.noReloadOnClear` (default `false`): disable reloading startup/profile do files after clear all/program drop.
@@ -107,11 +108,20 @@ Offline fallback:
 
 ### Automatic Configuration
 
-Stata Workbench **automatically writes** your MCP configuration when you first run it. The extension detects your editor and creates the appropriate config file.
+MCP configuration is **synced on extension load and when you toggle the relevant settings**. When a setting is enabled, the extension adds or updates the mcp-stata entry in that config. When you turn the setting off, the extension **removes** the mcp_stata entry cleanly.
+
+| When | Behaviour |
+|------|-----------|
+| Extension loads | Adds/updates mcp-stata in each enabled config target |
+| Setting toggled ON | Adds/updates mcp-stata in that config |
+| Setting toggled OFF | Removes mcp_stata from that config |
+
+The extension detects your editor and writes to the appropriate config file(s).
 - User-level `mcp.json` with Stata MCP server entry
 - Uses `uvx --refresh --refresh-package mcp-stata --from mcp-stata@latest mcp-stata` for auto-updates
 - Works for: VS Code, Cursor, Windsurf, Antigravity
-- Optional: Claude Code CLI when `stataMcp.configureClaudeCode` is enabled
+- Optional: Claude Code CLI and extension when `stataMcp.configureClaudeCode` is enabled
+- Optional: Codex CLI and extension when `stataMcp.configureCodex` is enabled
 
 **Config file locations:**
 
@@ -123,7 +133,8 @@ Stata Workbench **automatically writes** your MCP configuration when you first r
 | **Windsurf** | `~/.codeium/windsurf/mcp_config.json` | `%USERPROFILE%/.codeium/windsurf/mcp_config.json` | `~/.codeium/windsurf/mcp_config.json` |
 | **Windsurf Next** | `~/.codeium/windsurf-next/mcp_config.json` | `%USERPROFILE%/.codeium/windsurf-next/mcp_config.json` | `~/.codeium/windsurf-next/mcp_config.json` |
 | **Antigravity** | `~/Library/Application Support/Antigravity/User/mcp.json` | `%APPDATA%/Antigravity/User/mcp.json` | `~/.antigravity/mcp.json` |
-| **Claude Code CLI (user scope)** | `~/.claude.json` | `%USERPROFILE%/.claude.json` | `~/.claude.json` |
+| **Claude Code CLI & extension** | Via `claude mcp add-json` (user scope) | same | same |
+| **Codex CLI & extension** | `stataMcp.codexConfigPath` (default `~/.codex/config.toml`) | same | same |
 
 If you want to manage the file yourself, here is the content to add. User-level `mcp.json`:
 ```json
@@ -139,6 +150,7 @@ If you want to manage the file yourself, here is the content to add. User-level 
 ```
 
 ## Troubleshooting
+- **Claude Code extension doesn't see MCPs**: We use `claude mcp add-json` so both CLI and extension share the same config. Ensure `claude` is on PATH and `stataMcp.configureClaudeCode` is enabled. Restart the Claude Code panel after changes.
 - **Icons not visible in editor title bar**: If the play, run, and graph icons don't appear when you open a `.do` file, click the `...` menu in the editor title bar and enable the Stata Workbench icons to make them visible.
 - **Status bar says "CLI missing"**: This usually only occurs on unsupported platforms where a bundled binary is not provided. Install `uv` manually with `curl -LsSf https://astral.sh/uv/install.sh | sh` (macOS/Linux) or `powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -Command "iwr https://astral.sh/uv/install.ps1 -useb | iex"` (Windows).
 - **Requests time out**: raise `stataMcp.requestTimeoutMs`.
@@ -146,9 +158,13 @@ If you want to manage the file yourself, here is the content to add. User-level 
 - Cancel a stuck run: run `Stata: Cancel Current Request` from the command palette.
 
 ## Uninstall cleanup (optional)
-If you added agent configs and want to remove them, edit your user-level `mcp.json` (same path as above) and delete the relevant entry:
+**Automatic removal:** Turn off `stataMcp.autoConfigureMcp`, `stataMcp.configureClaudeCode`, or `stataMcp.configureCodex` in settings; the extension removes the mcp_stata entry immediately.
+
+**Manual removal:** Edit the config file and delete the relevant entry:
 - VS Code format → delete `servers.mcp_stata`
 - Cursor format → delete `mcpServers.mcp_stata`
+- Claude Code → run `claude mcp remove mcp_stata`, or turn off `stataMcp.configureClaudeCode` to auto-remove
+- Codex → delete `[mcp_servers.mcp_stata]` and `[mcp_servers.mcp_stata.env]` from `~/.codex/config.toml`
 
 ## Telemetry
 

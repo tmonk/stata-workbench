@@ -124,6 +124,12 @@ const createVscodeMock = () => {
 };
 
 const vscode = createVscodeMock();
+try {
+    const { setDefaultVscode } = require('../../src/runtime-context');
+    setDefaultVscode(vscode);
+} catch (_err) {
+    // Ignore if runtime-context cannot be loaded (unlikely in test env)
+}
 
 module.exports = vscode;
 module.exports.createVscodeMock = createVscodeMock;

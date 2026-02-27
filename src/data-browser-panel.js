@@ -1,5 +1,10 @@
 const path = require('path');
-const vscode = require('vscode');
+const { getVscode } = require('./runtime-context');
+const vscode = new Proxy({}, {
+    get(_target, prop) {
+        return getVscode()?.[prop];
+    }
+});
 const http = require('http');
 const Sentry = require("@sentry/node");
 const { client: mcpClient } = require('./mcp-client');
@@ -27,7 +32,8 @@ class DataBrowserPanel {
 
         // If we already have a panel, show it.
         if (DataBrowserPanel.currentPanel) {
-            DataBrowserPanel.currentPanel._panel.reveal(column);
+            const targetColumn = DataBrowserPanel.currentPanel._panel.viewColumn || vscode.ViewColumn.Beside;
+            DataBrowserPanel.currentPanel._panel.reveal(targetColumn);
             return;
         }
 
@@ -196,9 +202,13 @@ class DataBrowserPanel {
                         DataBrowserPanel._log(`[DataBrowser Proxy] Sending ${options.method} request to ${url.toString()}`);
                     }
 
+                    // Force close connection so single-threaded python server doesn't hang in keep-alive
+                    headers['Connection'] = 'close';
+
                     const opts = {
                         method: options.method,
-                        headers: headers
+                        headers: headers,
+                        timeout: 30000
                     };
 
                     const req = http.request(url, opts, (res) => {
@@ -222,6 +232,11 @@ class DataBrowserPanel {
                                 reject(new Error(`API Request Failed (${res.statusCode}): ${buffer.toString()}`));
                             }
                         });
+                    });
+
+                    req.on('timeout', () => {
+                        req.destroy();
+                        reject(new Error('Proxy request timed out from Stata server'));
                     });
 
                     req.on('error', (e) => {

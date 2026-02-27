@@ -609,29 +609,255 @@ describe('extension unit tests', () => {
         });
     });
 
-    describe('getClaudeMcpConfigTarget', () => {
-        itWithHarness('resolves user scope Claude config path', () => {
-            const ctx = {
-                mcpHomeOverride: '/home/alex',
-                extensionMode: vscode.ExtensionMode.Test
-            };
+    describe('addClaudeMcpViaCli / removeClaudeMcpViaCli', () => {
+        itWithHarness('removes first then runs claude mcp add-json (handles already exists)', () => {
+            const h = getHarness();
+            h.vscode.workspace.getConfiguration().get.mockImplementation((key, def) => {
+                if (key === 'noReloadOnClear') return false;
+                return def;
+            });
+            h.cp.spawnSync.mockReturnValue({ status: 0, stdout: '', stderr: '' });
 
-            const target = extension.getClaudeMcpConfigTarget(ctx, 'user');
-            expect(target.configPath).toEqual(path.join('/home/alex', '.claude.json'));
-            expect(target.writeCursor).toBe(true);
-            expect(target.writeVscode).toBe(false);
+            extension.addClaudeMcpViaCli({ mcpWorkspaceOverride: '/workspace' });
+
+            expect(h.cp.spawnSync).toHaveBeenCalledTimes(2);
+            expect(h.cp.spawnSync).toHaveBeenNthCalledWith(
+                1,
+                'claude',
+                ['mcp', 'remove', 'mcp_stata'],
+                expect.objectContaining({ timeout: 5000 })
+            );
+            expect(h.cp.spawnSync).toHaveBeenNthCalledWith(
+                2,
+                'claude',
+                expect.arrayContaining([
+                    'mcp', 'add-json', 'mcp_stata',
+                    expect.stringContaining('"type":"stdio"'),
+                    expect.stringContaining('"command"'),
+                    '--scope', 'user'
+                ]),
+                expect.objectContaining({ timeout: 15000 })
+            );
+            const jsonArg = h.cp.spawnSync.mock.calls[1][1][3];
+            expect(jsonArg).toContain('mcp-stata');
         });
 
-        itWithHarness('resolves project scope Claude config path', () => {
-            const ctx = {
-                mcpWorkspaceOverride: '/workspace',
-                extensionMode: vscode.ExtensionMode.Test
-            };
+        itWithHarness('runs claude mcp remove and cleans config files when removing', () => {
+            const h = getHarness();
+            h.cp.spawnSync.mockReturnValue({ status: 0, stdout: '', stderr: '' });
+            h.fs.existsSync.mockReturnValue(false);
 
-            const target = extension.getClaudeMcpConfigTarget(ctx, 'project');
-            expect(target.configPath).toEqual(path.join('/workspace', '.mcp.json'));
-            expect(target.writeCursor).toBe(true);
-            expect(target.writeVscode).toBe(false);
+            extension.removeClaudeMcpViaCli({ mcpWorkspaceOverride: '/workspace' });
+
+            expect(h.cp.spawnSync).toHaveBeenCalledWith(
+                'claude',
+                ['mcp', 'remove', 'mcp_stata'],
+                expect.objectContaining({ timeout: 5000 })
+            );
+        });
+    });
+
+    describe('getCodexMcpConfigTarget', () => {
+        itWithHarness('resolves default path ~/.codex/config.toml with home override', () => {
+            const ctx = { mcpHomeOverride: '/home/jane', extensionMode: vscode.ExtensionMode.Test };
+            const target = extension.getCodexMcpConfigTarget(ctx);
+            expect(target).not.toBeNull();
+            expect(target.configPath).toEqual(path.join('/home/jane', '.codex', 'config.toml'));
+        });
+
+        itWithHarness('returns null when ~ cannot be expanded (no home in test)', () => {
+            const ctx = { extensionMode: vscode.ExtensionMode.Test };
+            const target = extension.getCodexMcpConfigTarget(ctx);
+            expect(target).toBeNull();
+        });
+    });
+
+    describe('removeFromMcpConfig', () => {
+        itWithHarness('removes mcp_stata from JSON config when present', () => {
+            const configPath = '/tmp/test-mcp.json';
+            fs.writeFileSync.mockClear();
+            fs.existsSync.mockImplementation((p) => p === configPath);
+            fs.readFileSync.mockReturnValue(JSON.stringify({
+                servers: { mcp_stata: { command: 'uvx', args: [] }, other: {} },
+                mcpServers: {}
+            }));
+
+            extension.removeFromMcpConfig({
+                configPath,
+                writeVscode: true,
+                writeCursor: false
+            });
+
+            expect(fs.writeFileSync).toHaveBeenCalledWith(
+                configPath,
+                JSON.stringify({ servers: { other: {} } }, null, 2)
+            );
+        });
+
+        itWithHarness('does nothing when file does not exist', () => {
+            fs.writeFileSync.mockClear();
+            fs.existsSync.mockReturnValue(false);
+
+            extension.removeFromMcpConfig({
+                configPath: '/tmp/missing.json',
+                writeVscode: true,
+                writeCursor: false
+            });
+
+            expect(fs.writeFileSync).not.toHaveBeenCalled();
+        });
+
+        itWithHarness('only removes mcp_stata, leaves all other user settings immutable', () => {
+            const configPath = '/tmp/claude-mcp.json';
+            const userConfig = {
+                model: 'gpt-4',
+                inputs: [{ type: 'promptString', id: 'api-key', description: 'API Key' }],
+                mcpServers: {
+                    mcp_stata: { command: 'uvx', args: ['mcp-stata'] },
+                    github: { type: 'http', url: 'https://api.github.com/mcp', headers: { Authorization: 'Bearer x' } },
+                    memory: { command: 'npx', args: ['-y', '@modelcontextprotocol/server-memory'] }
+                }
+            };
+            fs.writeFileSync.mockClear();
+            fs.existsSync.mockImplementation((p) => p === configPath);
+            fs.readFileSync.mockReturnValue(JSON.stringify(userConfig));
+
+            extension.removeFromMcpConfig({
+                configPath,
+                writeVscode: false,
+                writeCursor: true
+            });
+
+            const written = JSON.parse(fs.writeFileSync.mock.calls[0][1]);
+            expect(written.model).toEqual('gpt-4');
+            expect(written.inputs).toEqual(userConfig.inputs);
+            expect(written.mcpServers.mcp_stata).toBeUndefined();
+            expect(written.mcpServers.github).toEqual(userConfig.mcpServers.github);
+            expect(written.mcpServers.memory).toEqual(userConfig.mcpServers.memory);
+        });
+    });
+
+    describe('removeFromCodexMcpConfig', () => {
+        itWithHarness('removes mcp_stata section from TOML config', () => {
+            const configPath = path.join('/home', '.codex', 'config.toml');
+            fs.writeFileSync.mockClear();
+            fs.existsSync.mockImplementation((p) => p === configPath);
+            fs.readFileSync.mockReturnValue(`
+[mcp_servers.memory]
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-memory"]
+
+[mcp_servers.mcp_stata]
+command = "uvx"
+args = ["mcp-stata"]
+`);
+
+            extension.removeFromCodexMcpConfig({ configPath });
+
+            expect(fs.writeFileSync).toHaveBeenCalled();
+            const written = fs.writeFileSync.mock.calls[0][1];
+            expect(written).not.toContain('[mcp_servers.mcp_stata]');
+            expect(written).toContain('[mcp_servers.memory]');
+        });
+
+        itWithHarness('only removes mcp_stata sections, leaves all other Codex config immutable', () => {
+            const configPath = '/tmp/codex/config.toml';
+            const originalToml = `# User comment - must stay
+model = "gpt-5.2-codex"
+project_doc_max_bytes = 32768
+
+[mcp_servers.memory]
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-memory"]
+
+[mcp_servers.github]
+url = "https://api.github.com/mcp"
+bearer_token_env_var = "GITHUB_TOKEN"
+
+[mcp_servers.mcp_stata]
+command = "uvx"
+args = ["--refresh", "mcp-stata"]
+
+[mcp_servers.mcp_stata.env]
+MCP_STATA_NO_RELOAD_ON_CLEAR = "1"
+
+[mcp_servers.figma]
+url = "https://mcp.figma.com/mcp"
+`;
+            fs.writeFileSync.mockClear();
+            fs.existsSync.mockImplementation((p) => p === configPath);
+            fs.readFileSync.mockReturnValue(originalToml);
+
+            extension.removeFromCodexMcpConfig({ configPath });
+
+            const written = fs.writeFileSync.mock.calls[0][1];
+            expect(written).toContain('# User comment - must stay');
+            expect(written).toContain('model = "gpt-5.2-codex"');
+            expect(written).toContain('project_doc_max_bytes = 32768');
+            expect(written).toContain('[mcp_servers.memory]');
+            expect(written).toContain('[mcp_servers.github]');
+            expect(written).toContain('[mcp_servers.figma]');
+            expect(written).not.toContain('[mcp_servers.mcp_stata]');
+            expect(written).not.toContain('MCP_STATA_NO_RELOAD_ON_CLEAR');
+        });
+    });
+
+    describe('MCP config immutability (user settings must never be touched)', () => {
+        itWithHarness('writeMcpConfig preserves top-level keys (inputs, model) and other servers', () => {
+            const configPath = '/tmp/vscode-mcp.json';
+            const existing = {
+                inputs: [{ type: 'promptString', id: 'perplexity-key', description: 'API Key', password: true }],
+                servers: {
+                    github: { type: 'http', url: 'https://api.githubcopilot.com/mcp' },
+                    memory: { command: 'npx', args: ['-y', '@modelcontextprotocol/server-memory'] }
+                }
+            };
+            fs.existsSync.mockReturnValue(true);
+            fs.readFileSync.mockReturnValue(JSON.stringify(existing));
+
+            extension.writeMcpConfig({
+                configPath,
+                writeVscode: true,
+                writeCursor: false
+            });
+
+            const written = JSON.parse(fs.writeFileSync.mock.calls[0][1]);
+            expect(written.inputs).toEqual(existing.inputs);
+            expect(written.servers.github).toEqual(existing.servers.github);
+            expect(written.servers.memory).toEqual(existing.servers.memory);
+            expect(written.servers.mcp_stata).toBeDefined();
+            expect(Object.keys(written)).toContain('inputs');
+        });
+
+        itWithHarness('writeCodexMcpConfig preserves other mcp_servers and top-level keys', () => {
+            const configPath = '/tmp/codex-config.toml';
+            const originalToml = `model = "gpt-5.2-codex"
+
+[mcp_servers.context7]
+command = "npx"
+args = ["-y", "@upstash/context7-mcp"]
+
+[mcp_servers.figma]
+url = "https://mcp.figma.com/mcp"
+bearer_token_env_var = "FIGMA_OAUTH_TOKEN"
+`;
+            fs.existsSync.mockReturnValue(true);
+            fs.readFileSync.mockReturnValue(originalToml);
+
+            const vscodeConfig = vscode.workspace.getConfiguration();
+            vscodeConfig.get.mockImplementation((key, def) => {
+                if (key === 'noReloadOnClear') return false;
+                return def;
+            });
+
+            extension.writeCodexMcpConfig({ configPath });
+
+            const written = fs.writeFileSync.mock.calls[0][1];
+            expect(written).toContain('model = "gpt-5.2-codex"');
+            expect(written).toContain('[mcp_servers.context7]');
+            expect(written).toContain('[mcp_servers.figma]');
+            expect(written).toContain('bearer_token_env_var = "FIGMA_OAUTH_TOKEN"');
+            expect(written).toContain('[mcp_servers.mcp_stata]');
         });
     });
 
@@ -876,6 +1102,141 @@ describe('extension unit tests', () => {
             await extension.activate(context);
 
             expect(mcpClientMock.connect).not.toHaveBeenCalled();
+        });
+    });
+
+    describe('help command dispatch (onGraphReady)', () => {
+        const activateWithHandlers = async (harness) => {
+            const handlers = new Map();
+            harness.vscode.commands.registerCommand.mockImplementation((name, handler) => {
+                handlers.set(name, handler);
+                return { dispose: jest.fn() };
+            });
+            const context = {
+                subscriptions: [],
+                globalState: { get: jest.fn().mockReturnValue(true), update: jest.fn().mockResolvedValue() },
+                globalStoragePath: '/tmp/globalStorage',
+                extensionUri: { fsPath: '/test/path' },
+                extensionPath: '/test/path',
+                extensionMode: harness.vscode.ExtensionMode.Test
+            };
+            await harness.extension.activate(context);
+            return handlers;
+        };
+
+        itWithHarness('onGraphReady with help artifact reads file and opens help panel', async () => {
+            const handlers = await activateWithHandlers(getHarness());
+
+            vscode.window.activeTextEditor = {
+                selection: { isEmpty: false },
+                document: {
+                    getText: jest.fn().mockReturnValue('help regress'),
+                    uri: { fsPath: '/tmp/test.do' },
+                    lineAt: jest.fn().mockReturnValue({ text: 'help regress' })
+                }
+            };
+
+            const helpContent = '# regress\n\nLinear regression help text';
+            fs.readFileSync.mockReturnValue(helpContent);
+            getHarness().terminalPanel.startStreamingEntry.mockReturnValue('run-42');
+
+            let capturedOnGraphReady = null;
+            mcpClientMock.runSelection.mockImplementation(async (_code, opts) => {
+                capturedOnGraphReady = opts?.onGraphReady;
+                return { rc: 0, success: true, stdout: '' };
+            });
+
+            const runHandler = handlers.get('stata-workbench.runSelection');
+            await runHandler();
+
+            // Now fire onGraphReady with a help artifact
+            expect(capturedOnGraphReady).toBeTruthy();
+            const helpArtifact = { type: 'help', path: '/tmp/help_regress.md', label: 'Help: regress' };
+            await capturedOnGraphReady(helpArtifact);
+
+            // readFileSync should have been called for the help file
+            expect(fs.readFileSync).toHaveBeenCalledWith('/tmp/help_regress.md', 'utf8');
+
+            // HelpPanel uses vscode.window.createWebviewPanel with 'stataHelp'
+            const helpPanelCalls = vscode.window.createWebviewPanel.mock.calls.filter(
+                c => c[0] === 'stataHelp'
+            );
+            expect(helpPanelCalls.length).toBeGreaterThan(0);
+            expect(helpPanelCalls[0][1]).toBe('Help: regress');
+        });
+
+        itWithHarness('onGraphReady with non-help artifact appends run artifact (not help panel)', async () => {
+            const handlers = await activateWithHandlers(getHarness());
+
+            vscode.window.activeTextEditor = {
+                selection: { isEmpty: false },
+                document: {
+                    getText: jest.fn().mockReturnValue('scatter price mpg'),
+                    uri: { fsPath: '/tmp/test.do' },
+                    lineAt: jest.fn().mockReturnValue({ text: 'scatter price mpg' })
+                }
+            };
+
+            let capturedOnGraphReady = null;
+            mcpClientMock.runSelection.mockImplementation(async (_code, opts) => {
+                capturedOnGraphReady = opts?.onGraphReady;
+                return { rc: 0, success: true, stdout: '' };
+            });
+
+            const runHandler = handlers.get('stata-workbench.runSelection');
+            await runHandler();
+
+            expect(capturedOnGraphReady).toBeTruthy();
+            const graphArtifact = { type: 'graph', path: '/tmp/scatter.pdf', label: 'scatter' };
+            capturedOnGraphReady(graphArtifact);
+
+            // A help panel (stataHelp) should NOT have been opened
+            const helpPanelCalls = vscode.window.createWebviewPanel.mock.calls.filter(
+                c => c[0] === 'stataHelp'
+            );
+            expect(helpPanelCalls.length).toBe(0);
+        });
+
+        itWithHarness('onGraphReady help file read failure falls back gracefully (no throw)', async () => {
+            const handlers = await activateWithHandlers(getHarness());
+
+            vscode.window.activeTextEditor = {
+                selection: { isEmpty: false },
+                document: {
+                    getText: jest.fn().mockReturnValue('help regress'),
+                    uri: { fsPath: '/tmp/test.do' },
+                    lineAt: jest.fn().mockReturnValue({ text: 'help regress' })
+                }
+            };
+
+            fs.readFileSync.mockImplementation(() => { throw new Error('ENOENT: file not found'); });
+
+            let capturedOnGraphReady = null;
+            mcpClientMock.runSelection.mockImplementation(async (_code, opts) => {
+                capturedOnGraphReady = opts?.onGraphReady;
+                return { rc: 0, success: true, stdout: '' };
+            });
+
+            const runHandler = handlers.get('stata-workbench.runSelection');
+            await runHandler();
+
+            expect(capturedOnGraphReady).toBeTruthy();
+            const helpArtifact = { type: 'help', path: '/missing/file.md', label: 'Help: regress' };
+
+            // Must not throw even though readFileSync throws
+            let thrown = null;
+            try {
+                capturedOnGraphReady(helpArtifact);
+            } catch (err) {
+                thrown = err;
+            }
+            expect(thrown).toBeNull();
+
+            // No help panel should have been created (error was caught)
+            const helpPanelCalls = vscode.window.createWebviewPanel.mock.calls.filter(
+                c => c[0] === 'stataHelp'
+            );
+            expect(helpPanelCalls.length).toBe(0);
         });
     });
 });
