@@ -1,3 +1,29 @@
+# [0.20.0](https://github.com/tmonk/stata-workbench/compare/v0.19.0...v0.20.0) (2026-02-27)
+
+
+### Bug Fixes
+
+*  MCP configuration management for Claude Code and Codex ([24f90c8](https://github.com/tmonk/stata-workbench/commit/24f90c8b024ba7ce46ed0d665bd4334e7f31432d))
+* Add request timeouts and connection close for data browser proxy, and prevent duplicate webview initialization. ([c08ffad](https://github.com/tmonk/stata-workbench/commit/c08ffad26600c2b50844bd5f1d83d9c5b9f141d3))
+* correct badge formatting in README ([871d452](https://github.com/tmonk/stata-workbench/commit/871d452cd8f60526053651ab25004ced818e0441))
+* enhance help command handling and artifact management in panels and MCP client ([7802fe1](https://github.com/tmonk/stata-workbench/commit/7802fe15fe8a0b23b6ab9991604456a18fa82225))
+* ensure panels reveal in current viewColumn and preserve focus ([a7e14c8](https://github.com/tmonk/stata-workbench/commit/a7e14c814123a1106fe3120dc23127b91bfece94))
+* prevent race condition in _ensureClient to ensure single mcp-stata process spawn ([8882750](https://github.com/tmonk/stata-workbench/commit/8882750487e65322a9f8bcd2a7641ce9a199f48d))
+* remove autofocus from command input textarea in terminal panel ([4a910cd](https://github.com/tmonk/stata-workbench/commit/4a910cdc3cab2126b0332a391db24ca53f4d6319))
+* rename mutation observers for clarity and avoid duplication in terminal panel ([19df7b8](https://github.com/tmonk/stata-workbench/commit/19df7b80696a7af94461266a6334453a5355c6b2))
+* streamline MCP configuration handling by simplifying conditions for auto-configuration ([eaa3e76](https://github.com/tmonk/stata-workbench/commit/eaa3e7632a5a6c039d46d4a12944508283943d76))
+* terminal panel issues ([05fba4b](https://github.com/tmonk/stata-workbench/commit/05fba4b3cf32c27da197611c7406380203495c0f))
+* update HelpPanel markdown rendering & tests ([560568f](https://github.com/tmonk/stata-workbench/commit/560568f0ebb9843718f41bd373869ad698f52e8a))
+* update MCP package version handling and improve help event documentation ([0cfefca](https://github.com/tmonk/stata-workbench/commit/0cfefca7e6e8d6986e65d7dd64e28423686f3c19))
+* update subproject commit reference in mcp-stata ([8d828c9](https://github.com/tmonk/stata-workbench/commit/8d828c900a2b55bb598fe455238923d18d87df9b))
+
+
+### Features
+
+* add HelpPanel for displaying help artifacts and enhance artifact handling in terminal panel ([99959e6](https://github.com/tmonk/stata-workbench/commit/99959e6368f0cb272dfbf2f733179ba4560a70d1))
+* implement help panel functionality for artifact handling in terminal and MCP client ([404ce6a](https://github.com/tmonk/stata-workbench/commit/404ce6a2998d30f85c75007468c794a7dc9e45bd))
+* implement WebviewPanelSerializer for TerminalPanel and add integration tests ([89b0ec5](https://github.com/tmonk/stata-workbench/commit/89b0ec564f68e05ec9d706e0d8b6571b4ed8dbd6))
+
 # [0.19.0](https://github.com/tmonk/stata-workbench/compare/v0.18.4...v0.19.0) (2026-02-09)
 
 
