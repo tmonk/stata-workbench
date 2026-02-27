@@ -69,6 +69,11 @@
         "command": "stata-workbench.cancelRequest",
         "title": "Stata: Cancel Current Request",
         "icon": "$(debug-stop)"
+      },
+      {
+        "command": "stata-workbench.openTerminal",
+        "title": "Stata: Open Interactive Terminal",
+        "icon": "$(terminal)"
       }
     ],
     "menus": {
@@ -109,6 +114,11 @@
         "key": "ctrl+shift+d",
         "mac": "cmd+shift+d",
         "when": "editorTextFocus && (editorLangId == stata || resourceExtname == .do || resourceExtname == .ado || resourceExtname == .mata)"
+      },
+      {
+        "command": "stata-workbench.openTerminal",
+        "key": "ctrl+shift+c",
+        "mac": "cmd+shift+c"
       }
     ],
     "configuration": {

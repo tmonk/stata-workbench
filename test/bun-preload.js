@@ -24,7 +24,8 @@ mock.module('@sentry/node', () => ({
   startTransaction: jest.fn().mockReturnValue({
     finish: jest.fn(),
     startChild: jest.fn().mockReturnValue({ finish: jest.fn() })
-  })
+  }),
+  startSpan: jest.fn().mockImplementation((_context, callback) => callback())
 }));
 
 mock.module('@sentry/browser', () => ({

@@ -225,6 +225,7 @@ function activate(context) {
         vscode.commands.registerCommand('stata-workbench.viewData', viewData),
         vscode.commands.registerCommand('stata-workbench.installMcpCli', () => promptInstallMcpCli(globalContext, true)),
         vscode.commands.registerCommand('stata-workbench.cancelRequest', cancelRequest),
+        vscode.commands.registerCommand('stata-workbench.openTerminal', openTerminal),
         mcpClient.onStatusChanged(updateStatusBar)
     ];
 
@@ -1639,6 +1640,34 @@ async function runFile() {
                 }
             }
         }
+    });
+}
+
+async function openTerminal() {
+    return Sentry.startSpan({ name: 'stata.extension.openTerminal', op: 'extension.operation' }, async () => {
+        const editor = vscode.window.activeTextEditor;
+        const filePath = editor?.document?.uri?.fsPath || null;
+        const runId = null; // No active run yet
+
+        TerminalPanel.show({
+            filePath,
+            initialCode: null,
+            initialResult: null,
+            runCommand: terminalRunCommand,
+            variableProvider: variableListProvider,
+            downloadGraphPdf: downloadGraphAsPdf,
+            openHelpPanel: (helpPath, helpLabel) => {
+                try {
+                    const content = fs.readFileSync(helpPath, 'utf8');
+                    HelpPanel.show(globalExtensionUri, helpLabel || 'Stata Help', content);
+                } catch (err) {
+                    debugLog(`[Extension] openHelpPanel failed: ${err.message}`);
+                }
+            },
+            cancelRun: cancelRequest,
+            cancelTask: cancelTask,
+            clearAll: clearAllCommand
+        });
     });
 }
 
