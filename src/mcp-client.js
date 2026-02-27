@@ -2601,8 +2601,9 @@ class StataMcpClient {
             return;
         }
 
-        // Help artifacts are emitted after the log_path is set, so handle them
-        // before the logPath guard below.
+        // help_ready is emitted before log_path (early interception path) or
+        // after log_path (post-run path). Either way, handle it before the
+        // logPath guard below so it is never silently dropped.
         if (event === 'help_ready') {
             const artifact = {
                 type: 'help',

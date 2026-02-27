@@ -686,7 +686,8 @@ function addClaudeMcpViaCli(context) {
     const noReloadOnClear = !!config.get('noReloadOnClear', false);
 
     const resolvedCommand = uvCommand || 'uvx';
-    const activeSpec = (mcpPackageVersion && mcpPackageVersion !== 'unknown')
+    const isDevVersion = mcpPackageVersion && /\.dev\d+$|\.post\d+$|[ab]\d+$/.test(mcpPackageVersion);
+    const activeSpec = (mcpPackageVersion && mcpPackageVersion !== 'unknown' && !isDevVersion)
         ? `${MCP_PACKAGE_NAME}==${mcpPackageVersion}`
         : MCP_PACKAGE_SPEC;
     const isRunUv = resolvedCommand.endsWith('uv') || resolvedCommand.endsWith('uv.exe');
@@ -1021,7 +1022,8 @@ function writeCodexMcpConfig(target) {
         outputChannel?.appendLine?.('Skipping Codex MCP config write: resolved command appears to be a mock path');
         return;
     }
-    const activeSpec = (mcpPackageVersion && mcpPackageVersion !== 'unknown')
+    const isDevVersion = mcpPackageVersion && /\.dev\d+$|\.post\d+$|[ab]\d+$/.test(mcpPackageVersion);
+    const activeSpec = (mcpPackageVersion && mcpPackageVersion !== 'unknown' && !isDevVersion)
         ? `${MCP_PACKAGE_NAME}==${mcpPackageVersion}`
         : MCP_PACKAGE_SPEC;
     const expectedArgs = (resolvedCommand.endsWith('uv') || resolvedCommand.endsWith('uv.exe'))
@@ -1229,8 +1231,11 @@ function writeMcpConfig(target) {
             return;
         }
 
-        // Use the most current version we've resolved, or fallback to @latest
-        const activeSpec = (mcpPackageVersion && mcpPackageVersion !== 'unknown')
+        // Use the most current version we've resolved, or fallback to @latest.
+        // Dev/pre-release versions (e.g. 1.25.1.dev0) should not be pinned into
+        // the config because they don't exist on PyPI.
+        const isDevVersion = mcpPackageVersion && /\.dev\d+$|\.post\d+$|[ab]\d+$/.test(mcpPackageVersion);
+        const activeSpec = (mcpPackageVersion && mcpPackageVersion !== 'unknown' && !isDevVersion)
             ? `${MCP_PACKAGE_NAME}==${mcpPackageVersion}`
             : MCP_PACKAGE_SPEC;
 
