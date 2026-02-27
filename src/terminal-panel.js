@@ -108,12 +108,15 @@ class TerminalPanel {
   static _testCapture = null;
   static _testOutgoingCapture = null;
   static variableProvider = null;
+  static _runCommand = null;
   static _defaultRunCommand = null;
   static _downloadGraphPdf = null;
   static _openHelpPanel = null;
   static _cancelHandler = null;
   static _cancelTaskHandler = null;
   static _clearHandler = null;
+  /** @type {(() => object) | null} Registered by extension.js; returns the full set of handler callbacks. */
+  static _handlersFactory = null;
   static _activeRunId = null;
   static _activeFilePath = null;
   static _webviewReady = true;
@@ -122,6 +125,46 @@ class TerminalPanel {
 
   static setExtensionUri(uri) {
     TerminalPanel.extensionUri = uri;
+  }
+
+  /**
+   * Register a zero-argument factory that returns the full handler options object.
+   * Called once by the extension host during activation. Any code path that needs
+   * to (re-)bind handlers — including the panel serializer — will call this factory
+   * so that adding a new handler only requires updating one place in extension.js.
+   * @param {() => object} fn
+   */
+  static setHandlersFactory(fn) {
+    TerminalPanel._handlersFactory = fn;
+  }
+
+  /**
+   * Bind all handler callbacks from an options object (same shape as show()).
+   * Every field is optional; existing values are only overwritten when a function is supplied.
+   */
+  static _bindHandlers({ runCommand, variableProvider, downloadGraphPdf, openHelpPanel, cancelRun, cancelTask, clearAll } = {}) {
+    if (typeof runCommand === 'function') {
+      TerminalPanel._runCommand = runCommand;
+      TerminalPanel._defaultRunCommand = runCommand;
+    }
+    if (typeof variableProvider === 'function') {
+      TerminalPanel.variableProvider = variableProvider;
+    }
+    if (typeof downloadGraphPdf === 'function') {
+      TerminalPanel._downloadGraphPdf = downloadGraphPdf;
+    }
+    if (typeof openHelpPanel === 'function') {
+      TerminalPanel._openHelpPanel = openHelpPanel;
+    }
+    if (typeof cancelRun === 'function') {
+      TerminalPanel._cancelHandler = cancelRun;
+    }
+    if (typeof cancelTask === 'function') {
+      TerminalPanel._cancelTaskHandler = cancelTask;
+    }
+    if (typeof clearAll === 'function') {
+      TerminalPanel._clearHandler = clearAll;
+    }
   }
 
 
@@ -141,27 +184,7 @@ class TerminalPanel {
   static show({ filePath, initialCode, initialResult, runCommand, variableProvider, downloadGraphPdf, openHelpPanel, cancelRun, cancelTask, clearAll, column }) {
     const targetColumn = column || (TerminalPanel.currentPanel ? TerminalPanel.currentPanel.viewColumn : vscode.ViewColumn.Beside);
     TerminalPanel._activeFilePath = filePath || null;
-    if (typeof variableProvider === 'function') {
-      TerminalPanel.variableProvider = variableProvider;
-    }
-    if (typeof runCommand === 'function') {
-      TerminalPanel._runCommand = runCommand;
-    }
-    if (typeof downloadGraphPdf === 'function') {
-      TerminalPanel._downloadGraphPdf = downloadGraphPdf;
-    }
-    if (typeof openHelpPanel === 'function') {
-      TerminalPanel._openHelpPanel = openHelpPanel;
-    }
-    if (typeof cancelRun === 'function') {
-      TerminalPanel._cancelHandler = cancelRun;
-    }
-    if (typeof cancelTask === 'function') {
-      TerminalPanel._cancelTaskHandler = cancelTask;
-    }
-    if (typeof clearAll === 'function') {
-      TerminalPanel._clearHandler = clearAll;
-    }
+    TerminalPanel._bindHandlers({ runCommand, variableProvider, downloadGraphPdf, openHelpPanel, cancelRun, cancelTask, clearAll });
     if (!TerminalPanel.currentPanel) {
       TerminalPanel.currentPanel = vscode.window.createWebviewPanel(
         'stataTerminal',
@@ -190,9 +213,6 @@ class TerminalPanel {
     }
 
     const webview = TerminalPanel.currentPanel.webview;
-    if (typeof runCommand === 'function') {
-      TerminalPanel._defaultRunCommand = runCommand;
-    }
     const nonce = getNonce();
 
     // Convert initial data to history entry format for embedding
@@ -222,6 +242,11 @@ class TerminalPanel {
     });
 
     TerminalPanel._setupWebviewHandlers();
+    if (TerminalPanel._handlersFactory) {
+      TerminalPanel._bindHandlers(TerminalPanel._handlersFactory());
+    }
+
+    if (!TerminalPanel.extensionUri) return; // extensionUri set by activate(); skip renderHtml if not yet ready
 
     const nonce = getNonce();
     TerminalPanel.currentPanel.webview.html = renderHtml(

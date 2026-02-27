@@ -228,6 +228,23 @@ function activate(context) {
         mcpClient.onStatusChanged(updateStatusBar)
     ];
 
+    TerminalPanel.setHandlersFactory(() => ({
+        runCommand: terminalRunCommand,
+        variableProvider: variableListProvider,
+        downloadGraphPdf: downloadGraphAsPdf,
+        openHelpPanel: (helpPath, helpLabel) => {
+            try {
+                const content = fs.readFileSync(helpPath, 'utf8');
+                HelpPanel.show(globalExtensionUri, helpLabel || 'Stata Help', content);
+            } catch (err) {
+                debugLog(`[Extension] openHelpPanel failed: ${err.message}`);
+            }
+        },
+        cancelRun: cancelRequest,
+        cancelTask: cancelTask,
+        clearAll: clearAllCommand
+    }));
+
     if (vscode.window.registerWebviewPanelSerializer) {
         vscode.window.registerWebviewPanelSerializer('stataTerminal', {
             async deserializeWebviewPanel(webviewPanel, state) {
@@ -2329,6 +2346,7 @@ module.exports = {
     downloadGraphAsPdf,
     mcpClient,
     DataBrowserPanel,
+    TerminalPanel,
     findUvBinary,
     isMcpConfigWorking,
     isMcpConfigCurrent

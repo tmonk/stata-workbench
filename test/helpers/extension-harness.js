@@ -30,6 +30,8 @@ const createExtensionHarness = (overrides = {}) => {
         addEntry: jest.fn(),
         show: jest.fn(),
         setLogProvider: jest.fn(),
+        setHandlersFactory: jest.fn(),
+        restorePanel: jest.fn(),
         startStreamingEntry: jest.fn().mockReturnValue(null),
         appendStreamingLog: jest.fn(),
         updateStreamingProgress: jest.fn(),

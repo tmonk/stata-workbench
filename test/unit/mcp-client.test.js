@@ -685,6 +685,81 @@ describe('mcp-client', () => {
                 expect(result.logPath).toEqual('/tmp/mcp_stata_test.log');
                 expect(result.stdout).toEqual('abc\n');
             });
+
+            it('runSelection with null log_path (help command) completes without hanging and resets _pending', async () => {
+                // Regression test: help commands now return log_path: null from Python.
+                // The runSelection flow must complete cleanly so _pending returns to 0
+                // and the status bar does not stay "queued" indefinitely.
+                const TASK_ID = 'help-task-123';
+                client._ensureClient = sinon.stub().resolves({});
+                client._delay = sinon.stub().resolves();
+
+                // run_command_background returns task_id but NO log_path (help early exit).
+                client._callTool = sinon.stub().callsFake(async (_client, name) => {
+                    if (name === 'run_command_background') {
+                        return {
+                            content: [{ type: 'text', text: JSON.stringify({
+                                task_id: TASK_ID,
+                                status: 'started',
+                                log_path: null   // <-- help command: no log file
+                            }) }]
+                        };
+                    }
+                    return {};
+                });
+
+                const onGraphReady = sinon.stub();
+
+                // Start runSelection — it will pause waiting for task_done.
+                const runSelectionPromise = client.runSelection('help regress', {
+                    normalizeResult: true,
+                    includeGraphs: false,
+                    onGraphReady
+                });
+
+                // Wait a tick for _awaitBackgroundResult to register the run.
+                await Promise.resolve();
+                await Promise.resolve();
+                await Promise.resolve();
+
+                // Simulate help_ready arriving (emitted by server before task_done).
+                client._onLoggingMessage({}, {
+                    params: {
+                        data: JSON.stringify({
+                            event: 'help_ready',
+                            task_id: TASK_ID,
+                            path: '/tmp/help_regress.md',
+                            label: 'Help: regress',
+                            base_dir: '/tmp'
+                        })
+                    }
+                });
+
+                // Wait a tick, then simulate task_done arriving.
+                await Promise.resolve();
+                client._onLoggingMessage({}, {
+                    params: {
+                        data: JSON.stringify({
+                            event: 'task_done',
+                            task_id: TASK_ID,
+                            status: 'done',
+                            log_path: null
+                        })
+                    }
+                });
+
+                const result = await runSelectionPromise;
+
+                // The run completed normally without hanging.
+                expect(result.success).toBe(true);
+                // _pending must be 0 — no lingering "queued" state.
+                expect(client._pending).toBe(0);
+                // help_ready was processed and onGraphReady was called.
+                expect(onGraphReady.calledOnce).toBe(true);
+                expect(onGraphReady.firstCall.args[0]).toMatchObject({ type: 'help', path: '/tmp/help_regress.md' });
+                // No log tail was started since log_path is null.
+                expect(result.logPath).toBeFalsy();
+            });
         });
 
         describe('background task helpers', () => {

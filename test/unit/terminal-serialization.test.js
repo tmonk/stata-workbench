@@ -30,6 +30,9 @@ describe('TerminalPanel Serialization', () => {
             __stataPanelId: null
         };
 
+        // extensionUri must be set so restorePanel doesn't short-circuit before rendering HTML
+        TerminalPanel.extensionUri = { fsPath: '/ext' };
+
         // Call the static restorePanel method
         TerminalPanel.restorePanel(mockWebviewPanel, { chatHtml: '<div>restored terminal data</div>' });
 
