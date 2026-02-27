@@ -188,7 +188,7 @@ describe('Data Browser Frontend (data-browser.js)', () => {
     });
 
     it('should filter variables list via search', async () => {
-        const { document, triggerMessage, getApiCall, flushPromises, cleanup } = createTestContext();
+        const { document, window, triggerMessage, getApiCall, flushPromises, cleanup } = createTestContext();
         try {
         const vars = [{ name: 'apple' }, { name: 'banana' }, { name: 'cherry' }];
 
