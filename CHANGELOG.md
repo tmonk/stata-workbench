@@ -1,3 +1,10 @@
+## [0.21.1](https://github.com/tmonk/stata-workbench/compare/v0.21.0...v0.21.1) (2026-02-27)
+
+
+### Bug Fixes
+
+* Add command and functionality to open an interactive Stata terminal with a new keybinding. ([c1f0874](https://github.com/tmonk/stata-workbench/commit/c1f08741cfa8251a121a496d77de4c286b35cd15))
+
 # [0.21.0](https://github.com/tmonk/stata-workbench/compare/v0.20.0...v0.21.0) (2026-02-27)
 
 
