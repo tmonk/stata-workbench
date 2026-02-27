@@ -817,6 +817,7 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
   const mainJsUri = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'dist', 'ui-shared', 'main.js'));
   const highlightJsUri = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'src', 'ui-shared', 'highlight.min.js'));
   const markJsUri = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'src', 'ui-shared', 'mark.min.js'));
+  const autocompleteJsUri = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'src', 'ui-shared', 'autocomplete.js'));
 
   const fileName = filePath ? path.basename(filePath) : 'Terminal Session';
   const escapedTitle = escapeHtml(fileName);
@@ -904,6 +905,57 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
     .cancel-queued-btn:hover {
       color: var(--accent-error);
     }
+
+    /* Variable autocomplete dropdown */
+    .completion-dropdown {
+      position: absolute;
+      bottom: calc(100% + 6px);
+      left: 0;
+      right: 0;
+      background: var(--bg-panel);
+      border: 1px solid var(--border-focus);
+      border-radius: var(--radius-lg);
+      box-shadow: 0 -8px 32px rgba(0, 0, 0, 0.55), 0 -2px 8px rgba(0, 0, 0, 0.3);
+      max-height: 220px;
+      overflow-y: auto;
+      z-index: 200;
+      scrollbar-width: thin;
+      scrollbar-color: rgba(255,255,255,0.15) transparent;
+      padding: 4px;
+    }
+    .completion-dropdown.hidden { display: none; }
+    .completion-item {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      padding: 5px 10px;
+      border-radius: var(--radius-sm);
+      font-family: var(--font-mono);
+      font-size: 13px;
+      color: var(--text-primary);
+      cursor: pointer;
+      user-select: none;
+      white-space: nowrap;
+    }
+    .completion-item:hover,
+    .completion-item.active {
+      background: rgba(59, 130, 246, 0.18);
+    }
+    .completion-item.active {
+      background: rgba(59, 130, 246, 0.28);
+    }
+    .completion-item .ci-icon {
+      color: var(--text-tertiary);
+      font-size: 12px;
+      flex-shrink: 0;
+    }
+    .completion-item .ci-match {
+      color: var(--accent-primary);
+      font-weight: 600;
+    }
+    .completion-item .ci-rest {
+      color: var(--text-primary);
+    }
   </style>
 </head>
 <body>
@@ -968,6 +1020,7 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
 
   <!--Floating Input Area -->
   <footer class="input-area">
+    <div id="completion-dropdown" class="completion-dropdown hidden" role="listbox" aria-label="Variable completions"></div>
     <div class="input-container">
       <textarea id="command-input" placeholder="Run Stata command..." rows="1"></textarea>
       <div class="input-footer">
@@ -975,6 +1028,7 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
           <span class="kbd">Enter</span><span>run</span>
           <span class="kbd">PgUp/Down</span><span>prev/next</span>
           <span class="kbd">Tab</span><span>complete</span>
+          <span class="kbd">↑↓</span><span>pick</span>
         </div>
         <div class="input-actions">
           <button id="clear-btn" class="btn btn-sm btn-ghost" title="Clear all (Stata)">
@@ -997,6 +1051,7 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
   <script src="${highlightJsUri}"></script>
   <script src="${markJsUri}"></script>
   <script src="${mainJsUri}"></script>
+  <script src="${autocompleteJsUri}"></script>
   <script nonce="${nonce}">
     const vscode = acquireVsCodeApi();
 
@@ -1145,7 +1200,9 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
     let historyIndex = -1; // -1 means not currently traversing history
     const variables = [];
     let variablesPending = false;
-    let lastCompletion = null;
+
+    // Autocomplete controller (initialised after DOM queries below)
+    let _ac = null;
 
     const runs = Object.create(null);
     const runMetrics = Object.create(null);
@@ -1298,13 +1355,40 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
       this.style.height = 'auto';
       this.style.height = Math.min(this.scrollHeight, 200) + 'px';
       if (this.value === '') this.style.height = 'auto';
-      lastCompletion = null;
+      if (_ac) _ac.onUserInput();
     });
 
     // Handle keys
     input.addEventListener('keydown', (e) => {
+      // Dropdown navigation takes priority
+      if (_ac && _ac.isVisible()) {
+        if (e.key === 'ArrowDown') {
+          e.preventDefault();
+          _ac.setActive(_ac.getActiveIndex() + 1);
+          return;
+        }
+        if (e.key === 'ArrowUp') {
+          e.preventDefault();
+          _ac.setActive(_ac.getActiveIndex() - 1);
+          return;
+        }
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          _ac.close();
+          return;
+        }
+        if (e.key === 'Enter' && !e.shiftKey && _ac.getActiveIndex() >= 0) {
+          e.preventDefault();
+          const _items = document.getElementById('completion-dropdown').querySelectorAll('.completion-item');
+          const _item = _items[_ac.getActiveIndex()];
+          if (_item) _ac.applyItem(_item.dataset.value);
+          return;
+        }
+      }
+
       if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
+        if (_ac) _ac.close();
         doRun();
         return;
       }
@@ -1312,7 +1396,7 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
       if (e.key === 'Tab') {
         // Always prevent focus from leaving the input; attempt completion if possible.
         e.preventDefault();
-        const used = handleTabCompletion();
+        const used = _ac ? _ac.handleTab() : false;
         if (!used) {
           requestVariables();
         }
@@ -1488,6 +1572,7 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
     function clearInput() {
       input.value = '';
       input.style.height = 'auto';
+      if (_ac) _ac.close();
       input.focus();
     }
 
@@ -1499,7 +1584,7 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
       // Move cursor to end for quick editing
       const len = input.value.length;
       input.setSelectionRange(len, len);
-      lastCompletion = null;
+      if (_ac) _ac.close();
     }
 
     function setBusy(value) {
@@ -2365,7 +2450,8 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
                 variables.push(v.name);
             }
         });
-        lastCompletion = null;
+        // Refresh dropdown in case the user was already typing
+        if (_ac) _ac.update();
       }
 
       if (msg.type === 'error') {
@@ -2599,52 +2685,24 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
     setBusy(false);
     requestVariables();
 
-    function handleTabCompletion() {
-      if (!variables.length) {
-        requestVariables();
-        return false;
-      }
-
-      const token = currentToken();
-      if (!token) return false;
-
-      const names = variables.filter(Boolean);
-      const matches = names.filter((name) => name.toLowerCase().startsWith(token.prefix.toLowerCase()));
-      if (!matches.length) return false;
-
-      if (!lastCompletion || lastCompletion.prefix !== token.prefix || lastCompletion.start !== token.start || lastCompletion.end !== token.end) {
-        lastCompletion = { prefix: token.prefix, start: token.start, end: token.end, index: 0, matches };
-      } else {
-        lastCompletion.index = (lastCompletion.index + 1) % matches.length;
-      }
-
-      const replacement = matches[lastCompletion.index];
-      applyReplacement(token.start, token.end, replacement);
-      return true;
-    }
-
-    function currentToken() {
-      const pos = input.selectionStart;
-      if (pos === null || pos === undefined) return null;
-      const text = input.value;
-      const before = text.slice(0, pos);
-      const beforeMatch = before.match(/([A-Za-z0-9_\.]+)$/);
-      if (!beforeMatch) return null;
-      const prefix = beforeMatch[1];
-      const start = pos -prefix.length;
-      const after = text.slice(pos);
-      const afterMatch = after.match(/^([A-Za-z0-9_\.]+)/);
-      const end = pos + (afterMatch ? afterMatch[1].length : 0);
-      if (!prefix) return null;
-      return { prefix, start, end };
-    }
-
-    function applyReplacement(start, end, replacement) {
-      const value = input.value;
-      input.value = value.slice(0, start) + replacement + value.slice(end);
-      const cursor = start + replacement.length;
-      input.setSelectionRange(cursor, cursor);
-      input.dispatchEvent(new Event('input', { bubbles: true }));
+    // Initialise autocomplete controller (requires module loaded via <script src>)
+    if (window.stataAutocomplete && window.stataAutocomplete.createController) {
+      _ac = window.stataAutocomplete.createController({
+        inputEl: input,
+        dropdownEl: document.getElementById('completion-dropdown'),
+        variables: variables,
+        document: document,
+        escapeHtml: window.stataUI ? window.stataUI.escapeHtml : undefined,
+        onRequestVariables: requestVariables,
+      });
+      // Close dropdown when clicking outside the input area
+      document.addEventListener('mousedown', function(e) {
+        if (!_ac.isVisible()) return;
+        const dd = document.getElementById('completion-dropdown');
+        if (dd && !dd.contains(e.target) && e.target !== input) {
+          _ac.close();
+        }
+      });
     }
 
     class SearchController {
