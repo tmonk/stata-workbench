@@ -841,6 +841,138 @@ describe('mcp-client', () => {
                 expect(client._ensureLogTail.calledOnce).toBe(true);
                 expect(client._ensureLogTail.firstCall.args[2]).toEqual('/tmp/priority.log');
             });
+
+            it('_onLoggingMessage help_ready: pushes artifact and fires onGraphReady', async () => {
+                const onGraphReady = sinon.stub();
+                const run = {
+                    _lineBuffer: '', _appendLog: sinon.stub(), logPath: null,
+                    _graphArtifacts: [], onGraphReady
+                };
+                client._activeRun = run;
+
+                const notification = {
+                    params: {
+                        data: JSON.stringify({
+                            event: 'help_ready',
+                            path: '/tmp/help_regress.md',
+                            label: 'Help: regress',
+                            base_dir: '/tmp'
+                        })
+                    }
+                };
+
+                await client._onLoggingMessage({}, notification);
+
+                expect(run._graphArtifacts.length).toBe(1);
+                expect(run._graphArtifacts[0].type).toBe('help');
+                expect(run._graphArtifacts[0].path).toBe('/tmp/help_regress.md');
+                expect(run._graphArtifacts[0].label).toBe('Help: regress');
+                expect(onGraphReady.calledOnce).toBe(true);
+                expect(onGraphReady.firstCall.args[0]).toMatchObject({ type: 'help', path: '/tmp/help_regress.md' });
+            });
+
+            it('_onLoggingMessage help_ready: processed even after logPath is set', async () => {
+                const onGraphReady = sinon.stub();
+                const run = {
+                    _lineBuffer: '', _appendLog: sinon.stub(),
+                    logPath: '/tmp/active.log',   // logPath already set
+                    _graphArtifacts: [], onGraphReady
+                };
+                client._activeRun = run;
+
+                const notification = {
+                    params: {
+                        data: JSON.stringify({
+                            event: 'help_ready',
+                            path: '/tmp/help_regress.md',
+                            label: 'Help: regress',
+                            base_dir: '/tmp'
+                        })
+                    }
+                };
+
+                await client._onLoggingMessage({}, notification);
+
+                // Must still fire despite logPath being set
+                expect(run._graphArtifacts.length).toBe(1);
+                expect(onGraphReady.calledOnce).toBe(true);
+            });
+
+            it('_onLoggingMessage help_ready: skips artifact when path is missing', async () => {
+                const onGraphReady = sinon.stub();
+                const run = {
+                    _lineBuffer: '', _appendLog: sinon.stub(), logPath: null,
+                    _graphArtifacts: [], onGraphReady
+                };
+                client._activeRun = run;
+
+                const notification = {
+                    params: {
+                        data: JSON.stringify({
+                            event: 'help_ready',
+                            label: 'Help: regress'
+                            // path intentionally absent
+                        })
+                    }
+                };
+
+                await client._onLoggingMessage({}, notification);
+
+                expect(run._graphArtifacts.length).toBe(0);
+                expect(onGraphReady.called).toBe(false);
+            });
+
+            it('_onLoggingMessage help_ready: uses alternative field names (file_path, baseDir)', async () => {
+                const onGraphReady = sinon.stub();
+                const run = {
+                    _lineBuffer: '', _appendLog: sinon.stub(), logPath: null,
+                    _graphArtifacts: [], onGraphReady
+                };
+                client._activeRun = run;
+
+                const notification = {
+                    params: {
+                        data: JSON.stringify({
+                            event: 'help_ready',
+                            file_path: '/tmp/help_xtset.md',
+                            baseDir: '/tmp/alt',
+                            label: 'Help: xtset'
+                        })
+                    }
+                };
+
+                await client._onLoggingMessage({}, notification);
+
+                expect(run._graphArtifacts.length).toBe(1);
+                const artifact = run._graphArtifacts[0];
+                expect(artifact.path).toBe('/tmp/help_xtset.md');
+                expect(artifact.baseDir).toBe('/tmp/alt');
+            });
+
+            it('_onLoggingMessage graph_ready: still works normally (regression guard)', async () => {
+                const onGraphReady = sinon.stub();
+                const run = {
+                    _lineBuffer: '', _appendLog: sinon.stub(), logPath: null,
+                    _graphArtifacts: [], onGraphReady
+                };
+                client._activeRun = run;
+                client._graphToArtifact = sinon.stub().returns({ label: 'mygraph', path: '/tmp/g.pdf', type: 'graph' });
+
+                const notification = {
+                    params: {
+                        data: JSON.stringify({
+                            event: 'graph_ready',
+                            graph: { name: 'mygraph', path: '/tmp/g.pdf' }
+                        })
+                    }
+                };
+
+                await client._onLoggingMessage({}, notification);
+
+                expect(run._graphArtifacts.length).toBe(1);
+                expect(run._graphArtifacts[0].type).toBe('graph');
+                expect(onGraphReady.calledOnce).toBe(true);
+            });
         });
 
         describe('_resolveRunFileCwd', () => {

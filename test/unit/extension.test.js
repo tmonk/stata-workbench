@@ -1104,4 +1104,139 @@ bearer_token_env_var = "FIGMA_OAUTH_TOKEN"
             expect(mcpClientMock.connect).not.toHaveBeenCalled();
         });
     });
+
+    describe('help command dispatch (onGraphReady)', () => {
+        const activateWithHandlers = async (harness) => {
+            const handlers = new Map();
+            harness.vscode.commands.registerCommand.mockImplementation((name, handler) => {
+                handlers.set(name, handler);
+                return { dispose: jest.fn() };
+            });
+            const context = {
+                subscriptions: [],
+                globalState: { get: jest.fn().mockReturnValue(true), update: jest.fn().mockResolvedValue() },
+                globalStoragePath: '/tmp/globalStorage',
+                extensionUri: { fsPath: '/test/path' },
+                extensionPath: '/test/path',
+                extensionMode: harness.vscode.ExtensionMode.Test
+            };
+            await harness.extension.activate(context);
+            return handlers;
+        };
+
+        itWithHarness('onGraphReady with help artifact reads file and opens help panel', async () => {
+            const handlers = await activateWithHandlers(getHarness());
+
+            vscode.window.activeTextEditor = {
+                selection: { isEmpty: false },
+                document: {
+                    getText: jest.fn().mockReturnValue('help regress'),
+                    uri: { fsPath: '/tmp/test.do' },
+                    lineAt: jest.fn().mockReturnValue({ text: 'help regress' })
+                }
+            };
+
+            const helpContent = '# regress\n\nLinear regression help text';
+            fs.readFileSync.mockReturnValue(helpContent);
+            getHarness().terminalPanel.startStreamingEntry.mockReturnValue('run-42');
+
+            let capturedOnGraphReady = null;
+            mcpClientMock.runSelection.mockImplementation(async (_code, opts) => {
+                capturedOnGraphReady = opts?.onGraphReady;
+                return { rc: 0, success: true, stdout: '' };
+            });
+
+            const runHandler = handlers.get('stata-workbench.runSelection');
+            await runHandler();
+
+            // Now fire onGraphReady with a help artifact
+            expect(capturedOnGraphReady).toBeTruthy();
+            const helpArtifact = { type: 'help', path: '/tmp/help_regress.md', label: 'Help: regress' };
+            await capturedOnGraphReady(helpArtifact);
+
+            // readFileSync should have been called for the help file
+            expect(fs.readFileSync).toHaveBeenCalledWith('/tmp/help_regress.md', 'utf8');
+
+            // HelpPanel uses vscode.window.createWebviewPanel with 'stataHelp'
+            const helpPanelCalls = vscode.window.createWebviewPanel.mock.calls.filter(
+                c => c[0] === 'stataHelp'
+            );
+            expect(helpPanelCalls.length).toBeGreaterThan(0);
+            expect(helpPanelCalls[0][1]).toBe('Help: regress');
+        });
+
+        itWithHarness('onGraphReady with non-help artifact appends run artifact (not help panel)', async () => {
+            const handlers = await activateWithHandlers(getHarness());
+
+            vscode.window.activeTextEditor = {
+                selection: { isEmpty: false },
+                document: {
+                    getText: jest.fn().mockReturnValue('scatter price mpg'),
+                    uri: { fsPath: '/tmp/test.do' },
+                    lineAt: jest.fn().mockReturnValue({ text: 'scatter price mpg' })
+                }
+            };
+
+            let capturedOnGraphReady = null;
+            mcpClientMock.runSelection.mockImplementation(async (_code, opts) => {
+                capturedOnGraphReady = opts?.onGraphReady;
+                return { rc: 0, success: true, stdout: '' };
+            });
+
+            const runHandler = handlers.get('stata-workbench.runSelection');
+            await runHandler();
+
+            expect(capturedOnGraphReady).toBeTruthy();
+            const graphArtifact = { type: 'graph', path: '/tmp/scatter.pdf', label: 'scatter' };
+            capturedOnGraphReady(graphArtifact);
+
+            // A help panel (stataHelp) should NOT have been opened
+            const helpPanelCalls = vscode.window.createWebviewPanel.mock.calls.filter(
+                c => c[0] === 'stataHelp'
+            );
+            expect(helpPanelCalls.length).toBe(0);
+        });
+
+        itWithHarness('onGraphReady help file read failure falls back gracefully (no throw)', async () => {
+            const handlers = await activateWithHandlers(getHarness());
+
+            vscode.window.activeTextEditor = {
+                selection: { isEmpty: false },
+                document: {
+                    getText: jest.fn().mockReturnValue('help regress'),
+                    uri: { fsPath: '/tmp/test.do' },
+                    lineAt: jest.fn().mockReturnValue({ text: 'help regress' })
+                }
+            };
+
+            fs.readFileSync.mockImplementation(() => { throw new Error('ENOENT: file not found'); });
+
+            let capturedOnGraphReady = null;
+            mcpClientMock.runSelection.mockImplementation(async (_code, opts) => {
+                capturedOnGraphReady = opts?.onGraphReady;
+                return { rc: 0, success: true, stdout: '' };
+            });
+
+            const runHandler = handlers.get('stata-workbench.runSelection');
+            await runHandler();
+
+            expect(capturedOnGraphReady).toBeTruthy();
+            const helpArtifact = { type: 'help', path: '/missing/file.md', label: 'Help: regress' };
+
+            // Must not throw even though readFileSync throws
+            let thrown = null;
+            try {
+                capturedOnGraphReady(helpArtifact);
+            } catch (err) {
+                thrown = err;
+            }
+            expect(thrown).toBeNull();
+
+            // No help panel should have been created (error was caught)
+            const helpPanelCalls = vscode.window.createWebviewPanel.mock.calls.filter(
+                c => c[0] === 'stataHelp'
+            );
+            expect(helpPanelCalls.length).toBe(0);
+        });
+    });
 });

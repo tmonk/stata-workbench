@@ -1,4 +1,5 @@
 const { describe, it, expect } = require('bun:test');
+const sinon = require('sinon');
 const proxyquire = require('proxyquire').noCallThru().noPreserveCache();
 const { withTestContext } = require('../helpers/test-context');
 
@@ -256,6 +257,119 @@ describe('Panels', () => {
 
             TerminalPanel.currentPanel = null;
             vscode.window.createWebviewPanel = originalCreate;
+        });
+
+        itWithContext('show() should store openHelpPanel callback in _openHelpPanel', ({ vscode }) => {
+            const { TerminalPanel } = loadTerminalPanel();
+            const mockPanel = {
+                webview: {
+                    postMessage: () => {},
+                    html: '',
+                    onDidReceiveMessage: () => ({ dispose: () => {} }),
+                    asWebviewUri: (u) => u
+                },
+                onDidDispose: () => ({ dispose: () => {} }),
+                reveal: () => {}
+            };
+
+            const originalCreate = vscode.window.createWebviewPanel;
+            vscode.window.createWebviewPanel = () => mockPanel;
+
+            const helpPanelOpener = () => {};
+            TerminalPanel.show({ runCommand: () => {}, openHelpPanel: helpPanelOpener });
+            expect(TerminalPanel._openHelpPanel).toBe(helpPanelOpener);
+
+            TerminalPanel.currentPanel = null;
+            TerminalPanel._openHelpPanel = null;
+            vscode.window.createWebviewPanel = originalCreate;
+        });
+
+        itWithContext('openArtifact message with help type calls _openHelpPanel', async ({ vscode }) => {
+            const { TerminalPanel } = loadTerminalPanel();
+            let capturedPath = null;
+            let capturedLabel = null;
+            TerminalPanel._openHelpPanel = (p, l) => { capturedPath = p; capturedLabel = l; };
+
+            let messageHandler;
+            const mockWebview = {
+                onDidReceiveMessage: (handler) => { messageHandler = handler; return { dispose: () => {} }; },
+                postMessage: () => {},
+                asWebviewUri: (u) => u,
+                cspSource: ''
+            };
+            const mockPanel = {
+                webview: mockWebview,
+                reveal: () => {},
+                onDidDispose: () => ({ dispose: () => {} })
+            };
+
+            const originalCreate = vscode.window.createWebviewPanel;
+            vscode.window.createWebviewPanel = () => mockPanel;
+            TerminalPanel.show({ runCommand: async () => ({}) });
+
+            await messageHandler({
+                type: 'openArtifact',
+                artifactType: 'help',
+                path: '/tmp/help_regress.md',
+                label: 'Help: regress'
+            });
+
+            expect(capturedPath).toBe('/tmp/help_regress.md');
+            expect(capturedLabel).toBe('Help: regress');
+
+            TerminalPanel.currentPanel = null;
+            TerminalPanel._openHelpPanel = null;
+            vscode.window.createWebviewPanel = originalCreate;
+        });
+
+        itWithContext('openArtifact message without help type does NOT call _openHelpPanel', async ({ vscode }) => {
+            const { TerminalPanel } = loadTerminalPanel();
+            const openHelpPanelSpy = sinon.stub();
+            TerminalPanel._openHelpPanel = openHelpPanelSpy;
+
+            let messageHandler;
+            const mockWebview = {
+                onDidReceiveMessage: (handler) => { messageHandler = handler; return { dispose: () => {} }; },
+                postMessage: () => {},
+                asWebviewUri: (u) => u,
+                cspSource: ''
+            };
+            const mockPanel = {
+                webview: mockWebview,
+                reveal: () => {},
+                onDidDispose: () => ({ dispose: () => {} })
+            };
+
+            const originalCreate = vscode.window.createWebviewPanel;
+            vscode.window.createWebviewPanel = () => mockPanel;
+            TerminalPanel.show({ runCommand: async () => ({}) });
+
+            // Non-help artifact: no artifactType
+            await messageHandler({
+                type: 'openArtifact',
+                path: '/tmp/graph.pdf',
+                baseDir: '/tmp'
+            });
+
+            // _openHelpPanel should NOT have been called
+            expect(openHelpPanelSpy.called).toBe(false);
+
+            TerminalPanel.currentPanel = null;
+            TerminalPanel._openHelpPanel = null;
+            vscode.window.createWebviewPanel = originalCreate;
+        });
+
+        itWithContext('normalizeArtifacts preserves type field on artifacts', () => {
+            const { normalizeArtifacts } = loadTerminalPanel();
+            const result = normalizeArtifacts({
+                artifacts: [
+                    { path: '/tmp/help.md', type: 'help', label: 'Help: regress' },
+                    { path: '/tmp/graph.pdf', type: 'graph', label: 'mygraph' }
+                ]
+            });
+            expect(result.length).toBe(2);
+            expect(result[0].type).toBe('help');
+            expect(result[1].type).toBe('graph');
         });
     });
 

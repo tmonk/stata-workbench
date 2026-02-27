@@ -34,7 +34,10 @@ const createExtensionHarness = (overrides = {}) => {
         appendStreamingLog: jest.fn(),
         updateStreamingProgress: jest.fn(),
         finishStreamingEntry: jest.fn(),
-        failStreamingEntry: jest.fn()
+        failStreamingEntry: jest.fn(),
+        appendRunArtifact: jest.fn(),
+        updateStreamingStatus: jest.fn(),
+        notifyTaskDone: jest.fn()
     };
 
     const dataBrowserPanel = overrides.dataBrowserPanel || {
