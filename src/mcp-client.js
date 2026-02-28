@@ -1,16 +1,10 @@
 const { EventEmitter } = require('events');
-const { spawnSync } = require('child_process');
 const Sentry = require("@sentry/node");
 const path = require('path');
-const fs = require('fs');
 const os = require('os');
-const { getVscode } = require('./runtime-context');
-const vscode = new Proxy({}, {
-    get(_target, prop) {
-        return getVscode()?.[prop];
-    }
-});
-const { getEnv } = require('./runtime-context');
+const { getVscode, getChildProcess, getEnv, getFs, createDepProxy } = require('./runtime-context');
+const vscode = createDepProxy(getVscode);
+const fs = createDepProxy(getFs);
 const pkg = require('../package.json');
 const https = require('https');
 const { filterMcpLogs } = require('./log-utils');
@@ -684,6 +678,7 @@ class StataMcpClient {
 
         // Perform a pre-flight check to avoid ENOENT crashes in the transport layer.
         // On Windows, spawnSync handles .cmd/.exe suffixing when shell is not used if the command is on PATH.
+        const { spawnSync } = getChildProcess();
         try {
             let check = spawnSync(finalCommand, ['--version'], { encoding: 'utf8', shell: process.platform === 'win32' });
 
@@ -697,7 +692,7 @@ class StataMcpClient {
                 finalCommand = uvCommand;
                 finalArgs = ['--refresh', '--refresh-package', MCP_PACKAGE_NAME, '--from', currentSpec, MCP_PACKAGE_NAME];
                 // Re-run pre-flight for the fallback
-                check = spawnSync(finalCommand, ['--version'], { encoding: 'utf8', shell: process.platform === 'win32' });
+                check = spawnSync(finalCommand, ['--version'], { encoding: 'utf8', shell: process.platform === 'win32' });  // uses context-aware spawnSync
                 stderr = (check.stderr || '').toString();
             }
 

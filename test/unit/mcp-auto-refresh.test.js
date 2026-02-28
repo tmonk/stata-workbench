@@ -23,20 +23,8 @@ const StdioClientTransportMock = class {
 // Load McpClient with mocks
 const { StataMcpClient: McpClient } = proxyquire.noCallThru().noPreserveCache().load('../../src/mcp-client', {
     'vscode': vscodeMock,
-    'fs': {
-        existsSync: sinon.stub().returns(true),
-        readFileSync: sinon.stub().returns('{"servers": {"mcp_stata": {"command": "custom-cmd", "args": ["--custom"], "env": {"FOO": "BAR"}}}}')
-    },
     '@modelcontextprotocol/sdk/client/stdio.js': { StdioClientTransport: StdioClientTransportMock },
-    '@modelcontextprotocol/sdk/client/index.js': { Client: ClientMock },
-    'child_process': {
-        spawn: sinon.stub().returns({
-            stdout: { on: sinon.stub() },
-            stderr: { on: sinon.stub() },
-            on: sinon.stub(),
-            kill: sinon.stub()
-        })
-    }
+    '@modelcontextprotocol/sdk/client/index.js': { Client: ClientMock }
 });
 
 describe('McpClient Auto-Refresh', () => {

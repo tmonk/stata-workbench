@@ -5,31 +5,13 @@ const Sentry = require("@sentry/node");
 const path = require('path');
 const os = require('os');
 const { getVscode } = require('./runtime-context');
-const { getEnv, getFs, getChildProcess, getMcpClient } = require('./runtime-context');
+const { getEnv, getFs, getChildProcess, getMcpClient, createDepProxy } = require('./runtime-context');
 const pkg = require('../package.json');
 const { TerminalPanel } = require('./terminal-panel');
 const { DataBrowserPanel } = require('./data-browser-panel');
 const { openArtifact } = require('./artifact-utils');
 const { HelpPanel } = require('./help-panel');
 const { getTmpFilePath, getTmpDir } = require('./fs-utils');
-
-const createDepProxy = (getter) => new Proxy({}, {
-    get(_target, prop) {
-        const target = getter();
-        const value = target?.[prop];
-        const isMockFunction = typeof value === 'function' && (value._isMockFunction || value.mock);
-        if (typeof value === 'function' && !isMockFunction) {
-            return value.bind(target);
-        }
-        return value;
-    },
-    set(_target, prop, value) {
-        const target = getter();
-        if (!target) return false;
-        target[prop] = value;
-        return true;
-    }
-});
 
 const vscode = createDepProxy(getVscode);
 const fs = createDepProxy(getFs);

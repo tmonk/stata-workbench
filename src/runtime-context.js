@@ -66,7 +66,32 @@ const runWithContext = (context, fn) => {
     return storage.run(next, fn);
 };
 
+/**
+ * Creates a Proxy that lazily resolves to the object returned by `getter()`.
+ * Property access, method calls, and assignments are forwarded to the current
+ * value, so the underlying implementation can be swapped via runtime-context
+ * (e.g. in tests via `withTestContext`).
+ */
+const createDepProxy = (getter) => new Proxy({}, {
+    get(_target, prop) {
+        const target = getter();
+        const value = target?.[prop];
+        const isMockFunction = typeof value === 'function' && (value._isMockFunction || value.mock);
+        if (typeof value === 'function' && !isMockFunction) {
+            return value.bind(target);
+        }
+        return value;
+    },
+    set(_target, prop, value) {
+        const target = getter();
+        if (!target) return false;
+        target[prop] = value;
+        return true;
+    }
+});
+
 module.exports = {
+    createDepProxy,
     getVscode,
     getEnv,
     getFs,
