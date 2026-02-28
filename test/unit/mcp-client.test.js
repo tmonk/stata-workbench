@@ -19,6 +19,7 @@ class ClientMock {
 class StdioClientTransportMock {
     constructor(opts) {
         this._opts = opts;
+        this._serverParams = opts;
         StdioClientTransportMock._lastOpts = opts;
         this.close = sinon.stub().resolves();
     }
