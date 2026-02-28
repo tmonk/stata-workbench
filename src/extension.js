@@ -313,16 +313,29 @@ function activate(context) {
     }
 
     if (!missingCli) {
-        // Refresh package first so we know if we're "current"
-        const refreshed = refreshMcpPackage();
-        mcpPackageVersion = refreshed || getMcpPackageVersion();
-
+        // Sync configs immediately with current (possibly cached) version info
+        mcpPackageVersion = getMcpPackageVersion();
         syncMcpConfigsFromSettings(context);
 
         appendLine(`mcp-stata version: ${mcpPackageVersion}`);
         try {
             Sentry.setTag("mcp.version", mcpPackageVersion);
         } catch (_err) { }
+
+        // Defer the slow network refresh (uvx --refresh, up to 10s) to after activation returns
+        setImmediate(() => {
+            try {
+                const refreshed = refreshMcpPackage();
+                if (refreshed && refreshed !== mcpPackageVersion) {
+                    mcpPackageVersion = refreshed;
+                    appendLine(`mcp-stata updated to ${mcpPackageVersion}`);
+                    try { Sentry.setTag("mcp.version", mcpPackageVersion); } catch (_e) { }
+                    syncMcpConfigsFromSettings(context);
+                }
+            } catch (_err) {
+                appendLine(`Deferred mcp-stata refresh failed: ${_err.message}`);
+            }
+        });
     }
     updateStatusBar(missingCli ? 'missing' : 'idle');
 
@@ -371,6 +384,7 @@ function activate(context) {
             getUvCommand: () => uvCommand,
             getMcpPackageVersion,
             reDiscoverUv: () => {
+                _cachedUvBinary = undefined; // invalidate cache for re-discovery
                 ensureMcpCliAvailable(context);
                 return uvCommand;
             },
@@ -578,21 +592,30 @@ function promptInstallMcpCli(context, force = false) {
     return false;
 }
 
+let _cachedUvBinary = undefined; // undefined = not yet searched, null = searched but not found
+
 function findUvBinary(optionalInstallDir) {
     const env = getEnv();
-    const base = ['uvx', 'uvx.exe', 'uv', 'uv.exe'];
 
     // 0. Use environment variable override if specified (e.g. for testing)
     if (env.MCP_STATA_UVX_CMD) {
         return env.MCP_STATA_UVX_CMD;
     }
 
+    // Return cached result if we've already searched (unless caller passes an install dir)
+    if (!optionalInstallDir && _cachedUvBinary !== undefined) {
+        return _cachedUvBinary;
+    }
+
+    const isWin = process.platform === 'win32';
+    const base = isWin ? ['uvx', 'uvx.exe', 'uv', 'uv.exe'] : ['uvx', 'uv'];
+
     // 1. Check system PATH first to respect user-managed installations
     for (const name of base) {
-        // Simple test to see if it's on the PATH and executable
-        const result = cp.spawnSync(name, ['--version'], { encoding: 'utf8', shell: process.platform === 'win32' });
+        const result = cp.spawnSync(name, ['--version'], { encoding: 'utf8', shell: isWin });
         const stderr = (result.stderr || '').toString();
         if (!result.error && result.status === 0 && !stderr.includes('command not found')) {
+            _cachedUvBinary = name;
             return name;
         }
     }
@@ -601,15 +624,16 @@ function findUvBinary(optionalInstallDir) {
     if (globalContext && globalContext.extensionUri && globalContext.extensionUri.fsPath) {
         const platform = process.platform;
         const arch = process.arch;
-        const binNames = platform === 'win32' ? ['uvx.exe', 'uv.exe'] : ['uvx', 'uv'];
+        const binNames = isWin ? ['uvx.exe', 'uv.exe'] : ['uvx', 'uv'];
 
         for (const binName of binNames) {
             // Try platform-specific subdirectory first
             const platformSpecific = path.join(globalContext.extensionUri.fsPath, 'bin', `${platform}-${arch}`, binName);
             if (fs.existsSync(platformSpecific)) {
-                const result = cp.spawnSync(platformSpecific, ['--version'], { encoding: 'utf8', shell: process.platform === 'win32' });
+                const result = cp.spawnSync(platformSpecific, ['--version'], { encoding: 'utf8', shell: isWin });
                 const stderr = (result.stderr || '').toString();
                 if (!result.error && result.status === 0 && !stderr.includes('command not found')) {
+                    _cachedUvBinary = platformSpecific;
                     return platformSpecific;
                 }
             }
@@ -617,9 +641,10 @@ function findUvBinary(optionalInstallDir) {
             // Fallback to generic bin directory
             const genericBundled = path.join(globalContext.extensionUri.fsPath, 'bin', binName);
             if (fs.existsSync(genericBundled)) {
-                const result = cp.spawnSync(genericBundled, ['--version'], { encoding: 'utf8', shell: process.platform === 'win32' });
+                const result = cp.spawnSync(genericBundled, ['--version'], { encoding: 'utf8', shell: isWin });
                 const stderr = (result.stderr || '').toString();
                 if (!result.error && result.status === 0 && !stderr.includes('command not found')) {
+                    _cachedUvBinary = genericBundled;
                     return genericBundled;
                 }
             }
@@ -649,12 +674,14 @@ function findUvBinary(optionalInstallDir) {
     }
 
     for (const candidate of candidates) {
-        const result = cp.spawnSync(candidate, ['--version'], { encoding: 'utf8', shell: process.platform === 'win32' });
+        const result = cp.spawnSync(candidate, ['--version'], { encoding: 'utf8', shell: isWin });
         const stderr = (result.stderr || '').toString();
         if (!result.error && result.status === 0 && !stderr.includes('command not found')) {
+            _cachedUvBinary = candidate;
             return candidate;
         }
     }
+    if (!optionalInstallDir) _cachedUvBinary = null;
     return null;
 }
 
@@ -1413,8 +1440,9 @@ function updateStatusBar(status) {
             break;
         case 'connected':
             statusBarItem.text = '$(beaker) Stata Workbench: Connected';
-            statusBarItem.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');
+            statusBarItem.backgroundColor = undefined;
             statusBarItem.command = undefined;
+            statusBarItem.tooltip = 'Stata Workbench — connected to mcp-stata';
             break;
         case 'error':
             statusBarItem.text = '$(error) Stata Workbench: Error';
@@ -1786,59 +1814,6 @@ const variableListProvider = async () => {
         return [];
     }
 };
-
-async function showTerminal() {
-    const editor = vscode.window.activeTextEditor;
-    // We allow opening without an active editor too, but if present we might seed context.
-
-    // Check if there is a selection to pre-fill? 
-    // Actually, Terminal Mode usually starts fresh or with specific context.
-    // If called via command palette, just open blank.
-    // If proper selection logic was here before, we can preserve it.
-
-    // Existing logic tried to run selection. Let's make it optional:
-    // If selection exists, run it. If not, just open.
-
-    let initialCode = null;
-    let initialResult = null;
-    let filePath = editor?.document.uri.fsPath;
-
-    if (editor) {
-        const selection = editor.selection;
-        const text = !selection.isEmpty ? editor.document.getText(selection) : null;
-        if (text && text.trim()) {
-            initialCode = text;
-            try {
-                initialResult = await withStataProgress('Running terminal code', async (token) => {
-                    return mcpClient.runSelection(text, { cancellationToken: token, normalizeResult: true, includeGraphs: true });
-                }, text);
-            } catch (error) {
-                initialResult = { success: false, rc: -1, stderr: error?.message || String(error) };
-            }
-        }
-    }
-
-    TerminalPanel.show({
-        filePath,
-        initialCode,
-        initialResult,
-        runCommand: terminalRunCommand,
-        variableProvider: variableListProvider,
-        downloadGraphPdf: downloadGraphAsPdf,
-        openHelpPanel: (helpPath, helpLabel) => {
-            try {
-                const content = fs.readFileSync(helpPath, 'utf8');
-                HelpPanel.show(globalExtensionUri, helpLabel || 'Stata Help', content);
-            } catch (err) {
-                debugLog(`[Extension] openHelpPanel failed: ${err.message}`);
-            }
-        },
-        cancelRun: cancelRequest,
-        cancelTask: cancelTask,
-        clearAll: clearAllCommand
-    });
-    refreshDatasetSummary();
-}
 
 async function viewData() {
     return Sentry.startSpan({ name: 'extension.viewData', op: 'extension.operation' }, async () => {
@@ -2227,7 +2202,10 @@ function renderGraphHtml(graphDetails, webview, extensionUri, nonce) {
 async function withStataProgress(title, task, sample) {
     const hints = sample && sample.length > 180 ? `${sample.slice(0, 180)}…` : sample;
     try {
-        const result = await task(null);
+        const result = await vscode.window.withProgress(
+            { location: vscode.ProgressLocation.Notification, title, cancellable: true },
+            (_progress, token) => task(token)
+        );
         return result;
     } catch (error) {
         const detail = error?.message || String(error);

@@ -1348,7 +1348,13 @@ describe('mcp-client', () => {
                 delete contextEnv.STATA_PATH;
                 Object.assign(contextEnv, contextEnvOverrides);
 
-                return withTestContext({ env: contextEnv }, async (ctx) => {
+                // Provide childProcess via context so the preflight spawnSync is always
+                // mocked regardless of whether bun can intercept built-in modules.
+                const childProcessMock = {
+                    spawnSync: sinon.stub().returns({ status: 0, stdout: 'uv 0.5.0', stderr: '' })
+                };
+
+                return withTestContext({ env: contextEnv, childProcess: childProcessMock }, async (ctx) => {
                     const { vscode } = ctx;
                     vscode.workspace.workspaceFolders = [{ uri: { fsPath: '/mock/workspace' } }];
                     const configStub = sinon.stub(vscode.workspace, 'getConfiguration').returns({
@@ -1358,13 +1364,9 @@ describe('mcp-client', () => {
                             return def;
                         }
                     });
-                    cpMock.spawnSync.returns({ status: 0, stdout: 'uv 0.5.0', stderr: '' });
                     const client = new McpClient();
                     const { transport } = await client._createClient();
                     configStub.restore();
-                    // The real StdioClientTransport stores constructor args as _serverParams.
-                    // bunMock.module does not intercept the IIFE-captured require in mcp-client.js,
-                    // so the real SDK class is used; we inspect its internal _serverParams.
                     return transport._serverParams;
                 });
             };

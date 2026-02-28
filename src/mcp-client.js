@@ -1,10 +1,9 @@
 const { EventEmitter } = require('events');
-const { spawnSync } = require('child_process');
 const Sentry = require("@sentry/node");
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
-const { getVscode } = require('./runtime-context');
+const { getVscode, getChildProcess } = require('./runtime-context');
 const vscode = new Proxy({}, {
     get(_target, prop) {
         return getVscode()?.[prop];
@@ -64,7 +63,7 @@ class StataMcpClient {
         this._runCleanupTimers = new Map();
         this._cancellationSourcesByRunId = new Map();
         // Allow larger captured logs so long .do files and errors are preserved.
-        this._maxLogBufferChars = 500_000_000; // 500 MB
+        this._maxLogBufferChars = 10_000_000; // 10 MB
         this._clientVersion = pkg?.version || 'dev';
         this._onTaskDone = null;
         this._availableTools = new Set();
@@ -691,7 +690,7 @@ class StataMcpClient {
         // Perform a pre-flight check to avoid ENOENT crashes in the transport layer.
         // On Windows, spawnSync handles .cmd/.exe suffixing when shell is not used if the command is on PATH.
         try {
-            let check = spawnSync(finalCommand, ['--version'], { encoding: 'utf8', shell: process.platform === 'win32' });
+            let check = getChildProcess().spawnSync(finalCommand, ['--version'], { encoding: 'utf8', shell: process.platform === 'win32' });
 
             // Check if the initial command choice is broken
             let stderr = (check.stderr || '').toString();
@@ -703,7 +702,7 @@ class StataMcpClient {
                 finalCommand = uvCommand;
                 finalArgs = ['--refresh', '--refresh-package', MCP_PACKAGE_NAME, '--from', currentSpec, MCP_PACKAGE_NAME];
                 // Re-run pre-flight for the fallback
-                check = spawnSync(finalCommand, ['--version'], { encoding: 'utf8', shell: process.platform === 'win32' });
+                check = getChildProcess().spawnSync(finalCommand, ['--version'], { encoding: 'utf8', shell: process.platform === 'win32' });
                 stderr = (check.stderr || '').toString();
             }
 
@@ -856,7 +855,7 @@ class StataMcpClient {
                     this._toolMapping.set(shortName, fullName);
                 }
                 // Also handle direct suffix matches
-                const suffixMatch = ['run_command_background', 'run_do_file_background', 'get_ui_channel', 'break_session', 'stop_session', 'describe', 'codebook', 'get_data', 'get_variable_list', 'list_graphs', 'fetch_graph', 'export_all_graphs']
+                const suffixMatch = ['run_command_background', 'run_do_file_background', 'get_ui_channel', 'break_session', 'stop_session', 'describe', 'codebook', 'get_data', 'get_variable_list', 'list_graphs', 'export_graph', 'fetch_graph', 'export_all_graphs']
                     .find(s => fullName.endsWith(s));
                 if (suffixMatch && !this._toolMapping.has(suffixMatch)) {
                     this._toolMapping.set(suffixMatch, fullName);

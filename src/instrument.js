@@ -21,10 +21,9 @@ Sentry.init({
     // Send structured logs to Sentry
     enableLogs: true,
     // Tracing
-    tracesSampleRate: 1.0, //  Capture 100% of the transactions
-    // Setting this option to true will send default PII data to Sentry.
-    // For example, automatic IP address collection on events
-    sendDefaultPii: true,
+    tracesSampleRate: 0.2, //  Capture 20% of the transactions
+    // Do not send PII data to Sentry (IP addresses, etc.)
+    sendDefaultPii: false,
     // Capture stack traces for all messages
     attachStacktrace: true,
     // Maximum number of breadcrumbs to keep

@@ -86,6 +86,11 @@ class DataBrowserPanel {
                         break;
                     case 'apiCall':
                         try {
+                            // Validate URL to prevent SSRF — only allow requests to the local mcp-stata server
+                            const parsedUrl = new URL(message.url);
+                            if (parsedUrl.hostname !== '127.0.0.1' && parsedUrl.hostname !== 'localhost') {
+                                throw new Error(`Blocked request to non-local host: ${parsedUrl.hostname}`);
+                            }
                             const isArrow = message.url.endsWith('/arrow');
                             const result = await DataBrowserPanel._performRequest(message.url, message.options, isArrow);
 
