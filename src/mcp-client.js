@@ -682,6 +682,12 @@ class StataMcpClient {
             return '60';
         })();
 
+        const stataPath = (() => {
+            if (env.STATA_PATH) return env.STATA_PATH;
+            const val = (config.get('stataPath', '') || '').trim();
+            return val || undefined;
+        })();
+
         // Perform a pre-flight check to avoid ENOENT crashes in the transport layer.
         // On Windows, spawnSync handles .cmd/.exe suffixing when shell is not used if the command is on PATH.
         try {
@@ -751,6 +757,7 @@ class StataMcpClient {
                 ...env,
                 ...configuredEnv,
                 STATA_SETUP_TIMEOUT: setupTimeoutSeconds,
+                ...(stataPath && { STATA_PATH: stataPath }),
                 // Force Python to not buffer output
                 PYTHONUNBUFFERED: '1'
             }

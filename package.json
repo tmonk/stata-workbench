@@ -179,6 +179,11 @@
           "default": "",
           "description": "Working directory when running .do files. Supports an absolute path, ~, ${workspaceFolder} or ${fileDir}; empty uses the .do file's folder."
         },
+        "stataMcp.stataPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to your Stata installation. Can be a directory (e.g. /Applications/Stata/StataMP.app) or the full path to the Stata binary. Leave empty to use auto-discovery. Maps to the STATA_PATH environment variable for mcp-stata."
+        },
         "stataMcp.setupTimeoutSeconds": {
           "type": "number",
           "default": 60,

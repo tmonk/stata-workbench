@@ -1239,4 +1239,282 @@ bearer_token_env_var = "FIGMA_OAUTH_TOKEN"
             expect(helpPanelCalls.length).toBe(0);
         });
     });
+
+    describe('stataPath (STATA_PATH) setting', () => {
+        describe('writeMcpConfig with stataPath', () => {
+            itWithHarness('adds STATA_PATH env when stataPath is configured', () => {
+                const config = vscode.workspace.getConfiguration();
+                config.get.mockImplementation((key, def) => {
+                    if (key === 'stataPath') return '/Applications/Stata/StataMP.app';
+                    if (key === 'noReloadOnClear') return false;
+                    return def;
+                });
+
+                fs.existsSync.mockReturnValue(true);
+                fs.readFileSync.mockReturnValue(JSON.stringify({
+                    servers: {
+                        mcp_stata: {
+                            type: 'stdio',
+                            command: 'uvx',
+                            args: ['--from', 'mcp-stata@latest', 'mcp-stata']
+                        }
+                    }
+                }));
+
+                extension.writeMcpConfig({
+                    configPath: '/tmp/test.json',
+                    writeVscode: true,
+                    writeCursor: false
+                });
+
+                const updated = JSON.parse(fs.writeFileSync.mock.calls[0][1]);
+                expect(updated.servers.mcp_stata.env).toEqual({
+                    STATA_PATH: '/Applications/Stata/StataMP.app'
+                });
+            });
+
+            itWithHarness('updates STATA_PATH when stataPath overrides an existing value', () => {
+                const config = vscode.workspace.getConfiguration();
+                config.get.mockImplementation((key, def) => {
+                    if (key === 'stataPath') return '/Applications/Stata/StataSE.app';
+                    if (key === 'noReloadOnClear') return false;
+                    return def;
+                });
+
+                fs.existsSync.mockReturnValue(true);
+                fs.readFileSync.mockReturnValue(JSON.stringify({
+                    servers: {
+                        mcp_stata: {
+                            type: 'stdio',
+                            command: 'uvx',
+                            args: ['--from', 'mcp-stata@latest', 'mcp-stata'],
+                            env: { STATA_PATH: '/old/stata/path' }
+                        }
+                    }
+                }));
+
+                extension.writeMcpConfig({
+                    configPath: '/tmp/test.json',
+                    writeVscode: true,
+                    writeCursor: false
+                });
+
+                const updated = JSON.parse(fs.writeFileSync.mock.calls[0][1]);
+                expect(updated.servers.mcp_stata.env.STATA_PATH).toEqual('/Applications/Stata/StataSE.app');
+            });
+
+            itWithHarness('preserves manually-set STATA_PATH when stataPath setting is empty', () => {
+                const config = vscode.workspace.getConfiguration();
+                config.get.mockImplementation((key, def) => {
+                    if (key === 'stataPath') return '';
+                    if (key === 'noReloadOnClear') return false;
+                    return def;
+                });
+
+                fs.existsSync.mockReturnValue(true);
+                fs.readFileSync.mockReturnValue(JSON.stringify({
+                    servers: {
+                        mcp_stata: {
+                            type: 'stdio',
+                            command: 'uvx',
+                            args: ['--from', 'mcp-stata@latest', 'mcp-stata'],
+                            env: { STATA_PATH: '/manually/set/stata' }
+                        }
+                    }
+                }));
+
+                extension.writeMcpConfig({
+                    configPath: '/tmp/test.json',
+                    writeVscode: true,
+                    writeCursor: false
+                });
+
+                const updated = JSON.parse(fs.writeFileSync.mock.calls[0][1]);
+                expect(updated.servers.mcp_stata.env.STATA_PATH).toEqual('/manually/set/stata');
+            });
+
+            itWithHarness('sets both STATA_PATH and MCP_STATA_NO_RELOAD_ON_CLEAR when both enabled', () => {
+                const config = vscode.workspace.getConfiguration();
+                config.get.mockImplementation((key, def) => {
+                    if (key === 'stataPath') return '/opt/stata18';
+                    if (key === 'noReloadOnClear') return true;
+                    return def;
+                });
+
+                fs.existsSync.mockReturnValue(true);
+                fs.readFileSync.mockReturnValue(JSON.stringify({
+                    servers: {
+                        mcp_stata: {
+                            type: 'stdio',
+                            command: 'uvx',
+                            args: ['--from', 'mcp-stata@latest', 'mcp-stata']
+                        }
+                    }
+                }));
+
+                extension.writeMcpConfig({
+                    configPath: '/tmp/test.json',
+                    writeVscode: true,
+                    writeCursor: false
+                });
+
+                const updated = JSON.parse(fs.writeFileSync.mock.calls[0][1]);
+                expect(updated.servers.mcp_stata.env).toEqual({
+                    STATA_PATH: '/opt/stata18',
+                    MCP_STATA_NO_RELOAD_ON_CLEAR: '1'
+                });
+            });
+
+            itWithHarness('adds STATA_PATH to Cursor mcpServers format', () => {
+                const config = vscode.workspace.getConfiguration();
+                config.get.mockImplementation((key, def) => {
+                    if (key === 'stataPath') return 'C:\\Program Files\\Stata19\\StataMP-64.exe';
+                    if (key === 'noReloadOnClear') return false;
+                    return def;
+                });
+
+                fs.existsSync.mockReturnValue(true);
+                fs.readFileSync.mockReturnValue(JSON.stringify({
+                    mcpServers: {
+                        mcp_stata: {
+                            command: 'uvx',
+                            args: ['--from', 'mcp-stata@latest', 'mcp-stata']
+                        }
+                    }
+                }));
+
+                extension.writeMcpConfig({
+                    configPath: '/tmp/test.json',
+                    writeVscode: false,
+                    writeCursor: true
+                });
+
+                const updated = JSON.parse(fs.writeFileSync.mock.calls[0][1]);
+                expect(updated.mcpServers.mcp_stata.env.STATA_PATH).toEqual('C:\\Program Files\\Stata19\\StataMP-64.exe');
+            });
+        });
+
+        describe('addClaudeMcpViaCli with stataPath', () => {
+            itWithHarness('includes STATA_PATH in Claude Code payload when stataPath is set', () => {
+                const h = getHarness();
+                h.vscode.workspace.getConfiguration().get.mockImplementation((key, def) => {
+                    if (key === 'stataPath') return '/Applications/Stata/StataMP.app';
+                    if (key === 'noReloadOnClear') return false;
+                    return def;
+                });
+                h.cp.spawnSync.mockReturnValue({ status: 0, stdout: '', stderr: '' });
+
+                extension.addClaudeMcpViaCli({ mcpWorkspaceOverride: '/workspace' });
+
+                const jsonArg = h.cp.spawnSync.mock.calls[1][1][3];
+                const payload = JSON.parse(jsonArg);
+                expect(payload.env).toBeDefined();
+                expect(payload.env.STATA_PATH).toEqual('/Applications/Stata/StataMP.app');
+            });
+
+            itWithHarness('omits STATA_PATH from Claude Code payload when stataPath is empty', () => {
+                const h = getHarness();
+                h.vscode.workspace.getConfiguration().get.mockImplementation((key, def) => {
+                    if (key === 'stataPath') return '';
+                    if (key === 'noReloadOnClear') return false;
+                    return def;
+                });
+                h.cp.spawnSync.mockReturnValue({ status: 0, stdout: '', stderr: '' });
+
+                extension.addClaudeMcpViaCli({ mcpWorkspaceOverride: '/workspace' });
+
+                const jsonArg = h.cp.spawnSync.mock.calls[1][1][3];
+                const payload = JSON.parse(jsonArg);
+                // env should be absent or not contain STATA_PATH
+                expect(payload.env?.STATA_PATH).toBeUndefined();
+            });
+
+            itWithHarness('includes both STATA_PATH and MCP_STATA_NO_RELOAD_ON_CLEAR when both set', () => {
+                const h = getHarness();
+                h.vscode.workspace.getConfiguration().get.mockImplementation((key, def) => {
+                    if (key === 'stataPath') return '/opt/stata';
+                    if (key === 'noReloadOnClear') return true;
+                    return def;
+                });
+                h.cp.spawnSync.mockReturnValue({ status: 0, stdout: '', stderr: '' });
+
+                extension.addClaudeMcpViaCli({ mcpWorkspaceOverride: '/workspace' });
+
+                const jsonArg = h.cp.spawnSync.mock.calls[1][1][3];
+                const payload = JSON.parse(jsonArg);
+                expect(payload.env.STATA_PATH).toEqual('/opt/stata');
+                expect(payload.env.MCP_STATA_NO_RELOAD_ON_CLEAR).toEqual('1');
+            });
+        });
+
+        describe('writeCodexMcpConfig with stataPath', () => {
+            itWithHarness('adds STATA_PATH to Codex TOML env block when stataPath is set', () => {
+                const config = vscode.workspace.getConfiguration();
+                config.get.mockImplementation((key, def) => {
+                    if (key === 'stataPath') return '/Applications/Stata/StataMP.app';
+                    if (key === 'noReloadOnClear') return false;
+                    return def;
+                });
+
+                fs.existsSync.mockReturnValue(false);
+
+                extension.writeCodexMcpConfig({ configPath: '/tmp/codex-stata.toml' });
+
+                const written = fs.writeFileSync.mock.calls[0][1];
+                expect(written).toContain('[mcp_servers.mcp_stata.env]');
+                expect(written).toContain('STATA_PATH = "/Applications/Stata/StataMP.app"');
+            });
+
+            itWithHarness('omits env block entirely when stataPath is empty and noReloadOnClear is false', () => {
+                const config = vscode.workspace.getConfiguration();
+                config.get.mockImplementation((key, def) => {
+                    if (key === 'stataPath') return '';
+                    if (key === 'noReloadOnClear') return false;
+                    return def;
+                });
+
+                fs.existsSync.mockReturnValue(false);
+
+                extension.writeCodexMcpConfig({ configPath: '/tmp/codex-clean.toml' });
+
+                const written = fs.writeFileSync.mock.calls[0][1];
+                expect(written).not.toContain('[mcp_servers.mcp_stata.env]');
+                expect(written).not.toContain('STATA_PATH');
+            });
+
+            itWithHarness('includes both STATA_PATH and MCP_STATA_NO_RELOAD_ON_CLEAR in TOML env block', () => {
+                const config = vscode.workspace.getConfiguration();
+                config.get.mockImplementation((key, def) => {
+                    if (key === 'stataPath') return '/opt/stata18';
+                    if (key === 'noReloadOnClear') return true;
+                    return def;
+                });
+
+                fs.existsSync.mockReturnValue(false);
+
+                extension.writeCodexMcpConfig({ configPath: '/tmp/codex-both.toml' });
+
+                const written = fs.writeFileSync.mock.calls[0][1];
+                expect(written).toContain('[mcp_servers.mcp_stata.env]');
+                expect(written).toContain('STATA_PATH = "/opt/stata18"');
+                expect(written).toContain('MCP_STATA_NO_RELOAD_ON_CLEAR = "1"');
+            });
+
+            itWithHarness('escapes backslashes in Windows STATA_PATH in TOML', () => {
+                const config = vscode.workspace.getConfiguration();
+                config.get.mockImplementation((key, def) => {
+                    if (key === 'stataPath') return 'C:\\Program Files\\Stata19\\StataMP-64.exe';
+                    if (key === 'noReloadOnClear') return false;
+                    return def;
+                });
+
+                fs.existsSync.mockReturnValue(false);
+
+                extension.writeCodexMcpConfig({ configPath: '/tmp/codex-win.toml' });
+
+                const written = fs.writeFileSync.mock.calls[0][1];
+                expect(written).toContain('STATA_PATH = "C:\\\\Program Files\\\\Stata19\\\\StataMP-64.exe"');
+            });
+        });
+    });
 });

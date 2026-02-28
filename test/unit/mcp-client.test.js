@@ -17,10 +17,13 @@ class ClientMock {
 }
 
 class StdioClientTransportMock {
-    constructor() {
+    constructor(opts) {
+        this._opts = opts;
+        StdioClientTransportMock._lastOpts = opts;
         this.close = sinon.stub().resolves();
     }
 }
+StdioClientTransportMock._lastOpts = null;
 
 const dummySchema = {
     parse: (x) => x,
@@ -1334,6 +1337,84 @@ describe('mcp-client', () => {
                 expect(error).toBeDefined();
                 expect(error.message).toContain('CRITICAL: Stata could not be found or initialized');
                 stub.restore();
+            });
+        });
+
+        describe('stataPath → STATA_PATH transport env', () => {
+            const runWithStataPath = (stataPathValue, contextEnvOverrides = {}) => {
+                const contextEnv = { ...process.env };
+                // Start with no STATA_PATH unless caller explicitly sets it
+                delete contextEnv.STATA_PATH;
+                Object.assign(contextEnv, contextEnvOverrides);
+
+                return withTestContext({ env: contextEnv }, async (ctx) => {
+                    const { vscode } = ctx;
+                    vscode.workspace.workspaceFolders = [{ uri: { fsPath: '/mock/workspace' } }];
+                    const configStub = sinon.stub(vscode.workspace, 'getConfiguration').returns({
+                        get: (key, def) => {
+                            if (key === 'setupTimeoutSeconds') return 60;
+                            if (key === 'stataPath') return stataPathValue;
+                            return def;
+                        }
+                    });
+                    cpMock.spawnSync.returns({ status: 0, stdout: 'uv 0.5.0', stderr: '' });
+                    const client = new McpClient();
+                    const { transport } = await client._createClient();
+                    configStub.restore();
+                    // The real StdioClientTransport stores constructor args as _serverParams.
+                    // bunMock.module does not intercept the IIFE-captured require in mcp-client.js,
+                    // so the real SDK class is used; we inspect its internal _serverParams.
+                    return transport._serverParams;
+                });
+            };
+
+            it('passes STATA_PATH when stataPath setting is configured', async () => {
+                const opts = await runWithStataPath('/Applications/Stata/StataMP.app');
+                expect(opts).not.toBeNull();
+                expect(opts.env.STATA_PATH).toEqual('/Applications/Stata/StataMP.app');
+            });
+
+            it('does not set STATA_PATH when stataPath setting is empty', async () => {
+                const opts = await runWithStataPath('');
+                expect(opts).not.toBeNull();
+                expect(opts.env.STATA_PATH).toBeUndefined();
+            });
+
+            it('uses STATA_PATH from process env when stataPath setting is empty', async () => {
+                const opts = await runWithStataPath('', { STATA_PATH: '/env/stata/path' });
+                expect(opts).not.toBeNull();
+                expect(opts.env.STATA_PATH).toEqual('/env/stata/path');
+            });
+
+            it('STATA_PATH env var takes precedence over stataPath setting', async () => {
+                const opts = await runWithStataPath('/setting/stata', { STATA_PATH: '/old/env/stata' });
+                expect(opts).not.toBeNull();
+                // Env var takes precedence (same pattern as STATA_SETUP_TIMEOUT / setupTimeoutSeconds)
+                expect(opts.env.STATA_PATH).toEqual('/old/env/stata');
+            });
+
+            it('trims whitespace from stataPath setting', async () => {
+                const opts = await runWithStataPath('  /Applications/Stata/StataMP.app  ');
+                expect(opts).not.toBeNull();
+                expect(opts.env.STATA_PATH).toEqual('/Applications/Stata/StataMP.app');
+            });
+
+            it('treats whitespace-only stataPath as empty (no STATA_PATH injected)', async () => {
+                const opts = await runWithStataPath('   ');
+                expect(opts).not.toBeNull();
+                expect(opts.env.STATA_PATH).toBeUndefined();
+            });
+
+            it('always includes STATA_SETUP_TIMEOUT in transport env', async () => {
+                const opts = await runWithStataPath('');
+                expect(opts).not.toBeNull();
+                expect(opts.env.STATA_SETUP_TIMEOUT).toBeDefined();
+            });
+
+            it('always includes PYTHONUNBUFFERED in transport env', async () => {
+                const opts = await runWithStataPath('');
+                expect(opts).not.toBeNull();
+                expect(opts.env.PYTHONUNBUFFERED).toEqual('1');
             });
         });
     });

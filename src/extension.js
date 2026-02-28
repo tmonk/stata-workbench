@@ -350,7 +350,9 @@ function activate(context) {
                     e.affectsConfiguration('stataMcp.autoConfigureMcp') ||
                     e.affectsConfiguration('stataMcp.configureClaudeCode') ||
                     e.affectsConfiguration('stataMcp.configureCodex') ||
-                    e.affectsConfiguration('stataMcp.codexConfigPath')
+                    e.affectsConfiguration('stataMcp.codexConfigPath') ||
+                    e.affectsConfiguration('stataMcp.stataPath') ||
+                    e.affectsConfiguration('stataMcp.noReloadOnClear')
                 ) {
                     if (!missingCli) syncMcpConfigsFromSettings(context);
                 }
@@ -685,6 +687,7 @@ function isClaudeCodeInstalled() {
 function addClaudeMcpViaCli(context) {
     const config = vscode.workspace.getConfiguration('stataMcp');
     const noReloadOnClear = !!config.get('noReloadOnClear', false);
+    const stataPath = (config.get('stataPath', '') || '').trim();
 
     const resolvedCommand = uvCommand || 'uvx';
     const isDevVersion = mcpPackageVersion && /\.dev\d+$|\.post\d+$|[ab]\d+$/.test(mcpPackageVersion);
@@ -696,11 +699,15 @@ function addClaudeMcpViaCli(context) {
         ? ['tool', 'run', '--refresh', '--refresh-package', MCP_PACKAGE_NAME, '--from', activeSpec, MCP_PACKAGE_NAME]
         : ['--refresh', '--refresh-package', MCP_PACKAGE_NAME, '--from', activeSpec, MCP_PACKAGE_NAME];
 
+    const payloadEnv = {
+        ...(noReloadOnClear && { MCP_STATA_NO_RELOAD_ON_CLEAR: '1' }),
+        ...(stataPath && { STATA_PATH: stataPath })
+    };
     const payload = {
         type: 'stdio',
         command: resolvedCommand,
         args,
-        ...(noReloadOnClear && { env: { MCP_STATA_NO_RELOAD_ON_CLEAR: '1' } })
+        ...(Object.keys(payloadEnv).length && { env: payloadEnv })
     };
     const jsonArg = JSON.stringify(payload);
 
@@ -1017,6 +1024,7 @@ function writeCodexMcpConfig(target) {
     if (!configPath) return;
     const config = vscode.workspace.getConfiguration('stataMcp');
     const noReloadOnClear = !!config.get('noReloadOnClear', false);
+    const stataPath = (config.get('stataPath', '') || '').trim();
     const resolvedCommand = uvCommand || 'uvx';
     const isTest = globalContext?.extensionMode === vscode.ExtensionMode.Test;
     if (resolvedCommand.includes('/mock/') && !isTest) {
@@ -1033,8 +1041,12 @@ function writeCodexMcpConfig(target) {
 
     const argsStr = JSON.stringify(expectedArgs);
     let tomlBlock = `[mcp_servers.${MCP_SERVER_ID}]\ncommand = "${resolvedCommand.replace(/"/g, '\\"')}"\nargs = ${argsStr}\n`;
-    if (noReloadOnClear) {
-        tomlBlock += `[mcp_servers.${MCP_SERVER_ID}.env]\nMCP_STATA_NO_RELOAD_ON_CLEAR = "1"\n`;
+    const envEntries = [
+        ...(noReloadOnClear ? [`MCP_STATA_NO_RELOAD_ON_CLEAR = "1"`] : []),
+        ...(stataPath ? [`STATA_PATH = "${stataPath.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`] : [])
+    ];
+    if (envEntries.length) {
+        tomlBlock += `[mcp_servers.${MCP_SERVER_ID}.env]\n${envEntries.join('\n')}\n`;
     }
 
     try {
@@ -1209,15 +1221,23 @@ function writeMcpConfig(target) {
 
         const config = vscode.workspace.getConfiguration('stataMcp');
         const noReloadOnClear = !!config.get('noReloadOnClear', false);
-        const applyNoReloadEnv = (env) => {
+        const stataPath = (config.get('stataPath', '') || '').trim();
+        const applySettingsEnv = (env) => {
             const next = { ...(env || {}) };
             if (noReloadOnClear) {
                 next.MCP_STATA_NO_RELOAD_ON_CLEAR = '1';
             } else {
                 delete next.MCP_STATA_NO_RELOAD_ON_CLEAR;
             }
+            if (stataPath) {
+                next.STATA_PATH = stataPath;
+            }
+            // When stataPath is empty we leave any pre-existing STATA_PATH untouched,
+            // since the user may have set it manually before this setting existed.
             return next;
         };
+        // Keep backward-compat alias
+        const applyNoReloadEnv = applySettingsEnv;
 
         // Only write the format appropriate for the host app.
         const shouldWriteCursor = !!writeCursor;
