@@ -1,3 +1,11 @@
+## [0.22.1](https://github.com/tmonk/stata-workbench/compare/v0.22.0...v0.22.1) (2026-02-28)
+
+
+### Bug Fixes
+
+* refactor runtime context to include createDepProxy and update MCP client to use it ([6acf05a](https://github.com/tmonk/stata-workbench/commit/6acf05a2ced92799acc1cfb4d9c951f283960a70))
+* update server config loading to check only current IDE's configuration ([ab9fb5f](https://github.com/tmonk/stata-workbench/commit/ab9fb5f360d351d5362caade0f7d7f11ff3de8a4))
+
 # [0.22.0](https://github.com/tmonk/stata-workbench/compare/v0.21.1...v0.22.0) (2026-02-28)
 
 
