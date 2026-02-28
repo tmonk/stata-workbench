@@ -1,9 +1,10 @@
 const { EventEmitter } = require('events');
+const { spawnSync } = require('child_process');
 const Sentry = require("@sentry/node");
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
-const { getVscode, getChildProcess } = require('./runtime-context');
+const { getVscode } = require('./runtime-context');
 const vscode = new Proxy({}, {
     get(_target, prop) {
         return getVscode()?.[prop];
@@ -63,7 +64,7 @@ class StataMcpClient {
         this._runCleanupTimers = new Map();
         this._cancellationSourcesByRunId = new Map();
         // Allow larger captured logs so long .do files and errors are preserved.
-        this._maxLogBufferChars = 10_000_000; // 10 MB
+        this._maxLogBufferChars = 500_000_000; // 500 MB
         this._clientVersion = pkg?.version || 'dev';
         this._onTaskDone = null;
         this._availableTools = new Set();
@@ -681,16 +682,10 @@ class StataMcpClient {
             return '60';
         })();
 
-        const stataPath = (() => {
-            if (env.STATA_PATH) return env.STATA_PATH;
-            const val = (config.get('stataPath', '') || '').trim();
-            return val || undefined;
-        })();
-
         // Perform a pre-flight check to avoid ENOENT crashes in the transport layer.
         // On Windows, spawnSync handles .cmd/.exe suffixing when shell is not used if the command is on PATH.
         try {
-            let check = getChildProcess().spawnSync(finalCommand, ['--version'], { encoding: 'utf8', shell: process.platform === 'win32' });
+            let check = spawnSync(finalCommand, ['--version'], { encoding: 'utf8', shell: process.platform === 'win32' });
 
             // Check if the initial command choice is broken
             let stderr = (check.stderr || '').toString();
@@ -702,7 +697,7 @@ class StataMcpClient {
                 finalCommand = uvCommand;
                 finalArgs = ['--refresh', '--refresh-package', MCP_PACKAGE_NAME, '--from', currentSpec, MCP_PACKAGE_NAME];
                 // Re-run pre-flight for the fallback
-                check = getChildProcess().spawnSync(finalCommand, ['--version'], { encoding: 'utf8', shell: process.platform === 'win32' });
+                check = spawnSync(finalCommand, ['--version'], { encoding: 'utf8', shell: process.platform === 'win32' });
                 stderr = (check.stderr || '').toString();
             }
 
@@ -747,6 +742,13 @@ class StataMcpClient {
         this._log(`[mcp-stata] Command: ${finalCommand}`);
         this._log(`[mcp-stata] Args: ${JSON.stringify(finalArgs)}`);
 
+        // Inject STATA_PATH from the stataPath setting if not already set in the environment
+        const stataPathSetting = (config.get('stataPath', '') || '').trim();
+        const stataPathEnv = {};
+        if (stataPathSetting && !env.STATA_PATH) {
+            stataPathEnv.STATA_PATH = stataPathSetting;
+        }
+
         const transport = new StdioClientTransport({
             command: finalCommand,
             args: finalArgs,
@@ -755,8 +757,8 @@ class StataMcpClient {
             env: {
                 ...env,
                 ...configuredEnv,
+                ...stataPathEnv,
                 STATA_SETUP_TIMEOUT: setupTimeoutSeconds,
-                ...(stataPath && { STATA_PATH: stataPath }),
                 // Force Python to not buffer output
                 PYTHONUNBUFFERED: '1'
             }
@@ -855,7 +857,7 @@ class StataMcpClient {
                     this._toolMapping.set(shortName, fullName);
                 }
                 // Also handle direct suffix matches
-                const suffixMatch = ['run_command_background', 'run_do_file_background', 'get_ui_channel', 'break_session', 'stop_session', 'describe', 'codebook', 'get_data', 'get_variable_list', 'list_graphs', 'export_graph', 'fetch_graph', 'export_all_graphs']
+                const suffixMatch = ['run_command_background', 'run_do_file_background', 'get_ui_channel', 'break_session', 'stop_session', 'describe', 'codebook', 'get_data', 'get_variable_list', 'list_graphs', 'fetch_graph', 'export_all_graphs']
                     .find(s => fullName.endsWith(s));
                 if (suffixMatch && !this._toolMapping.has(suffixMatch)) {
                     this._toolMapping.set(suffixMatch, fullName);
@@ -2307,9 +2309,10 @@ class StataMcpClient {
         return this._loadServerConfig(options);
     }
 
-    _loadServerConfig({ ignoreCommandArgs = false } = {}) {
+    _loadServerConfig({ ignoreCommandArgs = false, hostOnly = false } = {}) {
         // Load full server configuration (command, args, env) from MCP config files
-        for (const configPath of this._candidateMcpConfigPaths()) {
+        const candidates = hostOnly ? this._hostMcpConfigPaths() : this._candidateMcpConfigPaths();
+        for (const configPath of candidates) {
             if (!configPath) continue;
             try {
                 if (!fs.existsSync(configPath)) continue;
@@ -2369,6 +2372,24 @@ class StataMcpClient {
             }
         }
         return contexts;
+    }
+
+    /**
+     * Returns only the current host IDE's config path plus workspace-level paths.
+     * Used when we need to check whether THIS editor already has a working config,
+     * without accidentally picking up configs from other IDEs (Cursor, Windsurf, etc.).
+     * @returns {string[]}
+     */
+    _hostMcpConfigPaths() {
+        const paths = new Set();
+        const hostConfig = this._resolveHostMcpPath();
+        if (hostConfig) paths.add(hostConfig);
+        const workspaceRoot = this._resolveWorkspaceRoot();
+        if (workspaceRoot) {
+            paths.add(path.join(workspaceRoot, '.vscode', 'mcp.json'));
+            paths.add(path.join(workspaceRoot, '.mcp.json'));
+        }
+        return Array.from(paths).filter(Boolean);
     }
 
     /**

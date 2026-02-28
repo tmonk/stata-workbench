@@ -298,8 +298,8 @@ function activate(context) {
         env.MCP_STATA_UVX_CMD = uvCommand;
     }
 
-    // Load existing config and validate
-    const existingServerConfig = mcpClient.getServerConfig();
+    // Load existing config and validate (hostOnly: only check this IDE's own config, not other editors)
+    const existingServerConfig = mcpClient.getServerConfig({ hostOnly: true });
     const isWorking = isMcpConfigWorking(existingServerConfig);
 
     if (isWorking) {
