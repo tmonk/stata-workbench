@@ -1,3 +1,16 @@
+# [0.22.0](https://github.com/tmonk/stata-workbench/compare/v0.21.1...v0.22.0) (2026-02-28)
+
+
+### Bug Fixes
+
+* add _serverParams property to StdioClientTransportMock constructor ([42c49e1](https://github.com/tmonk/stata-workbench/commit/42c49e1ffd2dd552d38fcac849151be518bbfa20))
+* enhance security by validating URLs in API calls and prevent SSRF ([630f89b](https://github.com/tmonk/stata-workbench/commit/630f89b36cef53910283a89b035b14018ab18c33))
+
+
+### Features
+
+* add stataPath configuration option to set STATA_PATH environment variable ([5c90af1](https://github.com/tmonk/stata-workbench/commit/5c90af1abfc31e5f1aeb49648ef03b81dbb2ba33))
+
 ## [0.21.1](https://github.com/tmonk/stata-workbench/compare/v0.21.0...v0.21.1) (2026-02-27)
 
 
