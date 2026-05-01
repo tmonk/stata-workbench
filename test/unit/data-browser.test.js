@@ -293,4 +293,58 @@ describe('Data Browser Frontend (data-browser.js)', () => {
             cleanup();
         }
     });
+
+    it('should display Stata missing values as "." in the data grid', async () => {
+        const { document, window, vscodeMock, triggerMessage, getApiCall, flushPromises, cleanup } = createTestContext();
+        try {
+            const vars = [{ name: 'price', type: 'double' }, { name: 'name', type: 'str10' }];
+
+            // Init
+            triggerMessage({ type: 'init', baseUrl: 'http://test', token: 'xyz' });
+            const dsReq = getApiCall('/v1/dataset').reqId;
+            triggerMessage({ type: 'apiResponse', reqId: dsReq, success: true, data: { dataset: { id: '1', n: 2 } } });
+            await flushPromises();
+            const varsReq = getApiCall('/v1/vars').reqId;
+            triggerMessage({ type: 'apiResponse', reqId: varsReq, success: true, data: { vars } });
+            await flushPromises();
+
+            // Read the missing value constant from the evaluated script
+            const STATA_MISSING = window.__STATA_MISSING_VALUE;
+
+            // Respond to the arrow call with an Arrow table containing a Stata missing value
+            const arrowReq = getApiCall('/v1/arrow');
+            expect(arrowReq).toBeTruthy();
+
+            // Build an Arrow table: row 0 has a real value, row 1 has the Stata missing value
+            const table = tableFromArrays({
+                _n: new Int32Array([1, 2]),
+                price: new Float64Array([12345.67, STATA_MISSING]),
+                name: ['Alice', '']
+            });
+            const ipcBytes = tableToIPC(table, 'stream');
+
+            triggerMessage({
+                type: 'apiResponse',
+                reqId: arrowReq.reqId,
+                success: true,
+                data: new Uint8Array(ipcBytes),
+                isBinary: true
+            });
+            await flushPromises();
+
+            // Check rendered cells
+            const rows = document.querySelectorAll('#grid-body tr');
+            expect(rows.length).toBe(2);
+
+            // Row 0: price should show the real value
+            const row0Cells = rows[0].querySelectorAll('td');
+            expect(row0Cells[1].textContent).toBe('12345.67');
+
+            // Row 1: price should show "." for the Stata missing value
+            const row1Cells = rows[1].querySelectorAll('td');
+            expect(row1Cells[1].textContent).toBe('.');
+        } finally {
+            cleanup();
+        }
+    });
 });

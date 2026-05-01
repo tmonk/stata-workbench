@@ -75,6 +75,9 @@ const perf = {
 };
 
 // --- State and Constants ---
+// Stata represents numeric missing values (. and .a-.z) as values >= this threshold
+const STATA_MISSING_VALUE = 8.98846567431158e+307;
+
 let state = {
     baseUrl: '',
     token: '',
@@ -648,7 +651,7 @@ function renderGrid(pageData) {
                 }
             }
 
-            td.textContent = (val === null || val === undefined) ? '.' : String(val);
+            td.textContent = (val === null || val === undefined || (typeof val === 'number' && val >= STATA_MISSING_VALUE)) ? '.' : String(val);
             tr.appendChild(td);
         });
         dom.grid.appendChild(tr);
@@ -760,6 +763,7 @@ if (dom.applyFilterBtn) dom.applyFilterBtn.addEventListener('click', applyFilter
 if (typeof window !== 'undefined' && window.__DATA_BROWSER_TEST__) {
     window.__dataBrowserState = state;
     window.__loadPage = loadPage;
+    window.__STATA_MISSING_VALUE = STATA_MISSING_VALUE;
 }
 
 export default undefined;
