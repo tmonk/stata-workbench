@@ -1,3 +1,10 @@
+# [0.23.0](https://github.com/tmonk/stata-workbench/compare/v0.22.3...v0.23.0) (2026-05-03)
+
+
+### Features
+
+* Local mcp-stata testing + missing-values test ([adf6340](https://github.com/tmonk/stata-workbench/commit/adf6340c59578deb5b89fca4b6ef8f744dd710f4))
+
 ## [0.22.3](https://github.com/tmonk/stata-workbench/compare/v0.22.2...v0.22.3) (2026-05-03)
 
 
