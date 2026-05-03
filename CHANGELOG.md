@@ -1,3 +1,11 @@
+## [0.22.2](https://github.com/tmonk/stata-workbench/compare/v0.22.1...v0.22.2) (2026-05-03)
+
+
+### Bug Fixes
+
+* Avoid background UI refresh; fix autocomplete loop ([e08755b](https://github.com/tmonk/stata-workbench/commit/e08755baaca670072b4aa89750f2091164f753b4))
+* Update mcp-stata submodule commit ([1285729](https://github.com/tmonk/stata-workbench/commit/1285729d4164863075c5027079db64377cefedc7))
+
 ## [0.22.1](https://github.com/tmonk/stata-workbench/compare/v0.22.0...v0.22.1) (2026-02-28)
 
 
