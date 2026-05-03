@@ -3,7 +3,7 @@
 <img src="https://raw.githubusercontent.com/tmonk/stata-workbench/refs/heads/main/img/icon.png" width="200">
 </p>
 
-A VS Code compatible extension (Cursor, Windsurf, Antigravity etc.) that allows Stata code to be run directly from the editor. Enables AI agents to directly interact with Stata. Powered by [mcp-stata](https://github.com/tmonk/mcp-stata). Featured in <a href="https://www.stata.com/stata-news/news41-2/community-corner-ai-tools/"><img src="img/stata.svg"  height="40" alt="Stata" style="vertical-align:middle; margin-top: -5px;"/> News</a>.
+A VS Code compatible extension (Cursor, Windsurf, Antigravity etc.) that allows Stata code to be run directly from the editor. Enables AI agents to directly interact with Stata. Powered by [mcp-stata](https://github.com/tmonk/mcp-stata). Featured in <a href="https://www.stata.com/stata-news/news41-2/community-corner-ai-tools/"><img src="https://raw.githubusercontent.com/tmonk/stata-workbench/img/stata.svg"  height="40" alt="Stata" style="vertical-align:middle; margin-top: -5px;"/> News</a>.
 
 Built by [Thomas Monk](https://tdmonk.com), London School of Economics.
 
