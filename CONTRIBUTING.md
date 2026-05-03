@@ -8,6 +8,27 @@
 - Unit Tests: `bun run test`
 - Integration Tests: `bun run test:integration` (requires `mcp-stata` on PATH)
 
+### Testing with Local mcp-stata
+To test changes to the `mcp-stata` server locally without publishing to PyPI:
+
+1. **In Integration Tests**: The test runner (`runTest.js`) automatically attempts to resolve the local `mcp-stata` directory. You can force a specific path by setting the `MCP_STATA_LOCAL_REPO` environment variable:
+   ```bash
+   MCP_STATA_LOCAL_REPO="/path/to/mcp-stata" bun run test:integration
+   ```
+
+2. **In VS Code (Manual Testing)**: Create a `.vscode/mcp.json` file in the root of the `stata-workbench` workspace. This will override global MCP configurations:
+   ```json
+   {
+     "servers": {
+       "mcp_stata": {
+         "command": "uv",
+         "args": ["run", "--directory", "/path/to/your/mcp-stata", "mcp-stata"]
+       }
+     }
+   }
+   ```
+   *Note: Ensure `uv` is installed and the directory points to your local `mcp-stata` clone.*
+
 ## Commit Conventions
 We use [Conventional Commits](https://www.conventionalcommits.org/) to automate our release process. This is enforced via `commitlint` and `husky`.
 

@@ -2398,16 +2398,16 @@ class StataMcpClient {
         const platform = process.platform;
         const env = getEnv();
 
-        // 1. Host-determined path (PRIORITY: always check the current IDE's config first)
-        const hostConfig = this._resolveHostMcpPath();
-        if (hostConfig) {
-            paths.add(hostConfig);
-        }
-
-        // 2. Workspace
+        // 1. Workspace (PRIORITY: allow project-specific overrides)
         if (workspaceRoot) {
             paths.add(path.join(workspaceRoot, '.vscode', 'mcp.json'));
             paths.add(path.join(workspaceRoot, '.mcp.json'));
+        }
+        
+        // 2. Host-determined path (e.g. VS Code User config, Claude Desktop)
+        const hostConfig = this._resolveHostMcpPath();
+        if (hostConfig) {
+            paths.add(hostConfig);
         }
 
         // 3. Claude Desktop (Very common source of MCP servers)

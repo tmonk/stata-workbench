@@ -55,7 +55,7 @@ async function main() {
         // against a local mcp-stata repo instead of PyPI.
         // This is intended for integration tests in this mono-workspace.
         if (!process.env.MCP_STATA_PACKAGE_SPEC) {
-            const localRepo = process.env.MCP_STATA_LOCAL_REPO || path.resolve(__dirname, '../../../mcp-stata');
+            const localRepo = process.env.MCP_STATA_LOCAL_REPO || path.resolve(__dirname, '../../mcp-stata');
             if (fs.existsSync(localRepo)) {
                 process.env.MCP_STATA_PACKAGE_SPEC = localRepo;
             }
@@ -70,7 +70,7 @@ async function main() {
         if (!fs.existsSync(dotVscode)) fs.mkdirSync(dotVscode);
         const mcpJson = path.join(dotVscode, 'mcp.json');
 
-        const localRepo = process.env.MCP_STATA_LOCAL_REPO || path.resolve(__dirname, '../../../mcp-stata');
+        const localRepo = process.env.MCP_STATA_LOCAL_REPO || path.resolve(__dirname, '../../mcp-stata');
 
         const config = {
             servers: {
