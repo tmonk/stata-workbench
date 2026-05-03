@@ -691,3 +691,46 @@ describe('Autocomplete – HTML structure', () => {
     expect(htmlContent).toMatch(/stataAutocomplete\.createController/);
   }));
 });
+
+describe('Autocomplete – Regression: Infinite Loop (Empty Variables)', () => {
+  it('does NOT trigger onRequestVariables when update() is called with 0 variables', () => {
+    const dom = new JSDOM('<!doctype html><html><body><textarea id="inp"></textarea><div id="dd"></div></body></html>');
+    let requestCount = 0;
+    
+    const ac = createController({
+      inputEl: dom.window.document.getElementById('inp'),
+      dropdownEl: dom.window.document.getElementById('dd'),
+      variables: [],
+      document: dom.window.document,
+      onRequestVariables: () => {
+        requestCount++;
+      }
+    });
+
+    // Call update manually (this is what was looping)
+    ac.update();
+
+    expect(requestCount).toBe(0);
+  });
+
+  it('DOES still trigger onRequestVariables when Tab is pressed with 0 variables', () => {
+    const dom = new JSDOM('<!doctype html><html><body><textarea id="inp"></textarea><div id="dd"></div></body></html>');
+    let requestCount = 0;
+    const inputEl = dom.window.document.getElementById('inp');
+    inputEl.value = 'a';
+    inputEl.selectionStart = 1;
+    
+    const ac = createController({
+      inputEl,
+      dropdownEl: dom.window.document.getElementById('dd'),
+      variables: [],
+      document: dom.window.document,
+      onRequestVariables: () => {
+        requestCount++;
+      }
+    });
+
+    ac.handleTab();
+    expect(requestCount).toBe(1);
+  });
+});

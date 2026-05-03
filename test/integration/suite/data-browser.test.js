@@ -8,6 +8,7 @@ describe('Data Browser Integration', () => {
     let dummyUrl;
 
     beforeEach(async () => {
+        jest.useFakeTimers();
         // Start a dummy HTTP server to act as the Stata API for proxy tests
         // This ensures the test is reliable even if Stata isn't running
         await new Promise(resolve => {

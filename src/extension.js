@@ -1445,6 +1445,11 @@ function updateStatusBar(status) {
 }
 
 async function refreshDatasetSummary() {
+    // Only refresh if the user is actually using the extension UI
+    if (!TerminalPanel.currentPanel && !DataBrowserPanel.currentPanel) {
+        return;
+    }
+
     try {
         const channel = await mcpClient.getUiChannel();
         if (channel && channel.baseUrl && channel.token) {
