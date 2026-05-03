@@ -177,7 +177,7 @@
     function update() {
       if (applying) return;
       const vars = getVars();
-      if (!vars.length) { requestVars(); close(); return; }
+      if (!vars.length) { close(); return; }
       const token = currentToken(inputEl);
       if (!token || !token.prefix) { close(); return; }
       const matches = vars.filter(function (n) {

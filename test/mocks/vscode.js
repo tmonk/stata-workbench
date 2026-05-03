@@ -11,6 +11,16 @@ const createVscodeMock = () => {
     };
 
     const vscode = {
+        extensions: {
+            getExtension: jest.fn().mockReturnValue({
+                isActive: true,
+                activate: jest.fn().mockResolvedValue({}),
+                exports: {
+                    DataBrowserPanel: { _performRequest: jest.fn() },
+                    mcpClient: { getUiChannel: jest.fn() }
+                }
+            })
+        },
         workspace: {
             _configListeners: [],
             getConfiguration: jest.fn().mockReturnValue(configuration),
@@ -59,9 +69,13 @@ const createVscodeMock = () => {
             withProgress: jest.fn().mockImplementation((_options, task) => task({ isCancellationRequested: false }))
         },
         commands: {
-            registerCommand: jest.fn(),
+            _commands: [],
+            registerCommand: jest.fn().mockImplementation((name) => {
+                vscode.commands._commands.push(name);
+                return { dispose: () => { vscode.commands._commands = vscode.commands._commands.filter(c => c !== name); } };
+            }),
             executeCommand: jest.fn().mockResolvedValue(),
-            getCommands: jest.fn().mockResolvedValue([])
+            getCommands: jest.fn().mockImplementation(async () => vscode.commands._commands)
         },
         Uri: {
             file: (path) => ({ fsPath: path, with: () => ({ toString: () => `file://${path}` }), path }),
