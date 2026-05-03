@@ -1,3 +1,10 @@
+## [0.22.3](https://github.com/tmonk/stata-workbench/compare/v0.22.2...v0.22.3) (2026-05-03)
+
+
+### Bug Fixes
+
+* Filter Sentry noise on shutdown and network ([b51b0e3](https://github.com/tmonk/stata-workbench/commit/b51b0e34137e6a13006ce8a141b436a739364750))
+
 ## [0.22.2](https://github.com/tmonk/stata-workbench/compare/v0.22.1...v0.22.2) (2026-05-03)
 
 
