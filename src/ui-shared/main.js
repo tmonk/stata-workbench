@@ -16,6 +16,35 @@ if (Sentry && Sentry.init) {
         replaysSessionSampleRate: 0.1,
         replaysOnErrorSampleRate: 1.0,
         tracePropagationTargets: ["localhost", /^\//, /^\/api\//],
+        beforeSend(event, hint) {
+            const error = hint.originalException;
+            if (error) {
+                const msg = (error.message || String(error)).toLowerCase();
+
+                // 1. SHUTDOWN & CONNECTIVITY NOISE (Broadly)
+                const isLifecycleError =
+                    msg.includes('canceled') ||
+                    msg.includes('aborted') ||
+                    msg.includes('channel has been closed') ||
+                    msg.includes('connection closed') ||
+                    msg.includes('failed to fetch') ||
+                    msg.includes('network error') ||
+                    msg.includes('request timed out') ||
+                    msg.includes('disposed');
+
+                if (isLifecycleError) {
+                    // If we're offline, or the message is about a closure, ignore it
+                    if (!window.navigator.onLine) return null;
+                    if (msg.includes('closed') || msg.includes('disposed')) return null;
+                }
+
+                // 2. THIRD-PARTY & TELEMETRY NOISE
+                if (msg.includes('otlpexportererror')) {
+                    return null;
+                }
+            }
+            return event;
+        }
     });
 }
 

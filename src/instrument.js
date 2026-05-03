@@ -10,6 +10,15 @@ global.addLogToSentryBuffer = (msg) => {
     if (logBuffer.length > 200) logBuffer.shift();
 };
 
+// Track if the extension is currently shutting down to suppress cleanup noise.
+let isShuttingDown = false;
+global.setStataWorkbenchShuttingDown = () => { isShuttingDown = true; };
+
+// Hook into standard process signals to catch shutdowns
+['exit', 'SIGINT', 'SIGTERM'].forEach(sig => {
+    process.on(sig, () => { isShuttingDown = true; });
+});
+
 Sentry.init({
     dsn: "https://97f5f46047e65ebbf758c0e9e4ffe6c5@o4510744386732032.ingest.de.sentry.io/4510744389550160",
     release: process.env.SENTRY_RELEASE || `v${pkg.version}`,
@@ -77,7 +86,7 @@ Sentry.init({
         return isOurTransaction ? event : null;
     },
 
-    // Filter out Stata user errors (not system failures)
+    // Filter out noise and known non-issues
     beforeSend(event, hint) {
         // Attach recent logs to the event for better context
         if (logBuffer.length > 0) {
@@ -88,29 +97,80 @@ Sentry.init({
         const error = hint.originalException;
         if (error) {
             const msg = (error.message || String(error)).toLowerCase();
-            // Ignore errors with Stata return codes (e.g. r(198);)
-            // These are usually results of user commands, not extension bugs.
-            if (/r\(\d+\);/.test(msg) || /\[rc\s+\d+\]/.test(msg)) {
+
+            // 1. SHUTDOWN & CLEANUP NOISE (More general)
+            // If we are shutting down, ignore almost all connection/lifecycle errors.
+            const isLifecycleError =
+                msg.includes('connection closed') ||
+                msg.includes('channel has been closed') ||
+                msg.includes('not connected') ||
+                msg.includes('socket hang up') ||
+                msg.includes('econnreset') ||
+                msg.includes('request timed out') ||
+                msg.includes('aborted') ||
+                msg.includes('canceled') ||
+                msg.includes('disposed') ||
+                msg.includes('terminated');
+
+            if (isShuttingDown && isLifecycleError) {
                 return null;
             }
-            // Ignore SMCL error markers which indicate Stata output slipped into an error message
-            if (msg.includes('{err}') || msg.includes('stata error:')) {
+
+            // 2. TEST ENVIRONMENT NOISE
+            const isTestFile = (event.exception?.values || []).some(ex =>
+                ex.stacktrace?.frames?.some(frame =>
+                    frame.filename && (
+                        frame.filename.includes('test/') ||
+                        frame.filename.includes('.test.') ||
+                        frame.filename.includes('mcp-client.test') ||
+                        frame.filename.includes('pypi-versioning.test')
+                    )
+                )
+            );
+            if (isTestFile) return null;
+
+            // 3. USER INTERACTION & CANCELLATION (Always ignore)
+            if (
+                msg.includes('external cancellation') ||
+                msg.includes('interrupted') ||
+                msg.includes('canceled: canceled') ||
+                msg === 'canceled'
+            ) {
                 return null;
             }
-            // Ignore VS Code shutdown noise or cancellation during host termination
-            if (msg.includes('channel has been closed') || msg.includes('canceled: canceled') || msg === 'canceled') {
+
+            // 4. TELEMETRY & THIRD-PARTY NOISE
+            if (
+                msg.includes('otlpexportererror') ||
+                msg.includes('msgcenterweb') ||
+                msg.includes('settemplatemcpservers') ||
+                msg.includes('err_network_changed') ||
+                msg.includes('socket has been ended by the other party')
+            ) {
                 return null;
             }
-            // Ignore errors occurring during shutdown/disposal (stack trace contains .terminate or .dispose)
+
+            // 5. USER SCRIPT ERRORS (Syntax errors in .R or .do files)
+            if (
+                (msg.includes('unexpected symbol') || msg.includes('unexpected token') || msg.includes('syntax error')) &&
+                (msg.includes('.r:') || msg.includes('.do:') || msg.includes('.py:') || msg.includes('.sthlp:'))
+            ) {
+                return null;
+            }
+
+            // Generic check for errors in non-extension files
+            const hasExternalFileRef = /\.[a-z0-9]+:\d+:\d+/i.test(msg);
+            if (hasExternalFileRef && !msg.includes('stata-workbench') && !msg.includes('mcp-stata') && !msg.includes('tmonk')) {
+                return null;
+            }
+
+            // 6. STATA USER ERRORS (not system failures)
+            if (/r\(\d+\);/.test(msg) || /\[rc\s+\d+\]/.test(msg) || msg.includes('{err}') || msg.includes('stata error:')) {
+                return null;
+            }
+
+            // 7. DISPOSAL NOISE
             if (error.stack && /\.(terminate|dispose)/.test(error.stack)) {
-                return null;
-            }
-            // Ignore transient network environment changes
-            if (msg.includes('err_network_changed')) {
-                return null;
-            }
-            // Ignore socket hang-ups or parties ending the connection (common during shutdown or network loss)
-            if (msg.includes('socket has been ended by the other party') || msg.includes('socket hang up') || msg.includes('econnreset')) {
                 return null;
             }
         }

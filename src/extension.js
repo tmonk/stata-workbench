@@ -1395,6 +1395,9 @@ function mergeConfigEntry(existing, expected) {
 }
 
 async function deactivate() {
+    if (typeof global.setStataWorkbenchShuttingDown === 'function') {
+        global.setStataWorkbenchShuttingDown();
+    }
     mcpClient.dispose();
     try {
         await Sentry.flush(2000);
