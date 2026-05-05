@@ -420,8 +420,8 @@ describe('TerminalPanel webview messages after restore', () => {
     it('downloadGraphPdf message uses _downloadGraphPdf after restore', async () => {
         return withTestContext({}, async () => {
             const { handlers, messageHandler } = setupRestoredPanel();
-            await messageHandler({ type: 'downloadGraphPdf', graphName: 'mygraph' });
-            expect(handlers.downloadGraphPdf).toHaveBeenCalledWith('mygraph');
+            await messageHandler({ type: 'downloadGraphPdf', graphName: 'mygraph', baseDir: '/tmp/base' });
+            expect(handlers.downloadGraphPdf).toHaveBeenCalledWith('mygraph', '/tmp/base');
         });
     });
 

@@ -13,11 +13,23 @@ const createVscodeMock = () => {
     const vscode = {
         extensions: {
             getExtension: jest.fn().mockReturnValue({
-                isActive: true,
-                activate: jest.fn().mockResolvedValue({}),
+                isActive: false,
+                activate: async function() {
+                    this.isActive = true;
+                    // Mocked commands that the real extension would register
+                    vscode.commands._commands.push('stata-workbench.runSelection');
+                    vscode.commands._commands.push('stata-workbench.runFile');
+                    vscode.commands._commands.push('stata-workbench.viewData');
+                    return this.exports;
+                },
                 exports: {
-                    DataBrowserPanel: { _performRequest: jest.fn() },
-                    mcpClient: { getUiChannel: jest.fn() }
+                    DataBrowserPanel: { _performRequest: jest.fn(), currentPanel: { dispose: jest.fn() } },
+                    TerminalPanel: { 
+                        _testOutgoingCapture: null,
+                        _handleDownloadGraphPdf: jest.fn()
+                    },
+                    mcpClient: { getUiChannel: jest.fn() },
+                    downloadGraphAsPdf: jest.fn()
                 }
             })
         },
@@ -35,7 +47,15 @@ const createVscodeMock = () => {
                 readFile: jest.fn().mockResolvedValue(Buffer.from('')),
                 stat: jest.fn().mockResolvedValue({ size: 100 })
             },
-            openTextDocument: jest.fn().mockResolvedValue({ getText: () => '', isDirty: false, fileName: '/tmp/test.do', save: jest.fn() })
+            openTextDocument: jest.fn().mockImplementation(async (options) => ({
+                getText: () => options?.content || '',
+                isDirty: false,
+                fileName: '/tmp/test.do',
+                save: jest.fn(),
+                lineCount: (options?.content || '').split('\n').length,
+                lineAt: (i) => ({ text: (options?.content || '').split('\n')[i] || '' }),
+                uri: { fsPath: '/tmp/test.do' }
+            }))
         },
         window: {
             createWebviewPanel: jest.fn().mockReturnValue({
@@ -51,6 +71,14 @@ const createVscodeMock = () => {
             }),
             showErrorMessage: jest.fn().mockResolvedValue(),
             showInformationMessage: jest.fn().mockResolvedValue(),
+            showTextDocument: jest.fn().mockResolvedValue({
+                selection: { isEmpty: false },
+                document: {
+                    getText: jest.fn().mockReturnValue(''),
+                    uri: { fsPath: '/tmp/test.do' }
+                }
+            }),
+            showSaveDialog: jest.fn().mockResolvedValue(undefined),
             createOutputChannel: jest.fn().mockReturnValue({
                 append: jest.fn(),
                 appendLine: jest.fn(),
@@ -70,11 +98,15 @@ const createVscodeMock = () => {
         },
         commands: {
             _commands: [],
-            registerCommand: jest.fn().mockImplementation((name) => {
+            registerCommand: jest.fn().mockImplementation((name, handler) => {
                 vscode.commands._commands.push(name);
+                if (!vscode.commands[name]) vscode.commands[name] = handler;
                 return { dispose: () => { vscode.commands._commands = vscode.commands._commands.filter(c => c !== name); } };
             }),
-            executeCommand: jest.fn().mockResolvedValue(),
+            executeCommand: jest.fn().mockImplementation(async (name, ...args) => {
+                if (vscode.commands[name]) return await vscode.commands[name](...args);
+                return Promise.resolve();
+            }),
             getCommands: jest.fn().mockImplementation(async () => vscode.commands._commands)
         },
         Uri: {
@@ -130,6 +162,18 @@ const createVscodeMock = () => {
                 if (this._listener) {
                     this._listener();
                 }
+            }
+        },
+        Position: class {
+            constructor(line, character) { this.line = line; this.character = character; }
+        },
+        Range: class {
+            constructor(start, end) { this.start = start; this.end = end; }
+        },
+        Selection: class {
+            constructor(anchorLine, anchorChar, activeLine, activeChar) {
+                this.anchor = { line: anchorLine, character: anchorChar };
+                this.active = { line: activeLine, character: activeChar };
             }
         }
     };

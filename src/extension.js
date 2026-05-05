@@ -1811,14 +1811,14 @@ async function viewData() {
     });
 }
 
-async function downloadGraphAsPdf(graphName) {
+async function downloadGraphAsPdf(graphName, baseDir) {
     return Sentry.startSpan({ name: 'extension.downloadGraphAsPdf', op: 'extension.operation' }, async () => {
         try {
-            debugLog(`[Download] Starting PDF export for: ${graphName}`);
+            debugLog(`[Download] Starting PDF export for: ${graphName} in ${baseDir || 'current dir'}`);
 
             // Request PDF export from MCP server
             debugLog('[Download] Calling mcpClient.fetchGraph...');
-            const response = await mcpClient.fetchGraph(graphName, { format: 'pdf' });
+            const response = await mcpClient.fetchGraph(graphName, { format: 'pdf', baseDir });
             debugLog(`[Download] Response received: ${JSON.stringify(response, null, 2)}`);
 
             let pdfPath = null;
@@ -1915,8 +1915,8 @@ function openGraphPanel(graphDetails) {
                 }
 
                 if (message.command === 'download-graph-pdf' && message.graphName) {
-                    debugLog(`[Graph Panel] Processing PDF download for: ${message.graphName}`);
-                    await downloadGraphAsPdf(message.graphName);
+                    debugLog(`[Graph Panel] Processing PDF download for: ${message.graphName} (baseDir: ${message.baseDir})`);
+                    await downloadGraphAsPdf(message.graphName, message.baseDir);
                 } else if (message.type === 'openArtifact' && message.path) {
                     debugLog(`[Graph Panel] Opening artifact: ${message.path}`);
                     if (message.artifactType === 'help' || message.label?.toLowerCase().startsWith('help:')) {
@@ -2124,9 +2124,10 @@ function renderGraphHtml(graphDetails, webview, extensionUri, nonce) {
                      });
                  } else {
                      vscode.postMessage({
-                         command: 'download-graph-pdf',
-                         graphName: graphName
-                     });
+                        command: 'download-graph-pdf',
+                        graphName: graphName,
+                        baseDir: activeModalArtifact.baseDir
+                    });
                  }
                  console.log('[Modal] Message sent successfully');
                  

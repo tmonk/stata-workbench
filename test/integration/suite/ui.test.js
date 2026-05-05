@@ -131,11 +131,73 @@ describe('UI Integration', () => {
     //     let downloadResult = null;
     //     api.TerminalPanel._downloadGraphPdf = async (graphName) => {
     //         const res = await extension.exports.downloadGraphAsPdf(graphName);
-    //         downloadResult = res;
-    //     };
+    test('Download PDF button triggers export_graph and yields PDF path', async () => {
+        if (!enabled) {
+            return;
+        }
 
-    //     await api.TerminalPanel._handleDownloadGraphPdf('gint');
+        const extension = vscode.extensions.getExtension('tmonk.stata-workbench');
+        expect(extension).toBeTruthy();
+        
+        if (!extension.isActive) {
+            await extension.activate();
+        }
+        
+        const api = extension.exports;
+        if (!api?.TerminalPanel) {
+            console.warn('api.TerminalPanel not found, skipping deep integration test part');
+            return;
+        }
 
+        const doc = await vscode.workspace.openTextDocument({ 
+            language: 'stata', 
+            content: 'sysuse auto, clear\nscatter price mpg, name(gtest, replace)' 
+        });
+        await vscode.window.showTextDocument(doc);
+
+        const outgoing = [];
+        api.TerminalPanel._testOutgoingCapture = (msg) => {
+            outgoing.push(msg);
+        };
+
+        await vscode.commands.executeCommand('stata-workbench.runSelection');
+
+        let graphArtifact = null;
+        for (let i = 0; i < 30; i++) {
+            const m = outgoing.find(msg => msg.type === 'runFinished');
+            if (m && m.artifacts) {
+                graphArtifact = m.artifacts.find(a => a.label === 'gtest' || a.name === 'gtest');
+                if (graphArtifact) break;
+            }
+            await new Promise(r => setTimeout(r, 500));
+        }
+        
+        expect(graphArtifact).toBeTruthy();
+
+        const tmpPath = path.join(os.tmpdir(), `test-graph-${Date.now()}.pdf`);
+        const showSaveDialogMock = jest.spyOn(vscode.window, 'showSaveDialog').mockResolvedValue(vscode.Uri.file(tmpPath));
+
+        try {
+            let receivedDownloadStatus = null;
+            const originalCapture = api.TerminalPanel._testOutgoingCapture;
+            api.TerminalPanel._testOutgoingCapture = (msg) => {
+                if (originalCapture) originalCapture(msg);
+                if (msg.type === 'downloadStatus') {
+                    receivedDownloadStatus = msg;
+                }
+            };
+
+            await api.TerminalPanel._handleDownloadGraphPdf('gtest', graphArtifact.baseDir);
+
+            expect(receivedDownloadStatus).toBeTruthy();
+            expect(receivedDownloadStatus.success).toBe(true);
+            expect(fs.existsSync(tmpPath)).toBe(true);
+            
+            if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath);
+        } finally {
+            showSaveDialogMock.mockRestore();
+        }
+    });
 
     test('Stop button cancels a running command', async () => {
         if (!enabled) {
@@ -150,7 +212,6 @@ describe('UI Integration', () => {
         const api = extension.exports;
         expect(api?.TerminalPanel).toBeTruthy();
 
-        // Use a loop that can be interrupted (100 iterations × 100ms = 10s total)
         const doc = await vscode.workspace.openTextDocument({ 
             language: 'stata', 
             content: 'forvalues i = 1/100 { display "`i\'"; sleep 100 }'
@@ -166,7 +227,6 @@ describe('UI Integration', () => {
         const runPromise = vscode.commands.executeCommand('stata-workbench.runSelection');
         runPromise.catch(() => { });
 
-        // Wait for runStarted
         let runStarted = null;
         for (let i = 0; i < 40; i++) {
             for (const m of outgoing) {

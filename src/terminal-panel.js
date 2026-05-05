@@ -283,9 +283,9 @@ class TerminalPanel {
         await TerminalPanel.handleRun(message.code, TerminalPanel._runCommand);
       }
       if ((message.command === 'download-graph-pdf' || message.type === 'downloadGraphPdf') && message.graphName) {
-        await TerminalPanel._handleDownloadGraphPdf(message.graphName);
+        await TerminalPanel._handleDownloadGraphPdf(message.graphName, message.baseDir);
       }
-      if (message.type === 'cancelRun') {
+      if (message.command === 'cancel-run' || message.type === 'cancelRun') {
         await TerminalPanel._handleCancelRun();
       }
       if (message.type === 'cancelTask' && message.runId) {
@@ -489,11 +489,11 @@ class TerminalPanel {
     });
   }
 
-  static async _handleDownloadGraphPdf(graphName) {
+  static async _handleDownloadGraphPdf(graphName, baseDir) {
     return Sentry.startSpan({ name: 'terminal.downloadGraphPdf', op: 'extension.operation' }, async () => {
       if (typeof TerminalPanel._downloadGraphPdf !== 'function') return;
       try {
-        await TerminalPanel._downloadGraphPdf(graphName);
+        await TerminalPanel._downloadGraphPdf(graphName, baseDir);
         TerminalPanel._postMessage({ type: 'downloadStatus', success: true, graphName });
       } catch (error) {
         console.error('[TerminalPanel] downloadGraphPdf failed:', error);
@@ -1992,7 +1992,8 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
                 // Request PDF export from the extension
                 vscode.postMessage({
                     command: 'download-graph-pdf',
-                    graphName: graphName
+                    graphName: graphName,
+                    baseDir: activeModalArtifact.baseDir
                 });
                 
                 console.log('[Modal] Message sent successfully');
