@@ -24,6 +24,8 @@ jobs:
   test:
     name: Test
     runs-on: ubuntu-latest
+    env:
+      SENTRY_UPLOAD: "false"
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -63,6 +65,8 @@ jobs:
     name: Release Dry Run
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request'
+    env:
+      SENTRY_UPLOAD: "false"
     steps:
       - name: Checkout
         uses: actions/checkout@v6
