@@ -30,13 +30,18 @@ To test changes to the `mcp-stata` server locally without publishing to PyPI:
    *Note: Ensure `uv` is installed and the directory points to your local `mcp-stata` clone.*
 
 ## Commit Conventions
-We use [Conventional Commits](https://www.conventionalcommits.org/) to automate our release process. This is enforced via `commitlint` and `husky`.
+We use [Conventional Commits](https://www.conventionalcommits.org/) to automate our release process. This is enforced locally via `commitlint` + `husky` and in CI via the `Commitlint` GitHub Actions workflow.
 
 When you commit, use the following prefixes:
 - `fix:` for bug fixes (triggers a **patch** release)
 - `feat:` for new features (triggers a **minor** release)
 - `BREAKING CHANGE:` or `!` after the type (e.g., `feat!:`) for breaking changes (triggers a **major** release)
 - `chore:`, `docs:`, `style:`, `refactor:`, `test:` for changes that don't affect the production code (no release)
+
+You can validate recent commits locally with:
+```bash
+bun run lint:commits
+```
 
 ## Automated Releases
 This project uses `semantic-release` to automate versioning and publishing to the VS Code Marketplace and Open VSX Registry via GitHub Actions.

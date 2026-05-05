@@ -4,12 +4,18 @@ on:
   push:
     branches:
       - main
+    paths-ignore:
+      - "**/*.md"
+      - "docs/**"
   workflow_dispatch:
 
 permissions:
   contents: write
   issues: write
   pull-requests: write
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -26,12 +32,12 @@ jobs:
       SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: latest
 
@@ -39,6 +45,16 @@ jobs:
         uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
+
+      - name: Cache Bun dependencies
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.bun/install/cache
+            node_modules
+          key: ${{ runner.os }}-bun-release-${{ hashFiles('bun.lock', 'package.json') }}
+          restore-keys: |
+            ${{ runner.os }}-bun-release-
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
@@ -51,7 +67,7 @@ jobs:
 
       - name: Release
         id: semantic
-        uses: cycjimmy/semantic-release-action@v4
+        uses: cycjimmy/semantic-release-action@v6
         with:
           extra_plugins: |
             @semantic-release/changelog
@@ -125,12 +141,12 @@ jobs:
         target: [win32-x64, win32-arm64, linux-x64, linux-arm64, darwin-x64, darwin-arm64]
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: v${{ needs.release.outputs.new_release_version }}
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: latest
 
@@ -138,6 +154,17 @@ jobs:
         uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
+
+      - name: Cache Bun dependencies
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.bun/install/cache
+            node_modules
+          key: ${{ runner.os }}-bun-release-target-${{ matrix.target }}-${{ hashFiles('bun.lock', 'package.json') }}
+          restore-keys: |
+            ${{ runner.os }}-bun-release-target-${{ matrix.target }}-
+            ${{ runner.os }}-bun-release-target-
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
@@ -178,7 +205,7 @@ jobs:
         continue-on-error: true # OVSX can be flaky
 
       - name: Upload to GitHub Release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v3
         with:
           files: dist/stata-workbench-${{ matrix.target }}.vsix
           tag_name: v${{ needs.release.outputs.new_release_version }}
