@@ -48,7 +48,7 @@ Sentry.init({
                 url.includes("mcp-stata") ||
                 url.includes("tmonk") ||
                 url.includes("pypi.org/pypi/mcp-stata") ||
-                url.includes("localhost") && (url.includes("get_ui_channel") || url.includes("stata"));
+                url.includes("localhost") && (url.includes("get_ui_channel") || url.includes("stata_manage_session") || url.includes("stata"));
 
             if (!isOurs) return null;
         }

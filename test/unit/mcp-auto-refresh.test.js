@@ -49,9 +49,9 @@ describe('McpClient Auto-Refresh', () => {
         // Second client returns new tools
         secondClient.listTools.resolves({
             tools: [
-                { name: 'run_command_background' },
-                { name: 'run_do_file_background' },
-                { name: 'get_ui_channel' }
+                { name: 'stata_run' },
+                { name: 'stata_manage_session' },
+                { name: 'stata_control' }
             ]
         });
 
@@ -130,7 +130,7 @@ describe('McpClient Auto-Refresh', () => {
             await client.run('sysuse auto');
             throw new Error('Should have failed');
         } catch (err) {
-            expect(err.message.toLowerCase()).toContain('required tools: run_command_background');
+            expect(err.message.toLowerCase()).toContain('required tools: stata_run');
             expect(err.message).toContain('Available tools: run_command');
         }
     });

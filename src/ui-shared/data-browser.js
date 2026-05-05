@@ -505,7 +505,7 @@ async function loadPage() {
         perf.log('Data Fetch', fetchTime);
 
         if (data) {
-            const numRows = data.table ? data.table.numRows : (data.rows?.length || data.data?.length);
+            const numRows = data.table ? data.table.numRows : 0;
             log(`Page loaded. Records: ${numRows}`);
 
             perf.start('renderGrid');
@@ -601,7 +601,12 @@ function handleSort(varName, isMulti = false) {
 
 function renderGrid(pageData) {
     const varCount = pageData.vars?.length || pageData.variables?.length || 0;
-    log(`Render Grid. Vars: ${varCount}, Rows: ${pageData.rows?.length || pageData.data?.length}`);
+    const table = pageData.table;
+    const rows = [];
+    if (!table) {
+        throw new Error('Expected Arrow table in /v1/arrow response');
+    }
+    log(`Render Grid. Vars: ${varCount}, Rows: ${table.numRows}`);
     dom.header.innerHTML = '';
     const obsTh = document.createElement('th');
     obsTh.textContent = '#';
@@ -634,12 +639,10 @@ function renderGrid(pageData) {
     });
 
     dom.grid.innerHTML = '';
-    const table = pageData.table;
-    const rows = pageData.rows || pageData.data || [];
     const returnedVars = pageData.vars || pageData.variables || [];
     const obsIndex = returnedVars.indexOf('_n');
 
-    const numRows = table ? table.numRows : rows.length;
+    const numRows = table.numRows;
 
     for (let i = 0; i < numRows; i++) {
         const tr = document.createElement('tr');
@@ -647,12 +650,7 @@ function renderGrid(pageData) {
 
         let obsVal = '';
         if (obsIndex !== -1) {
-            if (table) {
-                // Direct Arrow Access
-                obsVal = table.getChildAt(obsIndex).get(i);
-            } else {
-                obsVal = rows[i][obsIndex];
-            }
+            obsVal = table.getChildAt(obsIndex).get(i);
         }
 
         tdObs.textContent = obsVal || '';
@@ -665,11 +663,7 @@ function renderGrid(pageData) {
             let val = null;
 
             if (idx !== -1) {
-                if (table) {
-                    val = table.getChildAt(idx).get(i);
-                } else {
-                    val = rows[i][idx];
-                }
+                val = table.getChildAt(idx).get(i);
             }
 
             td.textContent = (val === null || val === undefined) ? '.' : String(val);
@@ -690,8 +684,7 @@ function updatePagination(data) {
     if (!dom.prevBtn || !dom.nextBtn || !dom.pageInfo) return;
     dom.prevBtn.disabled = state.offset <= 0;
 
-    // Support both Arrow Table and legacy array
-    const returnedCount = data.table ? data.table.numRows : (data.rows || data.data || []).length;
+    const returnedCount = data.table ? data.table.numRows : 0;
 
     dom.nextBtn.disabled = returnedCount < state.limit;
     const start = state.offset + 1;

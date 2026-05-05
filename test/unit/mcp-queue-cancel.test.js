@@ -42,11 +42,11 @@ describe('McpClient Queue and Cancellation', () => {
         const client = new McpClient();
         client._log = () => {};
         client._ensureClient = sinon.stub().resolves(new ClientMock());
-        client._availableTools = new Set(['run_command_background', 'break_session']);
+        client._availableTools = new Set(['stata_run', 'stata_manage_session', 'stata_control']);
         
-        // Default mock for run_command_background
+        // Default mock for stata_run
         client._callTool = sinon.stub().callsFake(async (c, name, args) => {
-            if (name === 'run_command_background') {
+            if (name === 'stata_run') {
                 return {
                     task_id: 'task-' + Math.random(),
                     log_path: '/tmp/test.log'
@@ -158,7 +158,7 @@ describe('McpClient Queue and Cancellation', () => {
             const firstPromise = new Promise(r => resolveFirst = r);
             
             client._callTool = sinon.stub().callsFake(async (c, name) => {
-                if (name === 'run_command_background') {
+                if (name === 'stata_run') {
                     return { task_id: 'active-task' };
                 }
                 return {};
@@ -217,43 +217,35 @@ describe('McpClient Queue and Cancellation', () => {
         });
     });
 
-    describe('Tool Name Mapping', () => {
-        itWithContext('should resolve tool names based on discovered mapping', async () => {
+    describe('Strict Tool Names', () => {
+        itWithContext('should keep tool names unchanged after discovery', async () => {
             const client = createClient();
-            // Mock listTools to return prefixed names
             const mockClient = new ClientMock();
             mockClient.listTools.resolves({
                 tools: [
-                    { name: 'mcp_stata_run_command_background' },
-                    { name: 'mcp_stata_break_session' }
+                    { name: 'stata_run' },
+                    { name: 'stata_control' }
                 ]
             });
             client._ensureClient = sinon.stub().resolves(mockClient);
 
-            // Connect to trigger tool discovery
-            await client._ensureClient(); // Usually called by _callTool but let's be explicit
+            await client._ensureClient();
             await client._refreshToolList(mockClient);
 
-            expect(client._resolveToolName('run_command_background')).toBe('mcp_stata_run_command_background');
-            expect(client._resolveToolName('break_session')).toBe('mcp_stata_break_session');
+            expect(client._resolveToolName('stata_run')).toBe('stata_run');
+            expect(client._resolveToolName('stata_control')).toBe('stata_control');
         });
 
-        itWithContext('should use resolved name in _callTool', async () => {
+        itWithContext('should fail when a requested tool is not available', async () => {
             const client = createClient();
-            // Restore real _callTool for this test
             client._callTool = McpClient.prototype._callTool.bind(client);
-            client._ensureClient = sinon.stub().resolves({ type: 'standard' });
-            
-            client._toolMapping = new Map([['break_session', 'prefixed_break']]);
-            client._availableTools = new Set(['prefixed_break']);
-            
+            client._ensureClient = sinon.stub().resolves({ type: 'standard', listTools: sinon.stub().resolves({ tools: [] }) });
+            client._availableTools = new Set(['stata_run']);
             const callToolStub = sinon.stub().resolves({});
             const mockClient = { callTool: callToolStub, type: 'standard' };
 
-            await client._callTool(mockClient, 'break_session', { session_id: 'default' });
-
-            expect(callToolStub.calledOnce).toBe(true);
-            expect(callToolStub.firstCall.args[0].name).toBe('prefixed_break');
+            await expect(client._callTool(mockClient, 'break_session', { session_id: 'default' })).rejects.toThrow(/not available/i);
+            expect(callToolStub.notCalled).toBe(true);
         });
     });
 

@@ -62,7 +62,6 @@ class StataMcpClient {
         this._clientVersion = pkg?.version || 'dev';
         this._onTaskDone = null;
         this._availableTools = new Set();
-        this._toolMapping = new Map();
         this._missingRequiredTools = [];
         this._forceLatestServer = false;
         this._forceLatestAttempted = false;
@@ -133,7 +132,7 @@ class StataMcpClient {
 
         const cts = this._createCancellationSource(externalCancellationToken);
 
-        const result = await this._enqueue('run_selection', { ...rest, runId, cancellationToken: cts.token, cancellationSource: cts, deferArtifacts: true }, async (client) => {
+        const result = await this._enqueue('stata_run', { ...rest, runId, cancellationToken: cts.token, cancellationSource: cts, deferArtifacts: true }, async (client) => {
             const args = { code: selection };
             if (maxOutputLines && maxOutputLines > 0) {
                 args.max_output_lines = maxOutputLines;
@@ -158,7 +157,7 @@ class StataMcpClient {
             }
 
             const result = await this._withActiveRun(runState, async () => {
-                const kickoff = await this._callTool(client, 'run_command_background', args, { progressToken, signal: cts.abortController.signal });
+                const kickoff = await this._callTool(client, 'stata_run', { ...args, background: true }, { progressToken, signal: cts.abortController.signal });
                 return this._awaitBackgroundResult(client, runState, kickoff, cts);
             });
             if (!runState.logPath) {
@@ -198,12 +197,12 @@ class StataMcpClient {
 
         const cts = this._createCancellationSource(externalCancellationToken);
 
-        const result = await this._enqueue('run_file', { ...rest, runId, cancellationToken: cts.token, cancellationSource: cts, deferArtifacts: true }, async (client) => {
+        const result = await this._enqueue('stata_run', { ...rest, runId, cancellationToken: cts.token, cancellationSource: cts, deferArtifacts: true }, async (client) => {
             const args = {
-                // Use absolute path so the server can locate the file, but also
-                // pass cwd so any relative includes resolve.
+                code: filePath,
                 path: filePath,
-                cwd
+                is_file: true,
+                cwd: cwd && cwd.trim() ? cwd : undefined
             };
             if (maxOutputLines && maxOutputLines > 0) {
                 args.max_output_lines = maxOutputLines;
@@ -225,7 +224,7 @@ class StataMcpClient {
             }
 
             const result = await this._withActiveRun(runState, async () => {
-                const kickoff = await this._callTool(client, 'run_do_file_background', args, { progressToken, signal: cts.abortController.signal });
+                const kickoff = await this._callTool(client, 'stata_run', { ...args, background: true, is_file: true }, { progressToken, signal: cts.abortController.signal });
                 return this._awaitBackgroundResult(client, runState, kickoff, cts);
             });
             if (!runState.logPath) {
@@ -278,7 +277,7 @@ class StataMcpClient {
             }
 
             const result = await this._withActiveRun(runState, async () => {
-                const kickoff = await this._callTool(client, 'run_command_background', args, { progressToken, signal: cts.abortController.signal });
+                const kickoff = await this._callTool(client, 'stata_run', { ...args, background: true }, { progressToken, signal: cts.abortController.signal });
                 return this._awaitBackgroundResult(client, runState, kickoff, cts);
             });
             if (!runState.logPath) {
@@ -299,35 +298,35 @@ class StataMcpClient {
             return result;
         };
 
-        const result = await this._enqueue('run_command', { ...rest, cancellationToken: cts.token, cancellationSource: cts, deferArtifacts: true }, task, meta, true, true);
+        const result = await this._enqueue('stata_run', { ...rest, cancellationToken: cts.token, cancellationSource: cts, deferArtifacts: true }, task, meta, true, true);
         return result;
     }
 
     async viewData(start = 0, count = 50, options = {}) {
-        return this._enqueue('view_data', options, async (client) => {
-            const response = await this._callTool(client, 'get_data', { start, count });
+        return this._enqueue('stata_inspect_data', options, async (client) => {
+            const response = await this._callTool(client, 'stata_inspect_data', { action: 'get', start, count });
             return this._parseJson(response);
         });
     }
 
     async getUiChannel(options = {}) {
-        return this._enqueue('get_ui_channel', options, async (client) => {
-            const response = await this._callTool(client, 'get_ui_channel', {});
+        return this._enqueue('stata_manage_session', options, async (client) => {
+            const response = await this._callTool(client, 'stata_manage_session', { action: 'get_ui_channel' });
             const text = this._extractText(response);
             return this._tryParseJson(text) || this._parseJson(response);
         });
     }
 
     async getVariableList(options = {}) {
-        return this._enqueue('get_variable_list', options, async (client) => {
-            const response = await this._callTool(client, 'get_variable_list', {});
+        return this._enqueue('stata_inspect_data', options, async (client) => {
+            const response = await this._callTool(client, 'stata_inspect_data', { action: 'list' });
             return this._normalizeVariableList(response);
         });
     }
 
     async listGraphs(options = {}) {
-        return this._enqueue('list_graphs', options, async (client) => {
-            const raw = await this._callTool(client, 'list_graphs', {});
+        return this._enqueue('stata_manage_graphs', options, async (client) => {
+            const raw = await this._callTool(client, 'stata_manage_graphs', { action: 'list' });
             const artifacts = await this._resolveArtifactsFromList(raw, options?.baseDir, client);
             return { graphs: artifacts };
         });
@@ -344,26 +343,13 @@ class StataMcpClient {
     }
 
     async fetchGraph(name, options = {}) {
-        return this._enqueue('fetch_graph', options, async (client) => {
-            // Respect requested format; default to server default (often SVG) unless format is provided.
+        return this._enqueue('stata_manage_graphs', options, async (client) => {
             const preferredFormat = options.format || null;
-            const baseArgs = { graph_name: name };
+            const baseArgs = { action: 'export', graph_name: name };
             const primaryArgs = preferredFormat ? { ...baseArgs, format: preferredFormat } : baseArgs;
 
-            const primary = await this._callTool(client, 'export_graph', primaryArgs);
-            let artifact = this._graphResponseToArtifact(primary, name, options.baseDir);
-
-            // If the server returned a non-PDF artifact (e.g., SVG) and we need PDF, try again forcing PDF.
-            const hasPdfPath = artifact?.path && /\.pdf$/i.test(artifact.path);
-            if (preferredFormat === 'pdf' && !hasPdfPath) {
-                const fallback = await this._callTool(client, 'export_graph', { ...baseArgs, format: 'pdf' });
-                const fallbackArtifact = this._graphResponseToArtifact(fallback, name, options.baseDir);
-                if (fallbackArtifact && (fallbackArtifact.path && /\.pdf$/i.test(fallbackArtifact.path))) {
-                    artifact = fallbackArtifact;
-                }
-            }
-
-            return artifact;
+            const primary = await this._callTool(client, 'stata_manage_graphs', primaryArgs);
+            return this._graphResponseToArtifact(primary, name, options.baseDir);
         });
     }
 
@@ -833,7 +819,6 @@ class StataMcpClient {
     async _refreshToolList(client) {
         if (!client || typeof client.listTools !== 'function') {
             this._availableTools = new Set();
-            this._toolMapping = new Map();
             return;
         }
 
@@ -842,22 +827,6 @@ class StataMcpClient {
             const tools = Array.isArray(res?.tools) ? res.tools : [];
             const names = tools.map(t => t?.name).filter(Boolean);
             this._availableTools = new Set(names);
-            this._toolMapping = new Map();
-
-            // Populate mapping for common tools
-            for (const fullName of names) {
-                // Handle prefixes like mcp_mcp_stata_run_command -> run_command
-                const shortName = fullName.split('_').filter(part => !['mcp', 'stata'].includes(part.toLowerCase())).join('_');
-                if (shortName && !this._toolMapping.has(shortName)) {
-                    this._toolMapping.set(shortName, fullName);
-                }
-                // Also handle direct suffix matches
-                const suffixMatch = ['run_command_background', 'run_do_file_background', 'get_ui_channel', 'break_session', 'stop_session', 'describe', 'codebook', 'get_data', 'get_variable_list', 'list_graphs', 'fetch_graph', 'export_all_graphs']
-                    .find(s => fullName.endsWith(s));
-                if (suffixMatch && !this._toolMapping.has(suffixMatch)) {
-                    this._toolMapping.set(suffixMatch, fullName);
-                }
-            }
 
             if (names.length) {
                 this._log(`[mcp-stata] available tools: ${names.join(', ')}`);
@@ -870,21 +839,18 @@ class StataMcpClient {
         } catch (err) {
             this._captureMcpError(err);
             this._availableTools = new Set();
-            this._toolMapping = new Map();
             const context = this._formatRecentStderr();
             this._log(`[mcp-stata] listTools failed: ${err?.message || err}${context}`);
         }
     }
 
     _resolveToolName(name) {
-        if (this._availableTools?.has(name)) return name;
-        if (this._toolMapping?.has(name)) return this._toolMapping.get(name);
         return name;
     }
 
     async _callTool(client, name, args, callOptions = {}) {
         const toolName = name;
-        const resolvedName = this._resolveToolName(toolName);
+        let resolvedName = this._resolveToolName(toolName);
         if (resolvedName === 'read_log') {
             this._log('[mcp-stata] read_log tool call blocked: local file access only');
             throw new Error('read_log tool call disabled; local file access only');
@@ -898,6 +864,7 @@ class StataMcpClient {
                 if (!this._availableTools?.has(resolvedName)) {
                     await this._ensureLatestServerForMissingTool(toolName);
                     activeClient = await this._ensureClient();
+                    resolvedName = this._resolveToolName(toolName);
                     if (!this._availableTools?.has(resolvedName)) {
                         throw new Error(this._formatMissingToolError(toolName));
                     }
@@ -963,10 +930,9 @@ class StataMcpClient {
 
     _requiredToolNames() {
         return new Set([
-            'run_command_background',
-            'run_do_file_background',
-            'get_ui_channel',
-            'break_session'
+            'stata_run',
+            'stata_manage_session',
+            'stata_control'
         ]);
     }
 
@@ -1409,7 +1375,7 @@ class StataMcpClient {
     async _breakSession(client, sessionId = 'default') {
         if (!client) return;
         try {
-            await this._callTool(client, 'break_session', { session_id: sessionId });
+            await this._callTool(client, 'stata_control', { action: 'break', id: sessionId });
         } catch (err) {
             throw err;
         }
@@ -1497,23 +1463,15 @@ class StataMcpClient {
         const isMetadata = [
             'connect',
             'view_data',
-            'get_ui_channel',
-            'get_variable_list',
-            'get_data',
-            'describe',
-            'codebook',
-            'list_graphs',
-            'export_graph',
-            'export_all_graphs',
-            'export_graphs_all',
-            'get_task_status',
-            'get_task_result',
-            'get_help',
-            'get_stored_results',
-            'read_log',
-            'find_in_log',
-            'break_session',
-            'stop_session'
+            'stata_inspect_data',
+            'stata_manage_graphs',
+            'stata_read_log',
+            'stata_manage_session',
+            'stata_task_status',
+            'stata_control',
+            'stata_load_data',
+            'stata_inspect_results',
+            'stata_get_help'
         ].includes(label);
 
         if (!isMetadata && !config.get('enableExecuteTimeout', false)) {
@@ -2020,8 +1978,8 @@ class StataMcpClient {
         try {
             let response;
             let lastError = null;
-            response = await this._callTool(client, 'export_graphs_all', {});
-            this._log(`[mcp-stata graphs] export_graphs_all response: ${this._stringifySafe(response)}`);
+            response = await this._callTool(client, 'stata_manage_graphs', { action: 'export_all' });
+            this._log(`[mcp-stata graphs] export_all response: ${this._stringifySafe(response)}`);
 
             if (!response) {
                 if (lastError) throw lastError;
@@ -2150,13 +2108,7 @@ class StataMcpClient {
 
 
     async _exportGraphPreferred(client, name) {
-        // Prefer PDF export for durable artifacts; fall back to default.
-        try {
-            return await this._callTool(client, 'export_graph', { graph_name: name, format: 'pdf' });
-        } catch (err) {
-            this._log(`[mcp-stata] export_graph (pdf) failed for "${name}", falling back to default format: ${err?.message || err}`);
-            return await this._callTool(client, 'export_graph', { graph_name: name });
-        }
+        return await this._callTool(client, 'stata_manage_graphs', { action: 'export', graph_name: name, format: 'pdf' });
     }
 
     _firstGraphs(candidate) {

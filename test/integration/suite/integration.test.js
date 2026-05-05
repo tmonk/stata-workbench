@@ -96,7 +96,7 @@ describe('McpClient integration (VS Code host)', () => {
         const result = await client.runSelection('display "no-poll"', { normalizeResult: true, includeGraphs: false });
         expect(result.success).toBe(true);
         const combined = logLines.join('\n');
-        expect(combined).not.toContain('get_task_status');
+        expect(combined).not.toContain('stata_task_status');
         expect(combined).not.toContain('get_task_result');
     });
 

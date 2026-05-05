@@ -323,7 +323,7 @@ describe('mcp-client', () => {
 
                 expect(enqueueSpy.calledOnce).toBe(true);
                 const args = enqueueSpy.firstCall.args;
-                expect(args[0]).toEqual('run_command');
+                expect(args[0]).toEqual('stata_run');
                 expect(args[5]).toEqual(true); // collectArtifacts flag
             });
         });
@@ -335,7 +335,8 @@ describe('mcp-client', () => {
 
                 const callToolStub = client._callTool;
                 callToolStub.callsFake(async (c, name, args) => {
-                    expect(name).toEqual('export_graph');
+                    expect(name).toEqual('stata_manage_graphs');
+                    expect(args.action).toEqual('export');
                     expect(args.graph_name).toEqual('g1');
                     expect(args.format).not.toBeDefined();
                     return { content: [{ type: 'text', text: '/tmp/g1.pdf' }] };
@@ -347,7 +348,7 @@ describe('mcp-client', () => {
                 expect(result).toBe(taskResult);
                 expect(enqueueSpy.calledOnce).toBe(true);
                 const [label, options] = enqueueSpy.firstCall.args;
-                expect(label).toEqual('fetch_graph');
+                expect(label).toEqual('stata_manage_graphs');
                 expect(options).toEqual({});
             });
         });
@@ -355,7 +356,7 @@ describe('mcp-client', () => {
         describe('getVariableList', () => {
             it('enqueues get_variable_list and returns normalized list', async () => {
                 const enqueueStub = sinon.stub(client, '_enqueue').callsFake(async (label, options, task) => {
-                    expect(label).toEqual('get_variable_list');
+                    expect(label).toEqual('stata_inspect_data');
                     expect(options).toEqual({});
                     const normalized = await task();
                     return normalized;
@@ -390,14 +391,14 @@ describe('mcp-client', () => {
         describe('getUiChannel', () => {
             it('enqueues get_ui_channel and returns parsed result', async () => {
                 const enqueueStub = sinon.stub(client, '_enqueue').callsFake(async (label, options, task) => {
-                    expect(label).toEqual('get_ui_channel');
+                    expect(label).toEqual('stata_manage_session');
                     expect(options).toEqual({});
                     const result = await task();
                     return result;
                 });
 
                 client._callTool.callsFake(async (c, name) => {
-                    expect(name).toEqual('get_ui_channel');
+                    expect(name).toEqual('stata_manage_session');
                     return { baseUrl: 'http://localhost:1234', token: 'xyz' };
                 });
 
@@ -428,7 +429,7 @@ describe('mcp-client', () => {
 
                 expect(enqueueStub.calledOnce).toBe(true);
                 const [label, rest, , meta, normalizeFlag, collectFlag] = enqueueStub.firstCall.args;
-                expect(label).toEqual('run_file');
+                expect(label).toEqual('stata_run');
                 expect('cancellationToken' in rest).toBeTruthy();
                 expect(normalizeFlag).toEqual(false);
                 expect(collectFlag).toEqual(false);
@@ -438,9 +439,10 @@ describe('mcp-client', () => {
                 expect(meta.filePath).toEqual('/tmp/project/script.do');
                 expect(meta.command).toEqual('do "/tmp/project/script.do"');
 
-                expect(result.taskResult.name).toEqual('run_do_file_background');
+                expect(result.taskResult.name).toEqual('stata_run');
                 expect(result.taskResult.args.cwd).toEqual(expectedCwd);
                 expect(result.taskResult.args.path).toEqual('/tmp/project/script.do');
+                expect(result.taskResult.args.is_file).toBe(true);
 
                 enqueueStub.restore();
                 setWorkspaceFolders(vscode, originalFolders);
@@ -480,11 +482,12 @@ describe('mcp-client', () => {
                 const result = await client.runSelection('display "hi"', { cwd: '/tmp/project', normalizeResult: false, includeGraphs: false });
 
                 expect(enqueueStub.calledOnce).toBe(true);
-                expect(result.label).toEqual('run_selection');
+                expect(result.label).toEqual('stata_run');
                 expect(result.meta.cwd).toEqual('/tmp/project');
-                expect(result.taskResult.name).toEqual('run_command_background');
+                expect(result.taskResult.name).toEqual('stata_run');
                 expect(result.taskResult.args.cwd).toEqual('/tmp/project');
                 expect(result.taskResult.args.code).toEqual('display "hi"');
+                expect(result.taskResult.args.background).toBe(true);
 
                 enqueueStub.restore();
             });
@@ -497,9 +500,9 @@ describe('mcp-client', () => {
                 const requestStub = sinon.stub().resolves({ ok: true });
                 const callToolStub = sinon.stub().resolves({});
                 const clientMock = { request: requestStub, callTool: callToolStub };
-                client._availableTools = new Set(['run_command']);
+                client._availableTools = new Set(['stata_run']);
 
-                await client._callTool(clientMock, 'run_command', { code: 'sleep 10' }, { progressToken: 'p_tok', signal: abort.signal });
+                await client._callTool(clientMock, 'stata_run', { code: 'sleep 10' }, { progressToken: 'p_tok', signal: abort.signal });
 
                 expect(requestStub.calledOnce).toBe(true);
                 const [reqPayload, , options] = requestStub.firstCall.args;
@@ -515,11 +518,11 @@ describe('mcp-client', () => {
                 const callToolStub = sinon.stub().rejects(abortErr);
                 const emitSpy = sinon.spy(client._statusEmitter, 'emit');
                 const clientMock = { callTool: callToolStub };
-                client._availableTools = new Set(['run_command']);
+                client._availableTools = new Set(['stata_run']);
 
                 let thrown = null;
                 try {
-                    await client._callTool(clientMock, 'run_command', { code: 'sleep 10' });
+                    await client._callTool(clientMock, 'stata_run', { code: 'sleep 10' });
                 } catch (err) {
                     thrown = err;
                 }
@@ -626,7 +629,7 @@ describe('mcp-client', () => {
 
                 // Stub _callTool for background kickoff, result, and read_log.
                 client._callTool = sinon.stub().callsFake(async (_client, name, args) => {
-                    if (name === 'run_command_background') {
+                    if (name === 'stata_run') {
                         return {
                             structuredContent: {
                                 result: JSON.stringify({
@@ -643,7 +646,7 @@ describe('mcp-client', () => {
                             content: [{ type: 'text', text: '' }]
                         };
                     }
-                    if (name === 'get_task_result') {
+                    if (name === 'stata_task_status') {
                         return {
                             structuredContent: {
                                 result: JSON.stringify({
@@ -659,7 +662,7 @@ describe('mcp-client', () => {
                             content: [{ type: 'text', text: '' }]
                         };
                     }
-                    if (name === 'read_log') {
+                    if (name === 'stata_read_log') {
                         // Return one chunk then empty.
                         const nextOffset = (args.offset || 0) === 0 ? 3 : 3;
                         const data = (args.offset || 0) === 0 ? 'abc\n' : '';
@@ -699,8 +702,9 @@ describe('mcp-client', () => {
                 client._delay = sinon.stub().resolves();
 
                 // run_command_background returns task_id but NO log_path (help early exit).
+                // stata_run returns task_id but NO log_path (help early exit).
                 client._callTool = sinon.stub().callsFake(async (_client, name) => {
-                    if (name === 'run_command_background') {
+                    if (name === 'stata_run') {
                         return {
                             content: [{ type: 'text', text: JSON.stringify({
                                 task_id: TASK_ID,
@@ -1117,12 +1121,12 @@ describe('mcp-client', () => {
         describe('listGraphs', () => {
             it('should resolve artifacts with client access', async () => {
                 // Mock list_graphs to return simple list of names
-                client._callTool.withArgs(sinon.match.any, 'list_graphs', sinon.match.any)
+                client._callTool.withArgs(sinon.match.any, 'stata_manage_graphs', sinon.match.has('action', 'list'))
                     .resolves({ graphs: ['g1'] });
 
                 // Mock export behavior for "g1"
                 client._exportGraphPreferred = sinon.stub().resolves({ content: [{ type: 'text', text: '/tmp/g1.pdf' }] });
-                client._callTool.withArgs(sinon.match.any, 'export_graph', sinon.match.has('format', 'png'))
+                client._callTool.withArgs(sinon.match.any, 'stata_manage_graphs', sinon.match.has('action', 'export'))
                     .resolves({ content: [{ type: 'text', text: '/tmp/g1.png' }] });
 
 
@@ -1148,12 +1152,12 @@ describe('mcp-client', () => {
                     ]
                 };
 
-                client._callTool.withArgs(sinon.match.any, 'list_graphs', sinon.match.any)
+                client._callTool.withArgs(sinon.match.any, 'stata_manage_graphs', sinon.match.has('action', 'list'))
                     .resolves(wrappedResponse);
 
                 // Mock export for both graphs
                 client._exportGraphPreferred = sinon.stub().callsFake(async (_c, name) => ({ content: [{ type: 'text', text: `/tmp/${name}.pdf` }] }));
-                client._callTool.withArgs(sinon.match.any, 'export_graph', sinon.match.has('format', 'png'))
+                client._callTool.withArgs(sinon.match.any, 'stata_manage_graphs', sinon.match.has('action', 'export'))
                     .callsFake(async (_c, _name, args) => ({ content: [{ type: 'text', text: `/tmp/${args.graph_name}.png` }] }));
 
                 const result = await client.listGraphs({ baseDir: '/tmp' });
@@ -1174,12 +1178,12 @@ describe('mcp-client', () => {
                     }]
                 };
 
-                client._callTool.withArgs(sinon.match.any, 'list_graphs', sinon.match.any)
+                client._callTool.withArgs(sinon.match.any, 'stata_manage_graphs', sinon.match.has('action', 'list'))
                     .resolves(wrappedResponse);
 
                 // Mock export
                 client._exportGraphPreferred = sinon.stub().resolves({ content: [{ type: 'text', text: '/tmp/g_wrapped.pdf' }] });
-                client._callTool.withArgs(sinon.match.any, 'export_graph', sinon.match.has('format', 'png'))
+                client._callTool.withArgs(sinon.match.any, 'stata_manage_graphs', sinon.match.has('action', 'export'))
                     .resolves({ content: [{ type: 'text', text: '/tmp/g_wrapped.png' }] });
 
 

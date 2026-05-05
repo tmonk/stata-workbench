@@ -22,7 +22,7 @@ describe("McpClient Break Session", () => {
         vscode.workspace.getConfiguration = () => ({
             get: (_key, def) => def
         });
-        client._availableTools = new Set(['run_command_background', 'break_session']);
+        client._availableTools = new Set(['stata_run', 'stata_manage_session', 'stata_control']);
         return client;
     };
 
@@ -45,7 +45,7 @@ describe("McpClient Break Session", () => {
         const mockClient = {
             type: 'standard',
             callTool: sinon.stub().callsFake(async ({ name }) => {
-                if (name.includes('run_command_background')) {
+                if (name.includes('stata_run')) {
                     return { task_id: 'task-long-running', log_path: '/tmp/stata.log' };
                 }
                 return {};
@@ -89,7 +89,7 @@ describe("McpClient Break Session", () => {
         expect(cancelled).toBe(true);
 
         // Verify break_session tool was called on the mock client
-        const breakCalls = mockClient.callTool.getCalls().filter(c => c.args[0].name.includes('break_session'));
+        const breakCalls = mockClient.callTool.getCalls().filter(c => c.args[0].name.includes('stata_control'));
         expect(breakCalls.length).toBeGreaterThan(0);
     });
 
@@ -102,15 +102,15 @@ describe("McpClient Break Session", () => {
         client._callTool = callToolStub;
 
         // Long running task details
-        callToolStub.withArgs(sinon.match.any, 'run_command_background', sinon.match({ code: sinon.match(/forvalues/) }))
+        callToolStub.withArgs(sinon.match.any, 'stata_run', sinon.match({ code: sinon.match(/forvalues/) }))
             .resolves({ task_id: 'task-1', log_path: '/tmp/1.log' });
 
         // Second task details
-        callToolStub.withArgs(sinon.match.any, 'run_command_background', sinon.match({ code: 'di "After Break"' }))
+        callToolStub.withArgs(sinon.match.any, 'stata_run', sinon.match({ code: 'di "After Break"' }))
             .resolves({ rc: 0, stdout: 'After Break\n' });
 
         // break_session takes some time
-        callToolStub.withArgs(sinon.match.any, 'break_session', sinon.match.any).callsFake(async () => {
+        callToolStub.withArgs(sinon.match.any, 'stata_control', sinon.match.any).callsFake(async () => {
             await new Promise(r => setTimeout(r, 10));
             return {};
         });
