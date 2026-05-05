@@ -1,3 +1,11 @@
+## [0.23.2](https://github.com/tmonk/stata-workbench/compare/v0.23.1...v0.23.2) (2026-05-05)
+
+
+### Bug Fixes
+
+* Remove tool-name mapping and enforce Arrow table ([bb70fd1](https://github.com/tmonk/stata-workbench/commit/bb70fd1485b51ce5f1fcca6cafb15fc735ee1723))
+* Update mcp-stata submodule to ae19cb48 ([6bdf835](https://github.com/tmonk/stata-workbench/commit/6bdf835701f40d0c24d04469f727aaf1399590f3))
+
 ## [0.23.1](https://github.com/tmonk/stata-workbench/compare/v0.23.0...v0.23.1) (2026-05-05)
 
 
