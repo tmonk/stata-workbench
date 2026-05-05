@@ -20,3 +20,6 @@ mcp-stata/
 .env.sentry-build-plugin
 .envrc
 bin/*
+test_full_output.txt
+test_results.json
+test_results.xml

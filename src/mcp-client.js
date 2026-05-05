@@ -157,7 +157,7 @@ class StataMcpClient {
             }
 
             const result = await this._withActiveRun(runState, async () => {
-                const kickoff = await this._callTool(client, 'stata_run', { ...args, background: true }, { progressToken, signal: cts.abortController.signal });
+                const kickoff = await this._callTool(client, 'stata_run', { ...args, background: true, strip_smcl: false }, { progressToken, signal: cts.abortController.signal });
                 return this._awaitBackgroundResult(client, runState, kickoff, cts);
             });
             if (!runState.logPath) {
@@ -224,7 +224,7 @@ class StataMcpClient {
             }
 
             const result = await this._withActiveRun(runState, async () => {
-                const kickoff = await this._callTool(client, 'stata_run', { ...args, background: true, is_file: true }, { progressToken, signal: cts.abortController.signal });
+                const kickoff = await this._callTool(client, 'stata_run', { ...args, background: true, is_file: true, strip_smcl: false }, { progressToken, signal: cts.abortController.signal });
                 return this._awaitBackgroundResult(client, runState, kickoff, cts);
             });
             if (!runState.logPath) {
@@ -277,7 +277,7 @@ class StataMcpClient {
             }
 
             const result = await this._withActiveRun(runState, async () => {
-                const kickoff = await this._callTool(client, 'stata_run', { ...args, background: true }, { progressToken, signal: cts.abortController.signal });
+                const kickoff = await this._callTool(client, 'stata_run', { ...args, background: true, strip_smcl: false }, { progressToken, signal: cts.abortController.signal });
                 return this._awaitBackgroundResult(client, runState, kickoff, cts);
             });
             if (!runState.logPath) {
