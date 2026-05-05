@@ -1,3 +1,7 @@
+## <small>0.24.1 (2026-05-05)</small>
+
+* fix(ci): disable sentry upload in ci checks ([aa382b4](https://github.com/tmonk/stata-workbench/commit/aa382b4))
+
 ## 0.24.0 (2026-05-05)
 
 * feat(ci): harden release pipeline and checks ([3683ca9](https://github.com/tmonk/stata-workbench/commit/3683ca9))
