@@ -42,11 +42,11 @@ describe('McpClient Queue and Cancellation', () => {
         const client = new McpClient();
         client._log = () => {};
         client._ensureClient = sinon.stub().resolves(new ClientMock());
-        client._availableTools = new Set(['run_command_background', 'break_session']);
+        client._availableTools = new Set(['stata_run', 'stata_manage_session', 'stata_control']);
         
-        // Default mock for run_command_background
+        // Default mock for stata_run
         client._callTool = sinon.stub().callsFake(async (c, name, args) => {
-            if (name === 'run_command_background') {
+            if (name === 'stata_run') {
                 return {
                     task_id: 'task-' + Math.random(),
                     log_path: '/tmp/test.log'
@@ -158,7 +158,7 @@ describe('McpClient Queue and Cancellation', () => {
             const firstPromise = new Promise(r => resolveFirst = r);
             
             client._callTool = sinon.stub().callsFake(async (c, name) => {
-                if (name === 'run_command_background') {
+                if (name === 'stata_run') {
                     return { task_id: 'active-task' };
                 }
                 return {};
