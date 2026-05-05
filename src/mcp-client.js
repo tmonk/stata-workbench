@@ -304,7 +304,7 @@ class StataMcpClient {
 
     async viewData(start = 0, count = 50, options = {}) {
         return this._enqueue('stata_inspect_data', options, async (client) => {
-            const response = await this._callTool(client, 'stata_inspect_data', { action: 'get', start, count });
+            const response = await this._callTool(client, 'stata_inspect_data', { action: 'get', start, count, strip_smcl: false });
             return this._parseJson(response);
         });
     }
@@ -319,7 +319,7 @@ class StataMcpClient {
 
     async getVariableList(options = {}) {
         return this._enqueue('stata_inspect_data', options, async (client) => {
-            const response = await this._callTool(client, 'stata_inspect_data', { action: 'list' });
+            const response = await this._callTool(client, 'stata_inspect_data', { action: 'list', strip_smcl: false });
             return this._normalizeVariableList(response);
         });
     }
