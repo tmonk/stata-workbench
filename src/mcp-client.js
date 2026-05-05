@@ -62,7 +62,6 @@ class StataMcpClient {
         this._clientVersion = pkg?.version || 'dev';
         this._onTaskDone = null;
         this._availableTools = new Set();
-        this._toolMapping = new Map();
         this._missingRequiredTools = [];
         this._forceLatestServer = false;
         this._forceLatestAttempted = false;
@@ -345,25 +344,12 @@ class StataMcpClient {
 
     async fetchGraph(name, options = {}) {
         return this._enqueue('stata_manage_graphs', options, async (client) => {
-            // Respect requested format; default to server default (often SVG) unless format is provided.
             const preferredFormat = options.format || null;
             const baseArgs = { action: 'export', graph_name: name };
             const primaryArgs = preferredFormat ? { ...baseArgs, format: preferredFormat } : baseArgs;
 
             const primary = await this._callTool(client, 'stata_manage_graphs', primaryArgs);
-            let artifact = this._graphResponseToArtifact(primary, name, options.baseDir);
-
-            // If the server returned a non-PDF artifact (e.g., SVG) and we need PDF, try again forcing PDF.
-            const hasPdfPath = artifact?.path && /\.pdf$/i.test(artifact.path);
-            if (preferredFormat === 'pdf' && !hasPdfPath) {
-                const fallback = await this._callTool(client, 'stata_manage_graphs', { ...baseArgs, format: 'pdf' });
-                const fallbackArtifact = this._graphResponseToArtifact(fallback, name, options.baseDir);
-                if (fallbackArtifact && (fallbackArtifact.path && /\.pdf$/i.test(fallbackArtifact.path))) {
-                    artifact = fallbackArtifact;
-                }
-            }
-
-            return artifact;
+            return this._graphResponseToArtifact(primary, name, options.baseDir);
         });
     }
 
@@ -833,7 +819,6 @@ class StataMcpClient {
     async _refreshToolList(client) {
         if (!client || typeof client.listTools !== 'function') {
             this._availableTools = new Set();
-            this._toolMapping = new Map();
             return;
         }
 
@@ -842,22 +827,6 @@ class StataMcpClient {
             const tools = Array.isArray(res?.tools) ? res.tools : [];
             const names = tools.map(t => t?.name).filter(Boolean);
             this._availableTools = new Set(names);
-            this._toolMapping = new Map();
-
-            // Populate mapping for common tools
-            for (const fullName of names) {
-                // Handle prefixes like mcp_mcp_stata_run_command -> run_command
-                const shortName = fullName.split('_').filter(part => !['mcp', 'stata'].includes(part.toLowerCase())).join('_');
-                if (shortName && !this._toolMapping.has(shortName)) {
-                    this._toolMapping.set(shortName, fullName);
-                }
-                // Also handle direct suffix matches
-                const suffixMatch = ['stata_run', 'stata_inspect_data', 'stata_manage_graphs', 'stata_read_log', 'stata_manage_session', 'stata_task_status', 'stata_control', 'stata_load_data', 'stata_inspect_results', 'stata_get_help']
-                    .find(s => fullName.endsWith(s));
-                if (suffixMatch && !this._toolMapping.has(suffixMatch)) {
-                    this._toolMapping.set(suffixMatch, fullName);
-                }
-            }
 
             if (names.length) {
                 this._log(`[mcp-stata] available tools: ${names.join(', ')}`);
@@ -870,15 +839,12 @@ class StataMcpClient {
         } catch (err) {
             this._captureMcpError(err);
             this._availableTools = new Set();
-            this._toolMapping = new Map();
             const context = this._formatRecentStderr();
             this._log(`[mcp-stata] listTools failed: ${err?.message || err}${context}`);
         }
     }
 
     _resolveToolName(name) {
-        if (this._availableTools?.has(name)) return name;
-        if (this._toolMapping?.has(name)) return this._toolMapping.get(name);
         return name;
     }
 
@@ -2142,13 +2108,7 @@ class StataMcpClient {
 
 
     async _exportGraphPreferred(client, name) {
-        // Prefer PDF export for durable artifacts; fall back to default.
-        try {
-            return await this._callTool(client, 'stata_manage_graphs', { action: 'export', graph_name: name, format: 'pdf' });
-        } catch (err) {
-            this._log(`[mcp-stata] stata_manage_graphs (export:pdf) failed for "${name}", falling back to default format: ${err?.message || err}`);
-            return await this._callTool(client, 'stata_manage_graphs', { action: 'export', graph_name: name });
-        }
+        return await this._callTool(client, 'stata_manage_graphs', { action: 'export', graph_name: name, format: 'pdf' });
     }
 
     _firstGraphs(candidate) {
