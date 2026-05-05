@@ -1,3 +1,13 @@
+## [0.23.1](https://github.com/tmonk/stata-workbench/compare/v0.23.0...v0.23.1) (2026-05-05)
+
+
+### Bug Fixes
+
+* added Stata link ([7f39376](https://github.com/tmonk/stata-workbench/commit/7f39376c3ea0ec35ddb9f997597075b7bbf9f5ad))
+* Fix README Stata image URL ([e911688](https://github.com/tmonk/stata-workbench/commit/e911688d515d1b3cd8e16a1c53c34716e3546511))
+* stata image in readme ([be7b198](https://github.com/tmonk/stata-workbench/commit/be7b198439e3c43309c55d78eac5a6c60faaa5bc))
+* Stata logo location ([419c8aa](https://github.com/tmonk/stata-workbench/commit/419c8aac32fe35f93b1add645b7ad043502acede))
+
 # [0.23.0](https://github.com/tmonk/stata-workbench/compare/v0.22.3...v0.23.0) (2026-05-03)
 
 
