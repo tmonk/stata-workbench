@@ -1,3 +1,8 @@
+## <small>0.24.2 (2026-05-05)</small>
+
+* Merge branch 'main' of https://github.com/tmonk/stata-workbench ([9c39347](https://github.com/tmonk/stata-workbench/commit/9c39347))
+* fix: Do not strip SMCL in background Stata runs ([0507492](https://github.com/tmonk/stata-workbench/commit/0507492))
+
 ## <small>0.24.1 (2026-05-05)</small>
 
 * fix(ci): disable sentry upload in ci checks ([aa382b4](https://github.com/tmonk/stata-workbench/commit/aa382b4))
