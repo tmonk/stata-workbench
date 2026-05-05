@@ -1,3 +1,8 @@
+## <small>0.24.4 (2026-05-05)</small>
+
+* Merge branch 'main' of https://github.com/tmonk/stata-workbench ([26901a1](https://github.com/tmonk/stata-workbench/commit/26901a1))
+* fix: Pass baseDir through PDF download flow ([761fe82](https://github.com/tmonk/stata-workbench/commit/761fe82))
+
 ## <small>0.24.3 (2026-05-05)</small>
 
 * fix: Pass strip_smcl:false to stata_inspect_data ([c3fda25](https://github.com/tmonk/stata-workbench/commit/c3fda25))
