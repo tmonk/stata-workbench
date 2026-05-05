@@ -1,3 +1,7 @@
+## 0.24.0 (2026-05-05)
+
+* feat(ci): harden release pipeline and checks ([3683ca9](https://github.com/tmonk/stata-workbench/commit/3683ca9))
+
 ## [0.23.2](https://github.com/tmonk/stata-workbench/compare/v0.23.1...v0.23.2) (2026-05-05)
 
 
