@@ -80,17 +80,27 @@ Offline fallback:
 - Stata 17+ on macOS, Windows, or Linux.
 - **uv/uvx**: The extension includes bundled `uv` binaries for standard platforms. It will automatically use the system `uv` if available on your `PATH`, or fall back to the bundled version. No manual installation is required for most users.
 
-## Features & Commands
-- **Syntax highlighting** for Stata, Dyndoc Markdown, and Dyndoc LaTeX.
-- **Run Selection/Current Line** (`stata-workbench.runSelection`) → Executes the selected code or current line via MCP tool `run_command` with normalized output + graphs. Results appear in the terminal panel.
-- **Run Current File** (`stata-workbench.runFile`) → Runs the entire `.do` file via MCP tool `run_do_file`. Results appear in the terminal panel.
-- **Terminal panel**: Automatically opens when running code, displaying results with stdout/stderr, execution time, return codes, and graph artifacts. You can continue running additional Stata commands directly in the panel. Supports quick history navigation (PageUp/PageDown), Tab-based variable name completion, and clickable links to the full SMCL log. Matches Stata's behavior by providing a **Log tab** for viewing the full session history with efficient tail-loading for large files. Includes an **integrated search** within each card (click the search icon in the card header) with bidirectional highlights, match counts, and keyboard shortcuts (`Enter`/`Shift+Enter` for navigation, `Esc` to close).
-- **Data Browser** (`stata-workbench.viewData`): Live view of your data with filtering and sorting. Optimized for high performance (~20x faster with Apache Arrow support) and includes a custom variable selector for large datasets.
-- **Test MCP Server** (`stata-workbench.testMcpServer`) for quick smoke checks.
-- **Install MCP CLI helper** (`stata-workbench.installMcpCli`): Bootstraps uv locally when it is missing.
-- **Status bar + cancel** (`stata-workbench.cancelRequest`): Live request states with one-click cancellation routed through the MCP client.
-- **Auto-manage MCP configs**: Writes the user-level `mcp.json` in your editor's user data so AI agents reuse the same `uvx --refresh --refresh-package mcp-stata --from mcp-stata@latest mcp-stata` wiring.
-- **Durable logs**: All run results are logged to the `Stata Workbench` output channel for reference.
+## Features
+
+Stata Workbench is a unified **agentic toolkit** for Stata development, providing a rich IDE experience with deep AI integration:
+
+- **Integrated Terminal**: Rich UI for tracking Stata output with clickable links, integrated search, and persistent history. Provides a **Log tab** for viewing the full session history with efficient tail-loading.
+- **Data Browser** (`stata-workbench.viewData`): High-performance view of millions of rows (~20x faster with Apache Arrow) with live filtering and sorting.
+- **Advanced MCP Tools**: Full suite of tools for AI agents (Run, Inspect, Export Graphs, State Diff).
+- **Run Selection/Current Line** (`stata-workbench.runSelection`): Executes the selected code or current line via MCP tool `run_command` with normalized output and graphs.
+- **Run Current File** (`stata-workbench.runFile`): Runs the entire `.do` file via MCP tool `run_do_file`.
+- **Environment Detection** (`stata_manage_session` action="detect"): Returns Stata version, flavor, and OS metadata.
+- **Code Linting** (`stata_inspect_data` action="lint"): Static analysis of `.do` and `.ado` files to identify style violations and potential errors.
+- **Modern Stata Skill**: A specialized knowledge base for agents to use frames, `gtools`, and other modern Stata features instead of legacy anti-patterns.
+- **Setup Toolkit** (`scripts/setup_toolkit.py`): Automated registration for Claude Desktop, Codex, VS Code, and Cursor in one command.
+- **Auto-manage MCP configs**: Synchronizes your host MCP settings (`mcp.json`) across your favorite AI editors.
+- **Status Bar + Cancel** (`stata-workbench.cancelRequest`): Live request states with one-click cancellation.
+- **Test MCP Server** (`stata-workbench.testMcpServer`): Quick smoke checks to verify your Stata connection.
+- **Syntax Highlighting**: Full support for `.do`, `.ado`, `.mata`, Dyndoc Markdown, and Dyndoc LaTeX.
+- **Install MCP CLI helper** (`stata-workbench.installMcpCli`): Bootstraps `uv` locally when it is missing from the environment.
+- **Durable logs**: All run results are logged to the `Stata Workbench` output channel for persistent reference.
+
+For a detailed breakdown of all capabilities, see [FEATURES.md](FEATURES.md).
 
 ## Settings
 - `stataMcp.requestTimeoutMs` (default `100000`): timeout for MCP requests.
@@ -105,6 +115,8 @@ Offline fallback:
 - `stataMcp.maxOutputLines` (default `0`): limit Stata output to N lines (0 = unlimited). Useful for reducing token usage with AI agents.
 - `stataMcp.runFileBehavior` (default `runDirtyFile`): choose whether 'Run File' should run the current editor content (including unsaved changes) or the version saved on disk.
 - `stataMcp.defaultVariableLimit` (default `100`): default number of variables to select when opening the Data Browser (0 = all). Useful for huge datasets.
+
+
 
 
 ## AI Assistant Integration
