@@ -3,7 +3,7 @@
 <img src="https://raw.githubusercontent.com/tmonk/stata-workbench/refs/heads/main/img/icon.png" width="200">
 </p>
 
-A VS Code compatible extension (Cursor, Windsurf, Antigravity etc.) that allows Stata code to be run directly from the editor. Enables AI agents to directly interact with Stata. Powered by [mcp-stata](https://github.com/tmonk/mcp-stata). Featured in <a href="https://www.stata.com/stata-news/news41-2/community-corner-ai-tools/"><img src="https://raw.githubusercontent.com/tmonk/stata-workbench/refs/heads/main/img/stata.png"  height="40" alt="Stata" style="vertical-align:middle; margin-top: -5px;"/> News</a>.
+**Stata Workbench** is unified agentic toolkit for Stata development. The toolkit gives AI agents native control over Stata - run commands, inspect variables, export graphs, and build more quickly and reliably than native Stata alone. Built as a VS Code extension (Cursor, Windsurf, Antigravity), so your agent works inside your editor. Powered by [mcp-stata](https://github.com/tmonk/mcp-stata). Featured in <a href="https://www.stata.com/stata-news/news41-2/community-corner-ai-tools/"><img src="https://raw.githubusercontent.com/tmonk/stata-workbench/refs/heads/main/img/stata.png"  height="10px" alt="Stata" style="vertical-align:middle; margin-top: -5px;"/> News</a>.
 
 Built by [Thomas Monk](https://tdmonk.com), London School of Economics.
 
