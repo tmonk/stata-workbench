@@ -19,6 +19,3 @@ Stata Workbench is a unified **Agentic Toolkit** for Stata development, providin
 - **Syntax Highlighting**: Full support for `.do`, `.ado`, `.mata`, Dyndoc Markdown, and Dyndoc LaTeX.
 - **Install MCP CLI helper** (`stata-workbench.installMcpCli`): Bootstraps `uv` locally when it is missing from the environment.
 - **Durable logs**: All run results are logged to the `Stata Workbench` output channel for persistent reference.
-
----
-*Logic adapted from World Bank DIME Analytics repkit (MIT Licensed) for the linting engine.*
