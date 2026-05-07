@@ -1,3 +1,10 @@
+## [1.0.2](https://github.com/tmonk/stata-workbench/compare/v1.0.1...v1.0.2) (2026-05-07)
+
+
+### Bug Fixes
+
+* Support ToolEnvelope nested task_id/log_path ([9896eea](https://github.com/tmonk/stata-workbench/commit/9896eeae08cb90e855d3aa6b37ee3db5dbe06b40))
+
 ## [1.0.1](https://github.com/tmonk/stata-workbench/compare/v1.0.0...v1.0.1) (2026-05-07)
 
 
