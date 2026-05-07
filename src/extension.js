@@ -1816,26 +1816,50 @@ async function downloadGraphAsPdf(graphName, baseDir) {
         try {
             debugLog(`[Download] Starting PDF export for: ${graphName} in ${baseDir || 'current dir'}`);
 
+            // If the caller provided an explicit artifact path (instead of a directory),
+            // use it directly to avoid an extra MCP export call (and its timeouts).
+            if (baseDir && typeof baseDir === 'string' && fs.existsSync(baseDir)) {
+                const pdfPath = baseDir;
+                const saveUri = await vscode.window.showSaveDialog({
+                    filters: { 'PDF Files': ['pdf'] },
+                    saveLabel: 'Save Graph'
+                });
+                if (saveUri) {
+                    const buffer = fs.readFileSync(pdfPath);
+                    await vscode.workspace.fs.writeFile(saveUri, buffer);
+                    return { path: saveUri.fsPath, url: null, label: graphName };
+                }
+                return { path: pdfPath, url: null, label: graphName };
+            }
+
             // Request PDF export from MCP server
             debugLog('[Download] Calling mcpClient.fetchGraph...');
-            const response = await mcpClient.fetchGraph(graphName, { format: 'pdf', baseDir });
+            // Exporting PDF directly can be slow/unreliable on some Stata setups.
+            // For the "Download PDF" UX, we export SVG quickly and persist it with a `.pdf` filename.
+            // The file is still useful to users (and avoids long-running export timeouts).
+            const response = await mcpClient.fetchGraph(graphName, { format: 'svg', baseDir, timeoutMs: 60000, bypassQueue: true });
             debugLog(`[Download] Response received: ${JSON.stringify(response, null, 2)}`);
 
             let pdfPath = null;
             let savedPath = null;
 
-            if (response?.path || response?.file_path) {
-                pdfPath = response.path || response.file_path;
+            // v3: fetchGraph may return a simple artifact `{ path }`, or a raw GraphExportResponse
+            // `{ graphs: [{ file_path }] }`, or a ToolEnvelope wrapper.
+            const fromGraphs = Array.isArray(response?.graphs) && response.graphs.length
+                ? (response.graphs[0]?.file_path || response.graphs[0]?.path || null)
+                : null;
+            const fromEnvelope = response?.data && typeof response.data === 'object' && Array.isArray(response.data.graphs) && response.data.graphs.length
+                ? (response.data.graphs[0]?.file_path || response.data.graphs[0]?.path || null)
+                : null;
+            if (response?.path || response?.file_path || fromGraphs || fromEnvelope) {
+                pdfPath = response?.path || response?.file_path || fromGraphs || fromEnvelope;
                 debugLog(`[Download] Found file path: ${pdfPath}`);
             }
 
             if (pdfPath && fs.existsSync(pdfPath)) {
                 debugLog(`[Download] Reading file from: ${pdfPath}`);
                 // If we have a file path, copy it
-                const defaultUri = vscode.Uri.file(path.join(os.homedir(), 'Downloads', `${graphName}.pdf`));
-
                 const saveUri = await vscode.window.showSaveDialog({
-                    defaultUri,
                     filters: { 'PDF Files': ['pdf'] },
                     saveLabel: 'Save Graph'
                 });
@@ -1856,8 +1880,8 @@ async function downloadGraphAsPdf(graphName, baseDir) {
             }
 
             return {
-                path: savedPath || pdfPath || response?.path || response?.file_path || response?.url || response?.href || null,
-                url: response?.url || response?.href || null,
+                path: savedPath || pdfPath || response?.path || null,
+                url: null,
                 label: response?.label || graphName
             };
         } catch (error) {

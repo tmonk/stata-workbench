@@ -193,7 +193,8 @@ describe('mcp-client', () => {
 
                 // Setup mock responses for exports
                 client._exportGraphPreferred = sinon.stub().callsFake(async (c, name) => {
-                    return { content: [{ type: 'text', text: `/tmp/${name}.pdf` }] };
+                    // v3: export returns a canonical file `path` (no legacy wrappers)
+                    return { path: `/tmp/${name}.pdf` };
                 });
 
                 // Configure the stubbed _callTool to return artifacts
@@ -303,10 +304,10 @@ describe('mcp-client', () => {
             });
 
             it('_parseArtifactLikeJson should handle flat objects', () => {
-                const input = JSON.stringify({ name: 'g2', url: 'https://example.com/image.png' });
+                const input = JSON.stringify({ name: 'g2', path: '/tmp/g2.png' });
                 const art = client._parseArtifactLikeJson(input);
                 expect(art.label).toEqual('g2');
-                expect(art.path).toEqual('https://example.com/image.png');
+                expect(art.path).toEqual('/tmp/g2.png');
             });
 
             it('_parseArtifactLikeJson should return null for invalid json', () => {
@@ -339,7 +340,7 @@ describe('mcp-client', () => {
                     expect(args.action).toEqual('export');
                     expect(args.graph_name).toEqual('g1');
                     expect(args.format).not.toBeDefined();
-                    return { content: [{ type: 'text', text: '/tmp/g1.pdf' }] };
+                    return { path: '/tmp/g1.pdf' };
                 });
                 client._graphResponseToArtifact = sinon.stub().returns(taskResult);
 
@@ -362,7 +363,7 @@ describe('mcp-client', () => {
                     return normalized;
                 });
 
-                client._callTool.callsFake(async () => ({ variables: [{ name: 'price', label: 'Price' }, { variable: 'mpg' }] }));
+                client._callTool.callsFake(async () => ({ vars: [{ name: 'price', label: 'Price' }, { variable: 'mpg' }] }));
 
                 const result = await client.getVariableList();
 
@@ -380,7 +381,7 @@ describe('mcp-client', () => {
                     { name: 'mpg', label: '' }
                 ]);
 
-                const objects = client._normalizeVariableList({ variables: [{ variable: 'weight', desc: 'Weight' }] });
+                const objects = client._normalizeVariableList({ vars: [{ variable: 'weight', desc: 'Weight' }] });
                 expect(objects).toEqual([{ name: 'weight', label: 'Weight' }]);
 
                 const nested = client._normalizeVariableList({ content: [{ text: JSON.stringify({ vars: [{ var: 'turn' }] }) }] });
@@ -631,51 +632,25 @@ describe('mcp-client', () => {
                 client._callTool = sinon.stub().callsFake(async (_client, name, args) => {
                     if (name === 'stata_run') {
                         return {
-                            structuredContent: {
-                                result: JSON.stringify({
-                                    command: args.code,
-                                    rc: 0,
-                                    stdout: '',
-                                    stderr: null,
-                                    log_path: '/tmp/mcp_stata_test.log',
-                                    task_id: 'task-abc',
-                                    success: true,
-                                    error: null
-                                })
-                            },
-                            content: [{ type: 'text', text: '' }]
+                            command: args.code,
+                            rc: 0,
+                            stdout: '',
+                            stderr: null,
+                            log_path: '/tmp/mcp_stata_test.log',
+                            task_id: 'task-abc',
+                            success: true,
+                            error: null
                         };
                     }
                     if (name === 'stata_task_status') {
                         return {
-                            structuredContent: {
-                                result: JSON.stringify({
-                                    command: args.code || 'display "HI"',
-                                    rc: 0,
-                                    stdout: '',
-                                    stderr: null,
-                                    log_path: '/tmp/mcp_stata_test.log',
-                                    success: true,
-                                    error: null
-                                })
-                            },
-                            content: [{ type: 'text', text: '' }]
-                        };
-                    }
-                    if (name === 'stata_read_log') {
-                        // Return one chunk then empty.
-                        const nextOffset = (args.offset || 0) === 0 ? 3 : 3;
-                        const data = (args.offset || 0) === 0 ? 'abc\n' : '';
-                        return {
-                            content: [{
-                                type: 'text',
-                                text: JSON.stringify({
-                                    path: args.path,
-                                    offset: args.offset || 0,
-                                    next_offset: nextOffset,
-                                    data
-                                })
-                            }]
+                            command: args.code || 'display "HI"',
+                            rc: 0,
+                            stdout: '',
+                            stderr: null,
+                            log_path: '/tmp/mcp_stata_test.log',
+                            success: true,
+                            error: null
                         };
                     }
                     return {};
@@ -826,11 +801,7 @@ describe('mcp-client', () => {
 
                 const kickoff = {
                     log_path: '/tmp/background.log',
-                    structuredContent: {
-                        log_path: '/tmp/background.log',
-                        task_id: 'task-xyz'
-                    },
-                    content: [{ type: 'text', text: '' }]
+                    task_id: 'task-xyz'
                 };
 
                 const result = await client._awaitBackgroundResult({}, runState, kickoff, { token: { onCancellationRequested: sinon.stub() } });
@@ -844,24 +815,15 @@ describe('mcp-client', () => {
                 });
             });
 
-            it('_extractLogPathFromResponse should strictly prioritize path over smcl_path', () => {
+            it('_extractLogPathFromResponse should strictly prioritize path over log_path', () => {
                 const response = {
                     path: '/tmp/real.log',
-                    smcl_path: '/tmp/wrong.smcl',
                     log_path: '/tmp/legacy.log'
                 };
                 expect(client._extractLogPathFromResponse(response)).toEqual('/tmp/real.log');
 
-                const structuredResponse = {
-                    structuredContent: {
-                        path: '/tmp/struct.log',
-                        smcl_path: '/tmp/struct.smcl'
-                    }
-                };
-                expect(client._extractLogPathFromResponse(structuredResponse)).toEqual('/tmp/struct.log');
-
                 const jsonResponse = {
-                    content: [{ type: 'text', text: JSON.stringify({ path: '/tmp/json.log', smcl_path: '/tmp/json.smcl' }) }]
+                    content: [{ type: 'text', text: JSON.stringify({ path: '/tmp/json.log', log_path: '/tmp/json-legacy.log' }) }]
                 };
                 expect(client._extractLogPathFromResponse(jsonResponse)).toEqual('/tmp/json.log');
             });
@@ -875,8 +837,7 @@ describe('mcp-client', () => {
                     params: {
                         data: {
                             event: 'log_path',
-                            path: '/tmp/real-path.log',
-                            smcl_path: '/tmp/shadow.smcl'
+                            path: '/tmp/real-path.log'
                         }
                     }
                 };
@@ -902,27 +863,6 @@ describe('mcp-client', () => {
 
                 expect(onLog.calledOnce).toBe(true);
                 expect(onLog.firstCall.args[0]).toContain('Some log line');
-            });
-
-            it('_onLoggingMessage should strictly prioritize path over smcl_path in object payload', async () => {
-                const run = { _lineBuffer: '', _appendLog: sinon.stub(), logPath: null };
-                client._activeRun = run;
-                client._ensureLogTail = sinon.stub().resolves();
-
-                const notification = {
-                    params: {
-                        data: {
-                            event: 'log_path',
-                            path: '/tmp/priority.log',
-                            smcl_path: '/tmp/ignore.smcl'
-                        }
-                    }
-                };
-
-                await client._onLoggingMessage({}, notification);
-
-                expect(client._ensureLogTail.calledOnce).toBe(true);
-                expect(client._ensureLogTail.firstCall.args[2]).toEqual('/tmp/priority.log');
             });
 
             it('_onLoggingMessage help_ready: pushes artifact and fires onGraphReady', async () => {
@@ -1005,7 +945,7 @@ describe('mcp-client', () => {
                 expect(onGraphReady.called).toBe(false);
             });
 
-            it('_onLoggingMessage help_ready: uses alternative field names (file_path, baseDir)', async () => {
+            it('_onLoggingMessage help_ready: ignores legacy field names (file_path, baseDir)', async () => {
                 const onGraphReady = sinon.stub();
                 const run = {
                     _lineBuffer: '', _appendLog: sinon.stub(), logPath: null,
@@ -1026,10 +966,8 @@ describe('mcp-client', () => {
 
                 await client._onLoggingMessage({}, notification);
 
-                expect(run._graphArtifacts.length).toBe(1);
-                const artifact = run._graphArtifacts[0];
-                expect(artifact.path).toBe('/tmp/help_xtset.md');
-                expect(artifact.baseDir).toBe('/tmp/alt');
+                expect(run._graphArtifacts.length).toBe(0);
+                expect(onGraphReady.called).toBe(false);
             });
 
             it('_onLoggingMessage graph_ready: still works normally (regression guard)', async () => {
@@ -1125,9 +1063,9 @@ describe('mcp-client', () => {
                     .resolves({ graphs: ['g1'] });
 
                 // Mock export behavior for "g1"
-                client._exportGraphPreferred = sinon.stub().resolves({ content: [{ type: 'text', text: '/tmp/g1.pdf' }] });
+                client._exportGraphPreferred = sinon.stub().resolves({ path: '/tmp/g1.pdf' });
                 client._callTool.withArgs(sinon.match.any, 'stata_manage_graphs', sinon.match.has('action', 'export'))
-                    .resolves({ content: [{ type: 'text', text: '/tmp/g1.png' }] });
+                    .resolves({ path: '/tmp/g1.png' });
 
 
                 const result = await client.listGraphs({ baseDir: '/tmp' });
@@ -1156,9 +1094,9 @@ describe('mcp-client', () => {
                     .resolves(wrappedResponse);
 
                 // Mock export for both graphs
-                client._exportGraphPreferred = sinon.stub().callsFake(async (_c, name) => ({ content: [{ type: 'text', text: `/tmp/${name}.pdf` }] }));
+                client._exportGraphPreferred = sinon.stub().callsFake(async (_c, name) => ({ path: `/tmp/${name}.pdf` }));
                 client._callTool.withArgs(sinon.match.any, 'stata_manage_graphs', sinon.match.has('action', 'export'))
-                    .callsFake(async (_c, _name, args) => ({ content: [{ type: 'text', text: `/tmp/${args.graph_name}.png` }] }));
+                    .callsFake(async (_c, _name, args) => ({ path: `/tmp/${args.graph_name}.png` }));
 
                 const result = await client.listGraphs({ baseDir: '/tmp' });
 
@@ -1182,9 +1120,9 @@ describe('mcp-client', () => {
                     .resolves(wrappedResponse);
 
                 // Mock export
-                client._exportGraphPreferred = sinon.stub().resolves({ content: [{ type: 'text', text: '/tmp/g_wrapped.pdf' }] });
+                client._exportGraphPreferred = sinon.stub().resolves({ path: '/tmp/g_wrapped.pdf' });
                 client._callTool.withArgs(sinon.match.any, 'stata_manage_graphs', sinon.match.has('action', 'export'))
-                    .resolves({ content: [{ type: 'text', text: '/tmp/g_wrapped.png' }] });
+                    .resolves({ path: '/tmp/g_wrapped.png' });
 
 
                 const result = await client.listGraphs({ baseDir: '/tmp' });
