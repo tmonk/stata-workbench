@@ -1,3 +1,15 @@
+# [1.0.0](https://github.com/tmonk/stata-workbench/compare/v0.24.5...v1.0.0) (2026-05-07)
+
+
+### Features
+
+* Handle v3 ToolEnvelope and canonical artifacts ([b0fb2f4](https://github.com/tmonk/stata-workbench/commit/b0fb2f4d2c6cc5d1ae1779fb35d9df720be8f8ce))
+
+
+### BREAKING CHANGES
+
+* Handle v3 ToolEnvelope and canonical artifacts
+
 ## <small>0.24.5 (2026-05-07)</small>
 
 * fix: Use error.details and copy graph artifacts ([15e9e4d](https://github.com/tmonk/stata-workbench/commit/15e9e4d))
