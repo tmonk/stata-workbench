@@ -172,6 +172,9 @@ class StataMcpClient {
                 result.streamedLog = true;
                 if (Array.isArray(runState._graphArtifacts) && runState._graphArtifacts.length) {
                     result.graphArtifacts = runState._graphArtifacts;
+                    if (!result.artifacts || (Array.isArray(result.artifacts) && result.artifacts.length === 0)) {
+                        result.artifacts = runState._graphArtifacts;
+                    }
                 }
             }
             runState._cancelSubscription?.dispose?.();
@@ -239,6 +242,9 @@ class StataMcpClient {
                 result.streamedLog = true;
                 if (Array.isArray(runState._graphArtifacts) && runState._graphArtifacts.length) {
                     result.graphArtifacts = runState._graphArtifacts;
+                    if (!result.artifacts || (Array.isArray(result.artifacts) && result.artifacts.length === 0)) {
+                        result.artifacts = runState._graphArtifacts;
+                    }
                 }
             }
             runState._cancelSubscription?.dispose?.();
@@ -292,6 +298,9 @@ class StataMcpClient {
                 result.streamedLog = true;
                 if (Array.isArray(runState._graphArtifacts) && runState._graphArtifacts.length) {
                     result.graphArtifacts = runState._graphArtifacts;
+                    if (!result.artifacts || (Array.isArray(result.artifacts) && result.artifacts.length === 0)) {
+                        result.artifacts = runState._graphArtifacts;
+                    }
                 }
             }
             runState._cancelSubscription?.dispose?.();
@@ -1735,6 +1744,8 @@ class StataMcpClient {
             parsed.stderr,
             payload.error?.stderr,
             parsed.error?.stderr,
+            payload.error?.details,
+            parsed.error?.details,
             payload.error?.snippet,
             parsed.error?.snippet,
             payload.error?.message,
@@ -1763,6 +1774,7 @@ class StataMcpClient {
             const err = payload.error || parsed.error;
             const parts = [];
             if (err?.message) parts.push(err.message);
+            if (err?.details) parts.push(err.details);
             if (err?.snippet) parts.push(err.snippet);
             if (!normalized.stderr && parts.length) normalized.stderr = parts.join('\n');
         }
@@ -2522,6 +2534,7 @@ class StataMcpClient {
 
         if (event === 'graph_ready') {
             const graph = parsed?.graph;
+            this._log(`[mcp-stata notification] graph_ready event for run ${run._runId || 'unknown'}, graph=${graph?.name}`);
             if (graph) {
                 const artifact = this._graphToArtifact(graph, run.baseDir, parsed);
                 if (artifact) {

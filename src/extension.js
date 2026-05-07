@@ -2231,7 +2231,7 @@ function presentStataError(context, payload) {
     const rc = payload?.rc ?? payload?.error?.rc;
     const message = payload?.error?.message || payload?.message || 'Stata reported an error';
     const command = payload?.command || payload?.error?.command;
-    const snippet = payload?.error?.snippet || payload?.stdout;
+    const snippet = payload?.error?.details || payload?.error?.snippet || payload?.stdout;
     const detailParts = [];
     if (command) detailParts.push(`cmd: ${command}`);
     if (typeof rc === 'number') detailParts.push(`rc=${rc}`);
@@ -2292,6 +2292,8 @@ function logRunToOutput(result, contextTitle) {
         outputChannel.appendLine(result.stdout);
     } else if (result.stderr) {
         outputChannel.appendLine(result.stderr);
+    } else if (result?.error?.details) {
+        outputChannel.appendLine(result.error.details);
     } else if (result?.error?.snippet) {
         outputChannel.appendLine(result.error.snippet);
     } else if (result?.error?.message) {
