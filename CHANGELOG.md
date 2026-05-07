@@ -1,3 +1,11 @@
+## <small>0.24.5 (2026-05-07)</small>
+
+* fix: Use error.details and copy graph artifacts ([15e9e4d](https://github.com/tmonk/stata-workbench/commit/15e9e4d))
+* docs: Add FEATURES.md, expand README, update submodule ([f3893eb](https://github.com/tmonk/stata-workbench/commit/f3893eb))
+* docs: remove redundant attribution note from FEATURES.md ([4ec6c84](https://github.com/tmonk/stata-workbench/commit/4ec6c84))
+* docs: update project description and formatting in README.md ([5fc2f33](https://github.com/tmonk/stata-workbench/commit/5fc2f33))
+* chore: update mcp-stata pointer ([5463f2e](https://github.com/tmonk/stata-workbench/commit/5463f2e))
+
 ## <small>0.24.4 (2026-05-05)</small>
 
 * Merge branch 'main' of https://github.com/tmonk/stata-workbench ([26901a1](https://github.com/tmonk/stata-workbench/commit/26901a1))
