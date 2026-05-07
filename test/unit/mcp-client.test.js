@@ -828,6 +828,137 @@ describe('mcp-client', () => {
                 expect(client._extractLogPathFromResponse(jsonResponse)).toEqual('/tmp/json.log');
             });
 
+            it('_extractTaskIdFromResponse extracts task_id from ToolEnvelope data field', () => {
+                // Real mcp-stata wraps task_id inside data.task_id in the ToolEnvelope
+                const envelope = {
+                    schema_version: '3.0.0',
+                    tool: 'stata_run',
+                    success: true,
+                    data: { task_id: 'abc123', status: 'started', log_path: '/tmp/test.log' },
+                    log: { path: '/tmp/test.log' }
+                };
+                const response = {
+                    content: [{ type: 'text', text: JSON.stringify(envelope) }]
+                };
+                expect(client._extractTaskIdFromResponse(response)).toEqual('abc123');
+            });
+
+            it('_extractTaskIdFromResponse still works with flat task_id at top level', () => {
+                // Backward compat: flat responses used in tests/stubs
+                const response = { task_id: 'flat-id', log_path: '/tmp/test.log' };
+                expect(client._extractTaskIdFromResponse(response)).toEqual('flat-id');
+
+                const jsonResponse = {
+                    content: [{ type: 'text', text: JSON.stringify({ task_id: 'json-id' }) }]
+                };
+                expect(client._extractTaskIdFromResponse(jsonResponse)).toEqual('json-id');
+            });
+
+            it('_extractLogPathFromResponse extracts log_path from ToolEnvelope data and log fields', () => {
+                const envelopeViaData = {
+                    schema_version: '3.0.0',
+                    tool: 'stata_run',
+                    success: true,
+                    data: { task_id: 'abc', status: 'started', log_path: '/tmp/from-data.log' }
+                };
+                const responseViaData = {
+                    content: [{ type: 'text', text: JSON.stringify(envelopeViaData) }]
+                };
+                expect(client._extractLogPathFromResponse(responseViaData)).toEqual('/tmp/from-data.log');
+
+                const envelopeViaLog = {
+                    schema_version: '3.0.0',
+                    tool: 'stata_run',
+                    success: true,
+                    data: { task_id: 'abc', status: 'started' },
+                    log: { path: '/tmp/from-log.log' }
+                };
+                const responseViaLog = {
+                    content: [{ type: 'text', text: JSON.stringify(envelopeViaLog) }]
+                };
+                expect(client._extractLogPathFromResponse(responseViaLog)).toEqual('/tmp/from-log.log');
+            });
+
+            it('runSelection with ToolEnvelope kickoff: graph_ready notification delivers graph without fallback sweep', async () => {
+                const TASK_ID = 'envelope-task-123';
+                const LOG_PATH = '/tmp/mcp_stata_envelope.log';
+
+                client._ensureClient = sinon.stub().resolves({});
+                client._delay = sinon.stub().resolves();
+                client._readLogSlice = sinon.stub().resolves({ data: '', next_offset: 0 });
+                const collectSpy = sinon.stub(client, '_collectGraphArtifacts').resolves([]);
+
+                // Real server sends a ToolEnvelope with task_id nested in data
+                client._callTool = sinon.stub().callsFake(async (_client, name) => {
+                    if (name === 'stata_run') {
+                        return {
+                            content: [{
+                                type: 'text',
+                                text: JSON.stringify({
+                                    schema_version: '3.0.0',
+                                    tool: 'stata_run',
+                                    success: true,
+                                    data: { task_id: TASK_ID, status: 'started', log_path: LOG_PATH },
+                                    log: { path: LOG_PATH }
+                                })
+                            }]
+                        };
+                    }
+                    return {};
+                });
+
+                const onGraphReady = sinon.stub();
+
+                const runSelectionPromise = client.runSelection('twoway scatter mpg price', {
+                    normalizeResult: true,
+                    includeGraphs: true,
+                    onGraphReady
+                });
+
+                // Allow _awaitBackgroundResult to register the run by taskId
+                await Promise.resolve();
+                await Promise.resolve();
+                await Promise.resolve();
+
+                // graph_ready arrives BEFORE task_done (as in real mcp-stata)
+                client._onLoggingMessage({}, {
+                    params: {
+                        data: JSON.stringify({
+                            event: 'graph_ready',
+                            task_id: TASK_ID,
+                            graph: { name: 'scatter1', file_path: '/tmp/scatter1.svg' }
+                        })
+                    }
+                });
+
+                await Promise.resolve();
+
+                // task_done resolves the run
+                client._onLoggingMessage({}, {
+                    params: {
+                        data: JSON.stringify({
+                            event: 'task_done',
+                            task_id: TASK_ID,
+                            status: 'done',
+                            log_path: LOG_PATH
+                        })
+                    }
+                });
+
+                const result = await runSelectionPromise;
+
+                // Graph from graph_ready notification must be in result
+                expect(Array.isArray(result.graphArtifacts)).toBe(true);
+                expect(result.graphArtifacts.length).toBe(1);
+                expect(result.graphArtifacts[0].label).toEqual('scatter1');
+
+                // onGraphReady must fire once (streaming, not via sweep)
+                expect(onGraphReady.calledOnce).toBe(true);
+
+                // Fallback sweep must NOT run since graph_ready was captured
+                expect(collectSpy.notCalled).toBe(true);
+            });
+
             it('_onLoggingMessage should handle object payload and strictly prioritize path', async () => {
                 const run = { _lineBuffer: '', _appendLog: sinon.stub(), logPath: null };
                 client._activeRun = run;

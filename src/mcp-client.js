@@ -1316,7 +1316,8 @@ class StataMcpClient {
         if (typeof direct === 'string' && direct.trim()) return direct;
         const text = this._extractText(response);
         const parsed = this._tryParseJson(text);
-        const lp = parsed?.path || parsed?.log_path;
+        // ToolEnvelope wraps log_path inside data.log_path; also check log.path
+        const lp = parsed?.path || parsed?.log_path || parsed?.data?.log_path || parsed?.log?.path;
         if (typeof lp === 'string' && lp.trim()) return lp;
         return null;
     }
@@ -1327,7 +1328,8 @@ class StataMcpClient {
         if (typeof direct === 'string' && direct.trim()) return direct;
         const text = this._extractText(response);
         const parsed = this._tryParseJson(text);
-        const taskId = parsed?.task_id;
+        // ToolEnvelope wraps task_id inside data.task_id
+        const taskId = parsed?.task_id ?? parsed?.data?.task_id;
         if (typeof taskId === 'string' && taskId.trim()) return taskId;
         return null;
     }
