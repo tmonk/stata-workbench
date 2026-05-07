@@ -1,3 +1,10 @@
+## [1.0.1](https://github.com/tmonk/stata-workbench/compare/v1.0.0...v1.0.1) (2026-05-07)
+
+
+### Bug Fixes
+
+* **ci:** allow manual publish for existing release tags ([9ae17d1](https://github.com/tmonk/stata-workbench/commit/9ae17d1156c262ca149aee7ab1b099597260c8f4))
+
 # [1.0.0](https://github.com/tmonk/stata-workbench/compare/v0.24.5...v1.0.0) (2026-05-07)
 
 
