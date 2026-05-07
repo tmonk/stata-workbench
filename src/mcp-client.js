@@ -28,6 +28,7 @@ try {
     ({ StdioClientTransport } = require('@modelcontextprotocol/sdk/client/stdio.js'));
 
     // Notification / result schemas are needed for streaming + low-level requests.
+    // Notification / result schemas are needed for streaming + low-level requests.
     // Prefer the standard export, but keep a fallback path for older exports mapping.
     try {
         ({ LoggingMessageNotificationSchema, ProgressNotificationSchema, CallToolResultSchema } = require('@modelcontextprotocol/sdk/types'));
@@ -166,6 +167,23 @@ class StataMcpClient {
             if (!runState._skipDrain) {
                 await this._drainActiveRunLog(client, runState);
             }
+            // If no graph_ready notifications were emitted, do a post-run export_all sweep.
+            // This is the primary path for users who generate graphs without streaming graph events.
+            if (includeGraphs === true && (!Array.isArray(runState._graphArtifacts) || runState._graphArtifacts.length === 0)) {
+                try {
+                    const artifacts = await this._collectGraphArtifacts(client, meta);
+                    if (Array.isArray(artifacts) && artifacts.length) {
+                        runState._graphArtifacts = artifacts;
+                        if (typeof runState.onGraphReady === 'function') {
+                            for (const a of artifacts) {
+                                try { runState.onGraphReady(a); } catch (_e) { }
+                            }
+                        }
+                    }
+                } catch (_err) {
+                    // Best-effort: graph export should never fail the main command.
+                }
+            }
             meta.logText = runState._logBuffer || '';
             meta.logPath = runState.logPath || null;
             if (result && typeof result === 'object') {
@@ -235,6 +253,21 @@ class StataMcpClient {
             }
             if (!runState._skipDrain) {
                 await this._drainActiveRunLog(client, runState);
+            }
+            // If no graph_ready notifications were emitted, do a post-run export_all sweep.
+            if (includeGraphs === true && (!Array.isArray(runState._graphArtifacts) || runState._graphArtifacts.length === 0)) {
+                try {
+                    const artifacts = await this._collectGraphArtifacts(client, meta);
+                    if (Array.isArray(artifacts) && artifacts.length) {
+                        runState._graphArtifacts = artifacts;
+                        if (typeof runState.onGraphReady === 'function') {
+                            for (const a of artifacts) {
+                                try { runState.onGraphReady(a); } catch (_e) { }
+                            }
+                        }
+                    }
+                } catch (_err) {
+                }
             }
             meta.logText = runState._logBuffer || '';
             meta.logPath = runState.logPath || null;
@@ -322,7 +355,12 @@ class StataMcpClient {
         return this._enqueue('stata_manage_session', options, async (client) => {
             const response = await this._callTool(client, 'stata_manage_session', { action: 'get_ui_channel' });
             const text = this._extractText(response);
-            return this._tryParseJson(text) || this._parseJson(response);
+            const parsed = this._tryParseJson(text) || this._parseJson(response);
+            // v3 ToolEnvelope: actual payload lives in `data`
+            if (parsed && typeof parsed === 'object' && parsed.data && typeof parsed.data === 'object') {
+                return parsed.data;
+            }
+            return parsed;
         });
     }
 
@@ -358,7 +396,11 @@ class StataMcpClient {
             const primaryArgs = preferredFormat ? { ...baseArgs, format: preferredFormat } : baseArgs;
 
             const primary = await this._callTool(client, 'stata_manage_graphs', primaryArgs);
-            return this._graphResponseToArtifact(primary, name, options.baseDir);
+            const artifact = this._graphResponseToArtifact(primary, name, options.baseDir);
+            if (artifact) return artifact;
+            // Fall back to returning the parsed tool payload (ToolEnvelope) so callers
+            // can still find `data.graphs[*].file_path` / `artifacts[*].path`.
+            return this._parseToolJson(primary) || primary;
         });
     }
 
@@ -1259,37 +1301,33 @@ class StataMcpClient {
 
     _extractText(response) {
         if (typeof response === 'string') return response;
-        if (response?.text && typeof response.text === 'string') return response.text;
         if (Array.isArray(response?.content)) {
             const flattened = this._flattenContent(response.content);
             if (typeof flattened === 'string' && flattened.trim()) return flattened;
-        }
-        if (response?.structuredContent?.result && typeof response.structuredContent.result === 'string') {
-            return response.structuredContent.result;
         }
         return '';
     }
 
     _extractLogPathFromResponse(response) {
         if (!response) return null;
-        // Strictly prioritize 'path' for log_path events as requested by user.
-        // Avoid 'smcl_path'.
-        const direct = response?.path || response?.log_path || response?.logPath || response?.structuredContent?.path || response?.structuredContent?.log_path;
+        // v3 tool envelopes: log-path is reported as `path` (log_path event) or `log_path`.
+        // Do not accept legacy aliases (logPath, structuredContent, etc).
+        const direct = response?.path || response?.log_path;
         if (typeof direct === 'string' && direct.trim()) return direct;
         const text = this._extractText(response);
         const parsed = this._tryParseJson(text);
-        const lp = parsed?.path || parsed?.log_path || parsed?.logPath || parsed?.error?.path || parsed?.error?.log_path || parsed?.error?.logPath;
+        const lp = parsed?.path || parsed?.log_path;
         if (typeof lp === 'string' && lp.trim()) return lp;
         return null;
     }
 
     _extractTaskIdFromResponse(response) {
         if (!response) return null;
-        const direct = response?.task_id || response?.taskId || response?.structuredContent?.task_id;
+        const direct = response?.task_id;
         if (typeof direct === 'string' && direct.trim()) return direct;
         const text = this._extractText(response);
         const parsed = this._tryParseJson(text);
-        const taskId = parsed?.task_id || parsed?.taskId || parsed?.error?.task_id || parsed?.error?.taskId;
+        const taskId = parsed?.task_id;
         if (typeof taskId === 'string' && taskId.trim()) return taskId;
         return null;
     }
@@ -1701,8 +1739,9 @@ class StataMcpClient {
             cwd: meta.cwd || (meta.filePath ? path.dirname(meta.filePath) : null),
             filePath: meta.filePath,
             contentText: safeContentText || parsed.stdout || '',
-            logPath: meta.logPath || parsed.path || parsed.log_path || payload.path || payload.log_path || payload?.error?.path || payload?.error?.log_path || parsed?.error?.path || parsed?.error?.log_path || null,
-            logSize: parsed.log_size || payload.log_size || parsed.logSize || payload.logSize || null,
+            // v3: only accept canonical log path fields (no legacy aliases).
+            logPath: meta.logPath || parsed.path || parsed.log_path || payload.path || payload.log_path || null,
+            logSize: parsed.log_size || payload.log_size || null,
             raw: response
         };
 
@@ -1746,8 +1785,6 @@ class StataMcpClient {
             parsed.error?.stderr,
             payload.error?.details,
             parsed.error?.details,
-            payload.error?.snippet,
-            parsed.error?.snippet,
             payload.error?.message,
             parsed.error?.message
         ]);
@@ -1816,7 +1853,7 @@ class StataMcpClient {
     }
 
     _normalizeVariableList(response) {
-        const parsed = this._parseJson(response?.text ?? response);
+        const parsed = this._parseJson(this._extractText(response) || response);
         const source = this._firstVarList(parsed) || this._firstVarList(response) || [];
         return source
             .map((v) => {
@@ -1833,10 +1870,14 @@ class StataMcpClient {
     _firstVarList(candidate) {
         if (!candidate) return null;
         if (Array.isArray(candidate)) return candidate;
+        // ToolEnvelope shape: unwrap `data` (v3 server emits envelopes)
+        if (candidate?.data) {
+            const fromData = this._firstVarList(candidate.data);
+            if (fromData) return fromData;
+        }
+        // v3 tool output: `VariablesResponse` uses `variables`
         if (Array.isArray(candidate?.variables)) return candidate.variables;
         if (Array.isArray(candidate?.vars)) return candidate.vars;
-        if (Array.isArray(candidate?.data)) return candidate.data;
-        if (Array.isArray(candidate?.list)) return candidate.list;
         if (Array.isArray(candidate?.content)) {
             for (const item of candidate.content) {
                 const fromItem = this._firstVarList(item);
@@ -2014,8 +2055,12 @@ class StataMcpClient {
         if (!graphs || !Array.isArray(graphs)) return [];
 
         for (const g of graphs) {
-            // Check if graph already has data (file_path, path, url, etc)
-            const hasData = g && typeof g === 'object' && (g.file_path || g.path || g.url || g.href || g.link);
+            // v3: graph artifacts are returned with a local file reference
+            // (`file_path` in GraphExport; sometimes `path` in artifact refs).
+            const hasData = g && typeof g === 'object' && (
+                (typeof g.file_path === 'string' && g.file_path.trim()) ||
+                (typeof g.path === 'string' && g.path.trim())
+            );
 
             if (hasData) {
                 // Graph already has data, just convert it
@@ -2065,17 +2110,15 @@ class StataMcpClient {
             return this._artifactFromText(trimmed, baseDir || response?.baseDir || response?.base_dir || null);
         }
 
-        // Handle text-wrapped payloads from MCP (e.g., { type: "text", text: "<path>" }).
+        // Allow text-wrapped JSON objects (common MCP content pattern)
         if (graph?.text && typeof graph.text === 'string') {
             const parsed = this._parseArtifactLikeJson(graph.text, baseDir || response?.baseDir || response?.base_dir || null);
             if (parsed) return parsed;
-            const fromText = this._artifactFromText(graph.text, baseDir || response?.baseDir || response?.base_dir || null);
-            if (fromText) return fromText;
         }
 
-        const label = graph.name || graph.label || graph.graph_name || 'graph';
+        const label = graph.name || graph.label || graph.title || graph.graph_name || 'graph';
         const base = graph.baseDir || graph.base_dir || baseDir || response?.baseDir || response?.base_dir || null;
-        const href = graph.file_path || graph.url || graph.href || graph.link || graph.path || graph.file || graph.filename || null;
+        const href = graph.file_path || graph.path || null;
         if (!href) return null;
         return {
             label,
@@ -2086,22 +2129,80 @@ class StataMcpClient {
 
     _graphResponseToArtifact(resp, label, baseDir) {
         if (!resp) return null;
-        // If structuredContent carries a result string, try that first.
-        const structured = resp?.structuredContent?.result;
-        if (structured && typeof structured === 'string') {
-            const parsed = this._parseArtifactLikeJson(structured, baseDir);
-            if (parsed) {
-                if (label) parsed.label = label;
-                return parsed;
+        const base = baseDir || resp?.baseDir || resp?.base_dir || null;
+
+        const artifactFromArtifactRef = (ref) => {
+            if (!ref || typeof ref !== 'object') return null;
+            if (typeof ref.path !== 'string' || !ref.path.trim()) return null;
+            return {
+                label: label || ref.title || ref.name || 'graph',
+                path: ref.path,
+                baseDir: base
+            };
+        };
+
+        // ToolEnvelope may carry exported files as `artifacts`.
+        if (Array.isArray(resp?.artifacts) && resp.artifacts.length) {
+            const fromRef = artifactFromArtifactRef(resp.artifacts[0]);
+            if (fromRef) return fromRef;
+        }
+
+        // MCP SDK may place structured outputs in `structuredContent`.
+        if (resp?.structuredContent && typeof resp.structuredContent === 'object') {
+            const parsed = resp.structuredContent;
+            if (Array.isArray(parsed?.artifacts) && parsed.artifacts.length) {
+                const fromRef = artifactFromArtifactRef(parsed.artifacts[0]);
+                if (fromRef) return fromRef;
             }
-            const fromStructured = this._artifactFromText(structured, baseDir);
-            if (fromStructured) {
-                if (label) fromStructured.label = label;
-                return fromStructured;
+            if (parsed?.data && typeof parsed.data === 'object') {
+                const fromData = this._graphToArtifact(parsed.data, base, parsed);
+                if (fromData) {
+                    if (label) fromData.label = label;
+                    return fromData;
+                }
+                if (Array.isArray(parsed.data.graphs) && parsed.data.graphs.length) {
+                    const fromGraphs = this._graphToArtifact(parsed.data.graphs[0], base, parsed);
+                    if (fromGraphs) {
+                        if (label) fromGraphs.label = label;
+                        return fromGraphs;
+                    }
+                }
             }
         }
 
-        const fromResp = this._graphToArtifact(resp, baseDir, resp);
+        // If we got an MCP CallToolResult, the JSON is often inside content[].text
+        if (Array.isArray(resp?.content)) {
+            const text = this._flattenContent(resp.content);
+            const parsed = this._tryParseJson(text);
+            if (parsed) {
+                if (Array.isArray(parsed?.artifacts) && parsed.artifacts.length) {
+                    const fromRef = artifactFromArtifactRef(parsed.artifacts[0]);
+                    if (fromRef) return fromRef;
+                }
+                if (parsed?.data && typeof parsed.data === 'object') {
+                    // GraphExportResponse: { graphs: [...] } is typically inside data
+                    const fromData = this._graphToArtifact(parsed.data, base, parsed);
+                    if (fromData) {
+                        if (label) fromData.label = label;
+                        return fromData;
+                    }
+                    if (Array.isArray(parsed.data.graphs) && parsed.data.graphs.length) {
+                        const fromGraphs = this._graphToArtifact(parsed.data.graphs[0], base, parsed);
+                        if (fromGraphs) {
+                            if (label) fromGraphs.label = label;
+                            return fromGraphs;
+                        }
+                    }
+                }
+
+                const fromParsed = this._graphToArtifact(parsed, base, parsed);
+                if (fromParsed) {
+                    if (label) fromParsed.label = label;
+                    return fromParsed;
+                }
+            }
+        }
+        const fromResp = this._graphToArtifact(resp, base, resp);
         if (fromResp) {
             // Force label override when provided (e.g. graph name "mygraph" instead of "mcp_stata_xyz.pdf")
             if (label) fromResp.label = label;
@@ -2109,7 +2210,7 @@ class StataMcpClient {
         }
         const content = Array.isArray(resp?.content) ? resp.content : [];
         for (const item of content) {
-            const art = this._graphToArtifact(item, baseDir, resp);
+            const art = this._graphToArtifact(item, base, resp);
             if (art) {
                 if (label) art.label = label;
                 return art;
@@ -2147,14 +2248,18 @@ class StataMcpClient {
 
             if (typeof node !== 'object') return;
 
+            // ToolEnvelope shape: unwrap `data`
+            if (node.data) {
+                visit(node.data);
+            }
+
             if (Array.isArray(node.graphs)) {
                 pushAll(node.graphs);
             }
 
-            // Some MCP servers put the primary JSON payload in structuredContent.result
-            if (typeof node?.structuredContent?.result === 'string') {
-                const parsed = this._tryParseJson(node.structuredContent.result);
-                if (parsed) visit(parsed);
+            // ToolEnvelope may also surface exported files as `artifacts`.
+            if (Array.isArray(node.artifacts)) {
+                pushAll(node.artifacts);
             }
 
             // Common MCP single-text-content pattern
@@ -2214,9 +2319,9 @@ class StataMcpClient {
         const parsed = this._tryParseJson(typeof text === 'string' ? text : '');
         if (!parsed || typeof parsed !== 'object') return null;
 
-        // Common shapes: { path, url, data, mimeType }, or nested in "graph" key.
+        // v3 shape: { path, ... }, or nested in "graph" key.
         const candidate = parsed.graph || parsed;
-        const href = candidate.url || candidate.path || candidate.file || candidate.href || null;
+        const href = candidate.file_path || candidate.path || null;
         if (!href) return null;
         return {
             label: candidate.name || candidate.label || candidate.graph_name || path.basename(href || '') || 'graph',
@@ -2492,7 +2597,7 @@ class StataMcpClient {
 
         const event = parsed?.event;
         this._log(`[${timestamp}] Notification received: ${event || 'logMessage'}`);
-        const taskId = parsed?.task_id || parsed?.taskId || parsed?.request_id || parsed?.requestId || parsed?.run_id || parsed?.runId;
+        const taskId = parsed?.task_id;
 
         let run = null;
         if (taskId) {
@@ -2515,7 +2620,7 @@ class StataMcpClient {
             return;
         }
 
-        const lp = parsed?.path || parsed?.log_path || parsed?.logPath;
+        const lp = parsed?.path || parsed?.log_path;
         if (run && event === 'log_path' && lp) {
             this._log(`[mcp-stata] log_path payload=${text}`);
             this._log(`[mcp-stata] log_path event matched for run ${run._runId || 'unknown'}, path=${lp}`);
@@ -2560,7 +2665,7 @@ class StataMcpClient {
                 const taskPayload = {
                     taskId: String(taskId),
                     runId: run?._runId || null,
-                    logPath: parsed?.path || parsed?.log_path || parsed?.logPath || null,
+                    logPath: parsed?.path || parsed?.log_path || null,
                     status: parsed?.status || null,
                     rc: typeof parsed?.rc === 'number' ? parsed.rc : null
                 };
@@ -2595,7 +2700,7 @@ class StataMcpClient {
             const artifact = {
                 type: 'help',
                 label: parsed.label || 'Stata Help',
-                path: parsed.path || parsed.file_path || null,
+                path: parsed.path || null,
                 baseDir: parsed.base_dir || parsed.baseDir || null
             };
             if (artifact.path) {

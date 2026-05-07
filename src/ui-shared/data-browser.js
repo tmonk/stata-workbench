@@ -454,7 +454,7 @@ function initBrowser(baseUrl, token) {
             return apiCall('/v1/vars', 'GET');
         })
         .then(response => {
-            const variables = response.vars || response.variables || [];
+            const variables = response.vars || [];
             log(`Loaded ${variables.length} variables`);
             populateVariableSelector(variables);
             updateDataSummary(state.totalObs, variables.length);
@@ -600,7 +600,7 @@ function handleSort(varName, isMulti = false) {
 }
 
 function renderGrid(pageData) {
-    const varCount = pageData.vars?.length || pageData.variables?.length || 0;
+    const varCount = pageData.vars?.length || 0;
     const table = pageData.table;
     const rows = [];
     if (!table) {
@@ -639,7 +639,7 @@ function renderGrid(pageData) {
     });
 
     dom.grid.innerHTML = '';
-    const returnedVars = pageData.vars || pageData.variables || [];
+    const returnedVars = pageData.vars || [];
     const obsIndex = returnedVars.indexOf('_n');
 
     const numRows = table.numRows;
