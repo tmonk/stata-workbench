@@ -4,6 +4,14 @@
 ### Bug Fixes
 
 * **ci:** allow manual publish for existing release tags ([9ae17d1](https://github.com/tmonk/stata-workbench/commit/9ae17d1156c262ca149aee7ab1b099597260c8f4))
+* revert release workflow to remove manual publish steps ([75bde00](https://github.com/tmonk/stata-workbench/commit/75bde00f05bf9c6d20145b4c1ada8a06da763e67))
+
+## [1.0.1](https://github.com/tmonk/stata-workbench/compare/v1.0.0...v1.0.1) (2026-05-07)
+
+
+### Bug Fixes
+
+* **ci:** allow manual publish for existing release tags ([9ae17d1](https://github.com/tmonk/stata-workbench/commit/9ae17d1156c262ca149aee7ab1b099597260c8f4))
 
 # [1.0.0](https://github.com/tmonk/stata-workbench/compare/v0.24.5...v1.0.0) (2026-05-07)
 
