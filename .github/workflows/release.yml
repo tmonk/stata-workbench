@@ -159,18 +159,21 @@ jobs:
         if: steps.publish_context.outputs.should_publish == 'true'
         shell: bash
         run: |
+          RELEASE_VERSION="${{ steps.publish_context.outputs.release_version }}"
           if [ "${{ steps.publish_context.outputs.manual_publish }}" = "true" ]; then
             SEARCH_DIR="release-assets"
+            VSIX_PATH=$(find "$SEARCH_DIR" -maxdepth 2 -type f -name "*-${RELEASE_VERSION}.vsix" \
+              | grep -Ev '(win32|linux|darwin)-(x64|arm64)' \
+              | head -n 1 || true)
           else
             SEARCH_DIR="."
+            VSIX_PATH=$(find "$SEARCH_DIR" -maxdepth 2 -type f -name "*.vsix" \
+              | grep -Ev '(win32|linux|darwin)-(x64|arm64)' \
+              | head -n 1 || true)
           fi
 
-          VSIX_PATH=$(find "$SEARCH_DIR" -maxdepth 2 -type f -name "*.vsix" \
-            | grep -Ev '(win32|linux|darwin)-(x64|arm64)' \
-            | head -n 1 || true)
-
           if [ -z "$VSIX_PATH" ]; then
-            echo "No universal VSIX found in $SEARCH_DIR"
+            echo "No universal VSIX found in $SEARCH_DIR for version $RELEASE_VERSION"
             find "$SEARCH_DIR" -maxdepth 2 -type f -name "*.vsix" -print || true
             exit 1
           fi
@@ -294,14 +297,15 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           mkdir -p dist
+          RELEASE_VERSION="${{ needs.release.outputs.new_release_version }}"
           gh release download "${{ needs.release.outputs.release_tag }}" \
-            --pattern "*${{ matrix.target }}*.vsix" \
+            --pattern "*${{ matrix.target }}-${RELEASE_VERSION}.vsix" \
             --dir dist \
             --repo "${{ github.repository }}"
 
-          TARGET_VSIX=$(find dist -maxdepth 1 -type f -name "*${{ matrix.target }}*.vsix" | head -n 1)
+          TARGET_VSIX=$(find dist -maxdepth 1 -type f -name "*${{ matrix.target }}-${RELEASE_VERSION}.vsix" | head -n 1)
           if [ -z "$TARGET_VSIX" ]; then
-            echo "No VSIX found for target ${{ matrix.target }}"
+            echo "No VSIX found for target ${{ matrix.target }} and version ${RELEASE_VERSION}"
             ls -l dist || true
             exit 1
           fi
