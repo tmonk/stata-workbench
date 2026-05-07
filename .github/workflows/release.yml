@@ -28,7 +28,7 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.event_name == 'workflow_dispatch' && github.event.inputs.release_tag != '' && github.event.inputs.release_tag || github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -38,6 +38,8 @@ jobs:
     outputs:
       new_release_published: ${{ steps.publish_context.outputs.should_publish }}
       new_release_version: ${{ steps.publish_context.outputs.release_version }}
+      manual_publish: ${{ steps.publish_context.outputs.manual_publish }}
+      release_tag: ${{ steps.publish_context.outputs.release_tag }}
     env:
       SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
     steps:
@@ -46,6 +48,21 @@ jobs:
         with:
           fetch-depth: 0
           ref: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.release_tag != '' && github.event.inputs.release_tag || github.ref }}
+
+      - name: Resolve manual publish request
+        id: publish_request
+        shell: bash
+        run: |
+          RELEASE_TAG="${{ github.event_name == 'workflow_dispatch' && github.event.inputs.release_tag || '' }}"
+          FORCE_EXISTING="${{ github.event_name == 'workflow_dispatch' && github.event.inputs.force_publish_existing == 'true' }}"
+
+          MANUAL_REQUESTED="false"
+          if [ "$FORCE_EXISTING" = "true" ] && [ -n "$RELEASE_TAG" ]; then
+            MANUAL_REQUESTED="true"
+          fi
+
+          echo "manual_requested=$MANUAL_REQUESTED" >> "$GITHUB_OUTPUT"
+          echo "requested_release_tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
 
       - name: Setup Node
         uses: actions/setup-node@v6
@@ -58,6 +75,7 @@ jobs:
           bun-version: latest
 
       - name: Cache Bun dependencies
+        if: steps.publish_request.outputs.manual_requested != 'true'
         uses: actions/cache@v5
         with:
           path: |
@@ -68,16 +86,20 @@ jobs:
             ${{ runner.os }}-bun-release-
 
       - name: Install dependencies
+        if: steps.publish_request.outputs.manual_requested != 'true'
         run: bun install --frozen-lockfile
 
       - name: Build
+        if: steps.publish_request.outputs.manual_requested != 'true'
         run: bun run bundle
 
       - name: Test
+        if: steps.publish_request.outputs.manual_requested != 'true'
         run: bun run test
 
       - name: Release
         id: semantic
+        if: steps.publish_request.outputs.manual_requested != 'true'
         uses: cycjimmy/semantic-release-action@v6
         with:
           extra_plugins: |
@@ -94,37 +116,71 @@ jobs:
         id: publish_context
         shell: bash
         run: |
+          MANUAL_REQUESTED="${{ steps.publish_request.outputs.manual_requested }}"
+          REQUESTED_RELEASE_TAG="${{ steps.publish_request.outputs.requested_release_tag }}"
           SEMANTIC_PUBLISHED="${{ steps.semantic.outputs.new_release_published }}"
           SEMANTIC_VERSION="${{ steps.semantic.outputs.new_release_version }}"
-          FORCE_EXISTING="${{ github.event_name == 'workflow_dispatch' && github.event.inputs.force_publish_existing == 'true' }}"
-          RELEASE_TAG="${{ github.event_name == 'workflow_dispatch' && github.event.inputs.release_tag || '' }}"
 
           SHOULD_PUBLISH="false"
           RELEASE_VERSION=""
           MANUAL_PUBLISH="false"
+          RELEASE_TAG=""
 
-          if [ "$SEMANTIC_PUBLISHED" = "true" ] && [ -n "$SEMANTIC_VERSION" ]; then
+          if [ "$MANUAL_REQUESTED" = "true" ] && [ -n "$REQUESTED_RELEASE_TAG" ]; then
+            SHOULD_PUBLISH="true"
+            RELEASE_VERSION="${REQUESTED_RELEASE_TAG#v}"
+            MANUAL_PUBLISH="true"
+            RELEASE_TAG="$REQUESTED_RELEASE_TAG"
+          elif [ "$SEMANTIC_PUBLISHED" = "true" ] && [ -n "$SEMANTIC_VERSION" ]; then
             SHOULD_PUBLISH="true"
             RELEASE_VERSION="$SEMANTIC_VERSION"
-          elif [ "$FORCE_EXISTING" = "true" ] && [ -n "$RELEASE_TAG" ]; then
-            SHOULD_PUBLISH="true"
-            RELEASE_VERSION="${RELEASE_TAG#v}"
-            MANUAL_PUBLISH="true"
+            RELEASE_TAG="v$SEMANTIC_VERSION"
           fi
 
           echo "should_publish=$SHOULD_PUBLISH" >> "$GITHUB_OUTPUT"
           echo "release_version=$RELEASE_VERSION" >> "$GITHUB_OUTPUT"
           echo "manual_publish=$MANUAL_PUBLISH" >> "$GITHUB_OUTPUT"
+          echo "release_tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
 
-      - name: Package VSIX for manual publish
+      - name: Download existing release VSIX assets
         if: steps.publish_context.outputs.manual_publish == 'true'
-        run: bun run package
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p release-assets
+          gh release download "${{ steps.publish_context.outputs.release_tag }}" \
+            --pattern "*.vsix" \
+            --dir release-assets \
+            --repo "${{ github.repository }}"
+          ls -l release-assets
+
+      - name: Resolve universal VSIX path
+        id: universal_vsix
+        if: steps.publish_context.outputs.should_publish == 'true'
+        shell: bash
+        run: |
+          if [ "${{ steps.publish_context.outputs.manual_publish }}" = "true" ]; then
+            SEARCH_DIR="release-assets"
+          else
+            SEARCH_DIR="."
+          fi
+
+          VSIX_PATH=$(find "$SEARCH_DIR" -maxdepth 2 -type f -name "*.vsix" \
+            | grep -Ev '(win32|linux|darwin)-(x64|arm64)' \
+            | head -n 1 || true)
+
+          if [ -z "$VSIX_PATH" ]; then
+            echo "No universal VSIX found in $SEARCH_DIR"
+            find "$SEARCH_DIR" -maxdepth 2 -type f -name "*.vsix" -print || true
+            exit 1
+          fi
+
+          echo "vsix_path=$VSIX_PATH" >> "$GITHUB_OUTPUT"
 
       - name: Publish Universal to VS Code Marketplace
         if: steps.publish_context.outputs.should_publish == 'true'
         run: |
-          # The vsce plugin packages the VSIX in the root when publish is false
-          VSIX_PATH=$(ls *.vsix | head -n 1)
+          VSIX_PATH="${{ steps.universal_vsix.outputs.vsix_path }}"
           if [ -z "$VSIX_PATH" ]; then
             echo "No VSIX found to publish"
             exit 1
@@ -151,12 +207,7 @@ jobs:
       - name: Publish to Open VSX
         if: steps.publish_context.outputs.should_publish == 'true'
         run: |
-          echo "Looking for VSIX files..."
-          ls -R *.vsix dist/*.vsix 2>/dev/null || echo "No .vsix files found in root or dist/"
-          
-          # Find the packaged VSIX
-          VSIX_PATH=$(find . -maxdepth 2 -name "*.vsix" | head -n 1)
-          
+          VSIX_PATH="${{ steps.universal_vsix.outputs.vsix_path }}"
           if [ -n "$VSIX_PATH" ] && [ -f "$VSIX_PATH" ]; then
             echo "Verifying VSIX integrity: $VSIX_PATH"
             node scripts/verify-vsix.js "$VSIX_PATH"
@@ -184,7 +235,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
         with:
-          ref: v${{ needs.release.outputs.new_release_version }}
+          ref: ${{ needs.release.outputs.release_tag }}
 
       - name: Setup Node
         uses: actions/setup-node@v6
@@ -197,6 +248,7 @@ jobs:
           bun-version: latest
 
       - name: Cache Bun dependencies
+        if: needs.release.outputs.manual_publish != 'true'
         uses: actions/cache@v5
         with:
           path: |
@@ -208,15 +260,38 @@ jobs:
             ${{ runner.os }}-bun-release-target-
 
       - name: Install dependencies
+        if: needs.release.outputs.manual_publish != 'true'
         run: bun install --frozen-lockfile
 
       - name: Package VSIX
+        if: needs.release.outputs.manual_publish != 'true'
         run: bun run package:target
         env:
           npm_config_target: ${{ matrix.target }}
           SENTRY_UPLOAD: "false" # Source maps already uploaded by the universal release
 
+      - name: Download target VSIX from existing release
+        if: needs.release.outputs.manual_publish == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p dist
+          gh release download "${{ needs.release.outputs.release_tag }}" \
+            --pattern "*${{ matrix.target }}*.vsix" \
+            --dir dist \
+            --repo "${{ github.repository }}"
+
+          TARGET_VSIX=$(find dist -maxdepth 1 -type f -name "*${{ matrix.target }}*.vsix" | head -n 1)
+          if [ -z "$TARGET_VSIX" ]; then
+            echo "No VSIX found for target ${{ matrix.target }}"
+            ls -l dist || true
+            exit 1
+          fi
+
+          mv "$TARGET_VSIX" "dist/stata-workbench-${{ matrix.target }}.vsix"
+
       - name: Rename VSIX
+        if: needs.release.outputs.manual_publish != 'true'
         run: |
           mkdir -p dist
           mv *.vsix dist/stata-workbench-${{ matrix.target }}.vsix || true
@@ -246,6 +321,7 @@ jobs:
         continue-on-error: true # OVSX can be flaky
 
       - name: Upload to GitHub Release
+        if: needs.release.outputs.manual_publish != 'true'
         uses: softprops/action-gh-release@v3
         with:
           files: dist/stata-workbench-${{ matrix.target }}.vsix
