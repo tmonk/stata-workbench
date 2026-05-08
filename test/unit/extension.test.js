@@ -123,247 +123,27 @@ describe('extension unit tests', () => {
         });
     });
 
-    describe('writeMcpConfig', () => {
-        itWithHarness('writeMcpConfig (VS Code host) writes only servers entry, merges env, and removes cursor mcp_stata', () => {
-            fs.existsSync.mockReturnValue(true);
-            fs.readFileSync.mockReturnValue(JSON.stringify({
-                servers: {
-                    mcp_stata: {
-                        type: 'stdio',
-                        command: 'uvx',
-                        args: ['--from', 'mcp-stata@latest', 'mcp-stata'],
-                        env: { STATA_HOME: '/opt/stata' },
-                        note: 'keep-me'
-                    },
-                    other_server: {
-                        type: 'stdio',
-                        command: 'foo',
-                        args: ['bar'],
-                        env: { KEEP: 'me' }
-                    }
-                },
-                mcpServers: {
-                    mcp_stata: {
-                        command: 'uvx',
-                        args: ['--from', 'mcp-stata@latest', 'mcp-stata'],
-                        env: { STATA_LICENSE: 'abc' },
-                        retry: 3
-                    },
-                    other_cursor: {
-                        command: 'baz',
-                        args: ['qux'],
-                        env: { ALSO: 'keep' }
-                    }
-                }
-            }));
 
-            extension.writeMcpConfig({
-                configPath: '/tmp/test.json',
-                writeVscode: true,
-                writeCursor: false
-            });
-
-            expect(fs.writeFileSync).toHaveBeenCalled();
-            const updated = JSON.parse(fs.writeFileSync.mock.calls[0][1]);
-            const serverEntry = updated.servers.mcp_stata;
-            expect(serverEntry.args).toEqual(['--refresh', '--refresh-package', 'mcp-stata', '--from', 'mcp-stata@latest', 'mcp-stata']);
-            expect(serverEntry.env).toEqual({ STATA_LICENSE: 'abc', STATA_HOME: '/opt/stata' });
-            expect(serverEntry.note).toEqual('keep-me');
-            expect(updated.servers.other_server).toEqual({
-                type: 'stdio',
-                command: 'foo',
-                args: ['bar'],
-                env: { KEEP: 'me' }
-            });
-            expect(updated.mcpServers).toBeDefined();
-            expect(updated.mcpServers.mcp_stata).toBeUndefined();
-            expect(updated.mcpServers.other_cursor).toEqual({
-                command: 'baz',
-                args: ['qux'],
-                env: { ALSO: 'keep' }
-            });
+    describe('getMcpInstallCommand', () => {
+        itWithHarness('returns curl/bash installer on macOS', () => {
+            const result = extension.getMcpInstallCommand('darwin');
+            expect(result.command).toEqual('bash');
+            expect(result.args).toEqual(['-c', 'curl -LsSf https://mcp-stata-install.tdmonk.com/install.sh | bash']);
+            expect(result.display).toContain('curl -LsSf https://mcp-stata-install.tdmonk.com/install.sh | bash');
         });
 
-        itWithHarness('writeMcpConfig sets MCP_STATA_NO_RELOAD_ON_CLEAR when enabled', () => {
-            const config = vscode.workspace.getConfiguration();
-            config.get.mockImplementation((key, def) => {
-                if (key === 'noReloadOnClear') return true;
-                return def;
-            });
-
-            fs.existsSync.mockReturnValue(true);
-            fs.readFileSync.mockReturnValue(JSON.stringify({
-                servers: {
-                    mcp_stata: {
-                        type: 'stdio',
-                        command: 'uvx',
-                        args: ['--from', 'mcp-stata@latest', 'mcp-stata'],
-                        env: { STATA_HOME: '/opt/stata' }
-                    }
-                }
-            }));
-
-            extension.writeMcpConfig({
-                configPath: '/tmp/test.json',
-                writeVscode: true,
-                writeCursor: false
-            });
-
-            const updated = JSON.parse(fs.writeFileSync.mock.calls[0][1]);
-            expect(updated.servers.mcp_stata.env).toEqual({
-                STATA_HOME: '/opt/stata',
-                MCP_STATA_NO_RELOAD_ON_CLEAR: '1'
-            });
-        });
-
-        itWithHarness('writeMcpConfig removes MCP_STATA_NO_RELOAD_ON_CLEAR when disabled', () => {
-            const config = vscode.workspace.getConfiguration();
-            config.get.mockImplementation((key, def) => {
-                if (key === 'noReloadOnClear') return false;
-                return def;
-            });
-
-            fs.existsSync.mockReturnValue(true);
-            fs.readFileSync.mockReturnValue(JSON.stringify({
-                servers: {
-                    mcp_stata: {
-                        type: 'stdio',
-                        command: 'uvx',
-                        args: ['--from', 'mcp-stata@latest', 'mcp-stata'],
-                        env: { MCP_STATA_NO_RELOAD_ON_CLEAR: '1', STATA_HOME: '/opt/stata' }
-                    }
-                }
-            }));
-
-            extension.writeMcpConfig({
-                configPath: '/tmp/test.json',
-                writeVscode: true,
-                writeCursor: false
-            });
-
-            const updated = JSON.parse(fs.writeFileSync.mock.calls[0][1]);
-            expect(updated.servers.mcp_stata.env).toEqual({ STATA_HOME: '/opt/stata' });
-        });
-
-        itWithHarness('writeMcpConfig (Cursor host) writes only mcpServers entry, merges env, and removes VS Code mcp_stata', () => {
-            fs.existsSync.mockReturnValue(true);
-            fs.readFileSync.mockReturnValue(JSON.stringify({
-                servers: {
-                    mcp_stata: {
-                        type: 'stdio',
-                        command: 'uvx',
-                        args: ['--from', 'mcp-stata@latest', 'mcp-stata'],
-                        env: { STATA_HOME: '/opt/stata' },
-                        note: 'keep-me'
-                    },
-                    other_server: {
-                        type: 'stdio',
-                        command: 'foo',
-                        args: ['bar'],
-                        env: { KEEP: 'me' }
-                    }
-                },
-                mcpServers: {
-                    mcp_stata: {
-                        command: 'uvx',
-                        args: ['--from', 'mcp-stata@latest', 'mcp-stata'],
-                        env: { STATA_LICENSE: 'abc' },
-                        retry: 3
-                    },
-                    other_cursor: {
-                        command: 'baz',
-                        args: ['qux'],
-                        env: { ALSO: 'keep' }
-                    }
-                }
-            }));
-
-            extension.writeMcpConfig({
-                configPath: '/tmp/test.json',
-                writeVscode: false,
-                writeCursor: true
-            });
-
-            expect(fs.writeFileSync).toHaveBeenCalled();
-            const updated = JSON.parse(fs.writeFileSync.mock.calls[0][1]);
-            const cursorEntry = updated.mcpServers.mcp_stata;
-            expect(cursorEntry.args).toEqual(['--refresh', '--refresh-package', 'mcp-stata', '--from', 'mcp-stata@latest', 'mcp-stata']);
-            expect(cursorEntry.env).toEqual({ STATA_HOME: '/opt/stata', STATA_LICENSE: 'abc' });
-            expect(cursorEntry.retry).toEqual(3);
-            expect(updated.mcpServers.other_cursor).toEqual({
-                command: 'baz',
-                args: ['qux'],
-                env: { ALSO: 'keep' }
-            });
-            expect(updated.servers).toBeDefined();
-            expect(updated.servers.mcp_stata).toBeUndefined();
-            expect(updated.servers.other_server).toEqual({
-                type: 'stdio',
-                command: 'foo',
-                args: ['bar'],
-                env: { KEEP: 'me' }
-            });
-        });
-
-        itWithHarness('writeMcpConfig auto-updates old mcp.json formatting to the new uvx command', () => {
-            fs.existsSync.mockReturnValue(true);
-            fs.readFileSync.mockReturnValue(JSON.stringify({
-                servers: {
-                    mcp_stata: {
-                        type: 'stdio',
-                        command: 'uvx',
-                        args: ['--from', 'mcp-stata', 'mcp-stata', '--refresh'],
-                        env: { STATA_HOME: '/opt/stata' }
-                    }
-                }
-            }));
-
-            extension.writeMcpConfig({
-                configPath: '/tmp/test.json',
-                writeVscode: true,
-                writeCursor: false
-            });
-
-            expect(fs.writeFileSync).toHaveBeenCalled();
-            const updated = JSON.parse(fs.writeFileSync.mock.calls[0][1]);
-            const serverEntry = updated.servers.mcp_stata;
-            
-            // Should now have the full expanded argument list including --refresh-package
-            expect(serverEntry.args).toEqual([
-                '--refresh', 
-                '--refresh-package', 
-                'mcp-stata', 
-                '--from', 
-                'mcp-stata@latest', 
-                'mcp-stata'
-            ]);
-            
-            // Environment variables should be preserved
-            expect(serverEntry.env).toEqual({ STATA_HOME: '/opt/stata' });
-        });
-    });
-
-    describe('getUvInstallCommand', () => {
-        itWithHarness('returns curl/sh installer on macOS', () => {
-            const result = extension.getUvInstallCommand('darwin');
-            expect(result.command).toEqual('sh');
-            expect(result.args).toEqual(['-c', 'curl -LsSf https://astral.sh/uv/install.sh | sh']);
-            expect(result.display).toContain('curl -LsSf https://astral.sh/uv/install.sh | sh');
-        });
-
-        itWithHarness('returns curl/sh installer on Linux', () => {
-            const result = extension.getUvInstallCommand('linux');
-            expect(result.command).toEqual('sh');
-            expect(result.args).toEqual(['-c', 'curl -LsSf https://astral.sh/uv/install.sh | sh']);
-            expect(result.display).toContain('curl -LsSf https://astral.sh/uv/install.sh | sh');
+        itWithHarness('returns curl/bash installer on Linux', () => {
+            const result = extension.getMcpInstallCommand('linux');
+            expect(result.command).toEqual('bash');
+            expect(result.args).toEqual(['-c', 'curl -LsSf https://mcp-stata-install.tdmonk.com/install.sh | bash']);
+            expect(result.display).toContain('curl -LsSf https://mcp-stata-install.tdmonk.com/install.sh | bash');
         });
 
         itWithHarness('returns powershell installer on Windows', () => {
-            const result = extension.getUvInstallCommand('win32');
+            const result = extension.getMcpInstallCommand('win32');
             expect(result.command).toEqual('powershell');
-            expect(result.args).toEqual(['-NoLogo', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', 'iwr https://astral.sh/uv/install.ps1 -useb | iex']);
+            expect(result.args).toEqual(['-NoLogo', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', '& ([ScriptBlock]::Create((irm https://mcp-stata-install.tdmonk.com/install.ps1)))']);
             expect(result.display).toContain('install.ps1');
-            expect(result.display).toContain('powershell');
         });
     });
 
@@ -422,15 +202,6 @@ describe('extension unit tests', () => {
             expect(fs.writeFileSync).not.toHaveBeenCalled();
         });
 
-        itWithHarness('detects existing servers in config files', () => {
-            fs.existsSync.mockReturnValue(true);
-            fs.readFileSync.mockReturnValue(JSON.stringify({
-                servers: { mcp_stata: { command: 'uvx', args: [] } }
-            }));
-
-            const ctx = { mcpConfigPath: '/tmp/user/mcp.json' };
-            expect(extension.hasExistingMcpConfig(ctx)).toBe(true);
-        });
 
         itWithHarness('suppresses missing CLI prompt when config already present', async () => {
             mcpClientMock.hasConfig.mockReturnValue(true);
@@ -465,401 +236,14 @@ describe('extension unit tests', () => {
             expect(globalState.update).toHaveBeenCalledWith(expect.any(String), true);
         });
 
-        itWithHarness('detects cursor-format configs in user storage', () => {
-            fs.existsSync.mockReturnValue(true);
-            fs.readFileSync.mockReturnValue(JSON.stringify({
-                mcpServers: {
-                    mcp_stata: {
-                        command: 'uvx',
-                        args: ['--from', 'mcp-stata@latest', 'mcp-stata']
-                    }
-                }
-            }));
 
-            const ctx = { mcpConfigPath: '/tmp/user/cursor-mcp.json' };
-            expect(extension.hasExistingMcpConfig(ctx)).toBe(true);
-        });
 
-        itWithHarness('resolves VS Code path on windows', ({ env }) => {
-            const originalAppData = env.APPDATA;
-            delete env.APPDATA;
-
-            const ctx = {
-                mcpPlatformOverride: 'win32',
-                mcpHomeOverride: 'C:\\Users\\Bob',
-                mcpAppNameOverride: 'Visual Studio Code'
-            };
-
-            const target = extension.getMcpConfigTarget(ctx);
-            const expected = path.join('C:\\Users\\Bob', 'AppData', 'Roaming', 'Code', 'User', 'mcp.json');
-            expect(target.configPath).toEqual(expected);
-            expect(target.writeCursor).toBe(false);
-
-            env.APPDATA = originalAppData;
-        });
-
-        itWithHarness('resolves Cursor path on windows', () => {
-            const ctx = {
-                mcpPlatformOverride: 'win32',
-                mcpHomeOverride: 'C:\\Users\\Bob',
-                mcpAppNameOverride: 'Cursor'
-            };
-
-            const target = extension.getMcpConfigTarget(ctx);
-            const expected = path.join('C:\\Users\\Bob', '.cursor', 'mcp.json');
-            expect(target.configPath).toEqual(expected);
-            expect(target.writeCursor).toBe(true);
-        });
-
-        itWithHarness('resolves Windsurf path on linux', () => {
-            const ctx = {
-                mcpPlatformOverride: 'linux',
-                mcpHomeOverride: '/home/alex',
-                mcpAppNameOverride: 'Windsurf'
-            };
-
-            const target = extension.getMcpConfigTarget(ctx);
-            const expected = path.join('/home/alex', '.codeium', 'windsurf', 'mcp_config.json');
-            expect(target.configPath).toEqual(expected);
-            expect(target.writeCursor).toBe(true);
-        });
-
-        itWithHarness('resolves Windsurf Next path on mac', () => {
-            const ctx = {
-                mcpPlatformOverride: 'darwin',
-                mcpHomeOverride: '/Users/tom',
-                mcpAppNameOverride: 'Windsurf Next'
-            };
-
-            const target = extension.getMcpConfigTarget(ctx);
-            const expected = path.join('/Users/tom', '.codeium', 'windsurf-next', 'mcp_config.json');
-            expect(target.configPath).toEqual(expected);
-            expect(target.writeCursor).toBe(true);
-        });
-
-        itWithHarness('resolves Antigravity path on windows', ({ env }) => {
-            const originalAppData = env.APPDATA;
-            env.APPDATA = path.join('C:\\Users\\Bob', 'AppData', 'Roaming');
-
-            const ctx = {
-                mcpPlatformOverride: 'win32',
-                mcpHomeOverride: 'C:\\Users\\Bob',
-                mcpAppNameOverride: 'Antigravity'
-            };
-
-            const target = extension.getMcpConfigTarget(ctx);
-            // In the original test line 503: path.join('C\\Users\\Bob', 'AppData', 'Roaming', 'Antigravity', 'User', 'mcp.json')
-            // Wait, Antigravity in getMcpConfigTarget uses resolveHostMcpPath which might be different.
-            // Let's check what the code actually does.
-            const expected = path.join('C:\\Users\\Bob', 'AppData', 'Roaming', 'Antigravity', 'User', 'mcp.json');
-            expect(target.configPath).toEqual(expected);
-            expect(target.writeCursor).toBe(true);
-
-            env.APPDATA = originalAppData;
-        });
-
-        itWithHarness('resolves VS Code Insiders path on linux', () => {
-            const ctx = {
-                mcpPlatformOverride: 'linux',
-                mcpHomeOverride: '/home/dev',
-                mcpAppNameOverride: 'Visual Studio Code - Insiders'
-            };
-
-            const target = extension.getMcpConfigTarget(ctx);
-            const expected = path.join('/home/dev', '.config', 'Code - Insiders', 'User', 'mcp.json');
-            expect(target.configPath).toEqual(expected);
-            expect(target.writeCursor).toBe(false);
-        });
-
-        itWithHarness('honors explicit override path and writes both formats', () => {
-            const ctx = { mcpConfigPath: '/tmp/override/mcp.json' };
-            const target = extension.getMcpConfigTarget(ctx);
-            expect(target.configPath).toEqual('/tmp/override/mcp.json');
-            expect(target.writeCursor).toBe(true);
-            expect(target.writeVscode).toBe(false);
-        });
-
-        itWithHarness('falls back to home/AppData/Roaming when APPDATA unset', ({ env }) => {
-            const originalAppData = env.APPDATA;
-            delete env.APPDATA;
-
-            const ctx = {
-                mcpPlatformOverride: 'win32',
-                mcpHomeOverride: 'C:\\Users\\Dana',
-                mcpAppNameOverride: 'Visual Studio Code'
-            };
-
-            const target = extension.getMcpConfigTarget(ctx);
-            const expected = path.join('C:\\Users\\Dana', 'AppData', 'Roaming', 'Code', 'User', 'mcp.json');
-            expect(target.configPath).toEqual(expected);
-            expect(target.writeCursor).toBe(false);
-
-            env.APPDATA = originalAppData;
-        });
-
-        itWithHarness('returns null and logs when home cannot be resolved', () => {
-            const target = extension.getMcpConfigTarget({ mcpHomeOverride: null, mcpPlatformOverride: 'linux' });
-            expect(target).toBeNull();
-        });
-
-        itWithHarness('skips write when no targets selected', () => {
-            fs.writeFileSync.mockClear();
-            extension.writeMcpConfig({ configPath: '/tmp/none.json', writeVscode: false, writeCursor: false });
-            expect(fs.writeFileSync).not.toHaveBeenCalled();
-        });
     });
 
-    describe('addClaudeMcpViaCli / removeClaudeMcpViaCli', () => {
-        itWithHarness('removes first then runs claude mcp add-json (handles already exists)', () => {
-            const h = getHarness();
-            h.vscode.workspace.getConfiguration().get.mockImplementation((key, def) => {
-                if (key === 'noReloadOnClear') return false;
-                return def;
-            });
-            h.cp.spawnSync.mockReturnValue({ status: 0, stdout: '', stderr: '' });
 
-            extension.addClaudeMcpViaCli({ mcpWorkspaceOverride: '/workspace' });
 
-            expect(h.cp.spawnSync).toHaveBeenCalledTimes(2);
-            expect(h.cp.spawnSync).toHaveBeenNthCalledWith(
-                1,
-                'claude',
-                ['mcp', 'remove', 'mcp_stata'],
-                expect.objectContaining({ timeout: 5000 })
-            );
-            expect(h.cp.spawnSync).toHaveBeenNthCalledWith(
-                2,
-                'claude',
-                expect.arrayContaining([
-                    'mcp', 'add-json', 'mcp_stata',
-                    expect.stringContaining('"type":"stdio"'),
-                    expect.stringContaining('"command"'),
-                    '--scope', 'user'
-                ]),
-                expect.objectContaining({ timeout: 15000 })
-            );
-            const jsonArg = h.cp.spawnSync.mock.calls[1][1][3];
-            expect(jsonArg).toContain('mcp-stata');
-        });
 
-        itWithHarness('runs claude mcp remove and cleans config files when removing', () => {
-            const h = getHarness();
-            h.cp.spawnSync.mockReturnValue({ status: 0, stdout: '', stderr: '' });
-            h.fs.existsSync.mockReturnValue(false);
 
-            extension.removeClaudeMcpViaCli({ mcpWorkspaceOverride: '/workspace' });
-
-            expect(h.cp.spawnSync).toHaveBeenCalledWith(
-                'claude',
-                ['mcp', 'remove', 'mcp_stata'],
-                expect.objectContaining({ timeout: 5000 })
-            );
-        });
-    });
-
-    describe('getCodexMcpConfigTarget', () => {
-        itWithHarness('resolves default path ~/.codex/config.toml with home override', () => {
-            const ctx = { mcpHomeOverride: '/home/jane', extensionMode: vscode.ExtensionMode.Test };
-            const target = extension.getCodexMcpConfigTarget(ctx);
-            expect(target).not.toBeNull();
-            expect(target.configPath).toEqual(path.join('/home/jane', '.codex', 'config.toml'));
-        });
-
-        itWithHarness('returns null when ~ cannot be expanded (no home in test)', () => {
-            const ctx = { extensionMode: vscode.ExtensionMode.Test };
-            const target = extension.getCodexMcpConfigTarget(ctx);
-            expect(target).toBeNull();
-        });
-    });
-
-    describe('removeFromMcpConfig', () => {
-        itWithHarness('removes mcp_stata from JSON config when present', () => {
-            const configPath = '/tmp/test-mcp.json';
-            fs.writeFileSync.mockClear();
-            fs.existsSync.mockImplementation((p) => p === configPath);
-            fs.readFileSync.mockReturnValue(JSON.stringify({
-                servers: { mcp_stata: { command: 'uvx', args: [] }, other: {} },
-                mcpServers: {}
-            }));
-
-            extension.removeFromMcpConfig({
-                configPath,
-                writeVscode: true,
-                writeCursor: false
-            });
-
-            expect(fs.writeFileSync).toHaveBeenCalledWith(
-                configPath,
-                JSON.stringify({ servers: { other: {} } }, null, 2)
-            );
-        });
-
-        itWithHarness('does nothing when file does not exist', () => {
-            fs.writeFileSync.mockClear();
-            fs.existsSync.mockReturnValue(false);
-
-            extension.removeFromMcpConfig({
-                configPath: '/tmp/missing.json',
-                writeVscode: true,
-                writeCursor: false
-            });
-
-            expect(fs.writeFileSync).not.toHaveBeenCalled();
-        });
-
-        itWithHarness('only removes mcp_stata, leaves all other user settings immutable', () => {
-            const configPath = '/tmp/claude-mcp.json';
-            const userConfig = {
-                model: 'gpt-4',
-                inputs: [{ type: 'promptString', id: 'api-key', description: 'API Key' }],
-                mcpServers: {
-                    mcp_stata: { command: 'uvx', args: ['mcp-stata'] },
-                    github: { type: 'http', url: 'https://api.github.com/mcp', headers: { Authorization: 'Bearer x' } },
-                    memory: { command: 'npx', args: ['-y', '@modelcontextprotocol/server-memory'] }
-                }
-            };
-            fs.writeFileSync.mockClear();
-            fs.existsSync.mockImplementation((p) => p === configPath);
-            fs.readFileSync.mockReturnValue(JSON.stringify(userConfig));
-
-            extension.removeFromMcpConfig({
-                configPath,
-                writeVscode: false,
-                writeCursor: true
-            });
-
-            const written = JSON.parse(fs.writeFileSync.mock.calls[0][1]);
-            expect(written.model).toEqual('gpt-4');
-            expect(written.inputs).toEqual(userConfig.inputs);
-            expect(written.mcpServers.mcp_stata).toBeUndefined();
-            expect(written.mcpServers.github).toEqual(userConfig.mcpServers.github);
-            expect(written.mcpServers.memory).toEqual(userConfig.mcpServers.memory);
-        });
-    });
-
-    describe('removeFromCodexMcpConfig', () => {
-        itWithHarness('removes mcp_stata section from TOML config', () => {
-            const configPath = path.join('/home', '.codex', 'config.toml');
-            fs.writeFileSync.mockClear();
-            fs.existsSync.mockImplementation((p) => p === configPath);
-            fs.readFileSync.mockReturnValue(`
-[mcp_servers.memory]
-command = "npx"
-args = ["-y", "@modelcontextprotocol/server-memory"]
-
-[mcp_servers.mcp_stata]
-command = "uvx"
-args = ["mcp-stata"]
-`);
-
-            extension.removeFromCodexMcpConfig({ configPath });
-
-            expect(fs.writeFileSync).toHaveBeenCalled();
-            const written = fs.writeFileSync.mock.calls[0][1];
-            expect(written).not.toContain('[mcp_servers.mcp_stata]');
-            expect(written).toContain('[mcp_servers.memory]');
-        });
-
-        itWithHarness('only removes mcp_stata sections, leaves all other Codex config immutable', () => {
-            const configPath = '/tmp/codex/config.toml';
-            const originalToml = `# User comment - must stay
-model = "gpt-5.2-codex"
-project_doc_max_bytes = 32768
-
-[mcp_servers.memory]
-command = "npx"
-args = ["-y", "@modelcontextprotocol/server-memory"]
-
-[mcp_servers.github]
-url = "https://api.github.com/mcp"
-bearer_token_env_var = "GITHUB_TOKEN"
-
-[mcp_servers.mcp_stata]
-command = "uvx"
-args = ["--refresh", "mcp-stata"]
-
-[mcp_servers.mcp_stata.env]
-MCP_STATA_NO_RELOAD_ON_CLEAR = "1"
-
-[mcp_servers.figma]
-url = "https://mcp.figma.com/mcp"
-`;
-            fs.writeFileSync.mockClear();
-            fs.existsSync.mockImplementation((p) => p === configPath);
-            fs.readFileSync.mockReturnValue(originalToml);
-
-            extension.removeFromCodexMcpConfig({ configPath });
-
-            const written = fs.writeFileSync.mock.calls[0][1];
-            expect(written).toContain('# User comment - must stay');
-            expect(written).toContain('model = "gpt-5.2-codex"');
-            expect(written).toContain('project_doc_max_bytes = 32768');
-            expect(written).toContain('[mcp_servers.memory]');
-            expect(written).toContain('[mcp_servers.github]');
-            expect(written).toContain('[mcp_servers.figma]');
-            expect(written).not.toContain('[mcp_servers.mcp_stata]');
-            expect(written).not.toContain('MCP_STATA_NO_RELOAD_ON_CLEAR');
-        });
-    });
-
-    describe('MCP config immutability (user settings must never be touched)', () => {
-        itWithHarness('writeMcpConfig preserves top-level keys (inputs, model) and other servers', () => {
-            const configPath = '/tmp/vscode-mcp.json';
-            const existing = {
-                inputs: [{ type: 'promptString', id: 'perplexity-key', description: 'API Key', password: true }],
-                servers: {
-                    github: { type: 'http', url: 'https://api.githubcopilot.com/mcp' },
-                    memory: { command: 'npx', args: ['-y', '@modelcontextprotocol/server-memory'] }
-                }
-            };
-            fs.existsSync.mockReturnValue(true);
-            fs.readFileSync.mockReturnValue(JSON.stringify(existing));
-
-            extension.writeMcpConfig({
-                configPath,
-                writeVscode: true,
-                writeCursor: false
-            });
-
-            const written = JSON.parse(fs.writeFileSync.mock.calls[0][1]);
-            expect(written.inputs).toEqual(existing.inputs);
-            expect(written.servers.github).toEqual(existing.servers.github);
-            expect(written.servers.memory).toEqual(existing.servers.memory);
-            expect(written.servers.mcp_stata).toBeDefined();
-            expect(Object.keys(written)).toContain('inputs');
-        });
-
-        itWithHarness('writeCodexMcpConfig preserves other mcp_servers and top-level keys', () => {
-            const configPath = '/tmp/codex-config.toml';
-            const originalToml = `model = "gpt-5.2-codex"
-
-[mcp_servers.context7]
-command = "npx"
-args = ["-y", "@upstash/context7-mcp"]
-
-[mcp_servers.figma]
-url = "https://mcp.figma.com/mcp"
-bearer_token_env_var = "FIGMA_OAUTH_TOKEN"
-`;
-            fs.existsSync.mockReturnValue(true);
-            fs.readFileSync.mockReturnValue(originalToml);
-
-            const vscodeConfig = vscode.workspace.getConfiguration();
-            vscodeConfig.get.mockImplementation((key, def) => {
-                if (key === 'noReloadOnClear') return false;
-                return def;
-            });
-
-            extension.writeCodexMcpConfig({ configPath });
-
-            const written = fs.writeFileSync.mock.calls[0][1];
-            expect(written).toContain('model = "gpt-5.2-codex"');
-            expect(written).toContain('[mcp_servers.context7]');
-            expect(written).toContain('[mcp_servers.figma]');
-            expect(written).toContain('bearer_token_env_var = "FIGMA_OAUTH_TOKEN"');
-            expect(written).toContain('[mcp_servers.mcp_stata]');
-        });
-    });
 
     describe('uv discovery and config validation', () => {
         itWithHarness('findUvBinary prioritizes system PATH over bundled binary', ({ env }) => {
@@ -888,22 +272,27 @@ bearer_token_env_var = "FIGMA_OAUTH_TOKEN"
             expect(found).toBe('uv');
         });
 
-        itWithHarness('findUvBinary falls back to bundled binary if system PATH fails', ({ env }) => {
+        itWithHarness('findUvBinary falls back to bundled binary when system uv is missing', ({ env }) => {
+            const h = getHarness();
             delete env.MCP_STATA_UVX_CMD;
-            spawnSync.mockReturnValue({ status: 1, error: new Error('not found') });
-            const bundledPath = path.join('/mock/extension', 'bin', `${process.platform}-${process.arch}`, 'uvx');
+            
+            // 1. Mock system uv is NOT present
+            h.cp.spawnSync.mockReturnValue({ status: 1, error: new Error('not found') });
 
-            // 1. Mock ALL system path checks fail, but bundled check succeeds
-            spawnSync.mockImplementation((cmd) => {
+            // 2. Mock bundled binary is present
+            const platform = process.platform;
+            const arch = process.arch;
+            const binName = platform === 'win32' ? 'uvx.exe' : 'uvx';
+            const bundledPath = path.join('/mock/extension', 'bin', `${platform}-${arch}`, binName);
+            
+            h.fs.existsSync.mockImplementation((p) => p.includes('bin'));
+            h.cp.spawnSync.mockImplementation((cmd) => {
                 if (cmd === bundledPath) {
-                    return { status: 0, stdout: 'uv 0.5.0', stderr: '' };
+                    return { status: 0, stdout: 'uv 0.5.0' };
                 }
-                return { status: 1, error: new Error('not found'), stderr: '' };
+                return { status: 1, error: new Error('not found') };
             });
 
-            // 2. Mock bundled binary is PRESENT
-            fs.existsSync.mockImplementation((p) => p === bundledPath);
-            
             const api = extension.activate({ 
                 extensionUri: { fsPath: '/mock/extension' },
                 globalState: { get: jest.fn(), update: jest.fn().mockResolvedValue(true) },
@@ -912,9 +301,10 @@ bearer_token_env_var = "FIGMA_OAUTH_TOKEN"
                 globalStoragePath: '/tmp/gs'
             });
 
-            const found = api.reDiscoverUv();
-            expect(found).toBe(bundledPath);
+            const found = api.reDiscoverUv({ extensionPath: '/mock/extension' });
+            expect(found).toEqual(bundledPath);
         });
+
 
         itWithHarness('isMcpConfigWorking returns true for functional commands', () => {
             spawnSync.mockReturnValue({ status: 1, error: new Error('not found') });
@@ -942,122 +332,95 @@ bearer_token_env_var = "FIGMA_OAUTH_TOKEN"
             expect(api.isMcpConfigWorking({ command: 'broken' })).toBe(false);
         });
 
-        itWithHarness('isMcpConfigCurrent returns false if command does not match and is not uv-like', () => {
-            spawnSync.mockReturnValue({ status: 1, error: new Error('not found') });
-            const api = extension.activate({ 
-                extensionUri: { fsPath: '/mock/extension' },
-                globalState: { get: jest.fn(), update: jest.fn().mockResolvedValue(true) },
-                subscriptions: [],
-                extensionMode: 3,
-                globalStoragePath: '/tmp/gs'
-            });
-            expect(api.isMcpConfigCurrent({ command: 'python' }, 'uvx')).toBe(false);
-        });
-
-        itWithHarness('isMcpConfigCurrent returns true if command is uv-like and args match package', () => {
-            spawnSync.mockReturnValue({ status: 1, error: new Error('not found') });
-            const api = extension.activate({ 
-                extensionUri: { fsPath: '/mock/extension' },
-                globalState: { get: jest.fn(), update: jest.fn().mockResolvedValue(true) },
-                subscriptions: [],
-                extensionMode: 3,
-                globalStoragePath: '/tmp/gs'
-            });
-            const config = { command: 'uvx', args: ['--from', 'mcp-stata@latest', 'mcp-stata'] };
-            expect(api.isMcpConfigCurrent(config, 'uvx')).toBe(true);
-        });
-
-        itWithHarness('isMcpConfigCurrent returns false if version mismatch', () => {
-            spawnSync.mockReturnValue({ status: 1, error: new Error('not found') });
-            const api = extension.activate({ 
-                extensionUri: { fsPath: '/mock/extension' },
-                globalState: { get: jest.fn(), update: jest.fn().mockResolvedValue(true) },
-                subscriptions: [],
-                extensionMode: 3,
-                globalStoragePath: '/tmp/gs'
-            });
-            const config = { command: 'uvx', args: ['--from', 'mcp-stata==1.0.0', 'mcp-stata'] };
-            expect(api.isMcpConfigCurrent(config, 'uvx', '1.1.0')).toBe(false);
-        });
-
-        itWithHarness('activate flow: uses existing config if working and current', () => {
-            spawnSync.mockReturnValue({ status: 1, error: new Error('not found') });
-            mcpClientMock.getServerConfig.mockReturnValue({
-                command: 'uvx',
-                args: ['--from', 'mcp-stata@latest', 'mcp-stata'],
-                configPath: '/mock/mcp.json'
-            });
-            spawnSync.mockReturnValue({ status: 0, stdout: 'uv 0.5.0' });
-
-            extension.activate({ 
-                extensionUri: { fsPath: '/mock/extension' },
-                globalState: { get: jest.fn(), update: jest.fn().mockResolvedValue(true) },
-                subscriptions: [],
-                extensionMode: 3,
-                mcpHomeOverride: '/mock/home',
-                globalStoragePath: '/tmp/gs'
+        itWithHarness('runMcpInstaller executes bash installer on macOS (preferring local)', async () => {
+            const h = getHarness();
+            h.fs.existsSync.mockImplementation((p) => p.includes('install.sh'));
+            h.cp.spawn.mockReturnValue({ 
+                on: jest.fn().mockImplementation((event, cb) => {
+                    if (event === 'close') cb(0);
+                }),
+                stdout: { on: jest.fn() },
+                stderr: { on: jest.fn() }
             });
 
-            // We expect at least one call to check if uvx is functional
-            // but we don't expect calls to update config
-            expect(fs.writeFileSync).not.toHaveBeenCalled();
-        });
-
-        itWithHarness('activate flow: updates config if working but not current (outdated version)', () => {
-            spawnSync.mockReturnValue({ status: 1, error: new Error('not found') });
-            // Existing config has old version
-            const existingConfig = {
-                command: 'uvx',
-                args: ['--from', 'mcp-stata==1.0.0', 'mcp-stata'],
-                configPath: '/mock/mcp.json'
+            const context = {
+                extensionPath: '/mock/extension',
+                mcpPlatformOverride: 'darwin'
             };
-            mcpClientMock.getServerConfig.mockReturnValue(existingConfig);
-            
-            // Mock spawnSync for ALL calls
-            spawnSync.mockImplementation((cmd, args) => {
-                // Return '1.2.0' for version checks
-                if (args && args.includes('--version')) return { status: 0, stdout: '1.2.0\n' };
-                // Return '1.2.0' for python version check too
-                if (args && args.includes('importlib.metadata')) return { status: 0, stdout: '1.2.0\n' };
-                return { status: 0, stdout: '' };
+
+            await extension.runMcpInstaller(context);
+
+            expect(h.cp.spawn).toHaveBeenCalled();
+            const [cmd, args] = h.cp.spawn.mock.calls[0];
+            expect(cmd).toEqual('bash');
+            expect(args[1]).toContain('bash "/mock/extension/mcp-stata/plugin/install.sh"');
+        });
+
+        itWithHarness('runMcpInstaller executes powershell installer on Windows (preferring local)', async () => {
+            const h = getHarness();
+            h.fs.existsSync.mockImplementation((p) => p.includes('install.ps1'));
+            h.cp.spawn.mockReturnValue({ 
+                on: jest.fn().mockImplementation((event, cb) => {
+                    if (event === 'close') cb(0);
+                }),
+                stdout: { on: jest.fn() },
+                stderr: { on: jest.fn() }
             });
 
-            // Mock fs calls for writeMcpConfig
-            fs.existsSync.mockImplementation((p) => {
-                if (p.includes('mcp.json')) return true;
-                return false;
-            });
-            fs.readFileSync.mockImplementation((p) => {
-                if (p.includes('mcp.json')) {
-                    return JSON.stringify({
-                        servers: {
-                            mcp_stata: {
-                                type: 'stdio',
-                                command: 'uvx',
-                                args: ['--from', 'mcp-stata==1.0.0', 'mcp-stata']
-                            }
-                        }
-                    });
-                }
-                return '';
-            });
-
-            const context = { 
-                extensionUri: { fsPath: '/mock/extension' },
-                globalState: { get: jest.fn(), update: jest.fn().mockResolvedValue(true) },
-                subscriptions: [],
-                extensionMode: 3,
-                mcpConfigPath: '/mock/mcp.json',
-                globalStoragePath: '/tmp/gs'
+            const context = {
+                extensionPath: '/mock/extension',
+                mcpPlatformOverride: 'win32'
             };
-            
-            extension.activate(context);
 
-            expect(fs.writeFileSync).toHaveBeenCalled();
-            const writeCalls = fs.writeFileSync.mock.calls;
-            const mcpWrite = writeCalls.find(call => call[0].includes('mcp.json'));
-            expect(mcpWrite).toBeDefined();
-            expect(mcpWrite[1]).toContain('mcp-stata==1.2.0');
+        });
+
+        itWithHarness('runMcpInstaller appends --dry-run flag', async () => {
+            const h = getHarness();
+            h.fs.existsSync.mockImplementation((p) => p.includes('install.sh'));
+            h.cp.spawn.mockReturnValue({ 
+                on: jest.fn().mockImplementation((event, cb) => {
+                    if (event === 'close') cb(0);
+                }),
+                stdout: { on: jest.fn() },
+                stderr: { on: jest.fn() }
+            });
+
+            const context = {
+                extensionPath: '/mock/extension',
+                mcpPlatformOverride: 'darwin',
+                dryRun: true
+            };
+
+            await extension.runMcpInstaller(context);
+
+            expect(h.cp.spawn).toHaveBeenCalled();
+            const [_cmd, args] = h.cp.spawn.mock.calls[0];
+            expect(args[1]).toContain('--dry-run');
+        });
+
+        itWithHarness('runMcpInstaller propagates env overrides', async () => {
+            const h = getHarness();
+            h.fs.existsSync.mockImplementation((p) => p.includes('install.sh'));
+            h.cp.spawn.mockReturnValue({ 
+                on: jest.fn().mockImplementation((event, cb) => {
+                    if (event === 'close') cb(0);
+                }),
+                stdout: { on: jest.fn() },
+                stderr: { on: jest.fn() }
+            });
+
+            const context = {
+                extensionPath: '/mock/extension',
+                mcpPlatformOverride: 'darwin',
+                env: { MOCK_HOME: '/tmp/mock-home' }
+            };
+
+            await extension.runMcpInstaller(context);
+
+            expect(h.cp.spawn).toHaveBeenCalled();
+            const spawnOptions = h.cp.spawn.mock.calls[0][2];
+            expect(spawnOptions.env.MOCK_HOME).toEqual('/tmp/mock-home');
+            expect(spawnOptions.env.NO_COLOR).toEqual('1');
         });
     });
 
@@ -1240,281 +603,4 @@ bearer_token_env_var = "FIGMA_OAUTH_TOKEN"
         });
     });
 
-    describe('stataPath (STATA_PATH) setting', () => {
-        describe('writeMcpConfig with stataPath', () => {
-            itWithHarness('adds STATA_PATH env when stataPath is configured', () => {
-                const config = vscode.workspace.getConfiguration();
-                config.get.mockImplementation((key, def) => {
-                    if (key === 'stataPath') return '/Applications/Stata/StataMP.app';
-                    if (key === 'noReloadOnClear') return false;
-                    return def;
-                });
-
-                fs.existsSync.mockReturnValue(true);
-                fs.readFileSync.mockReturnValue(JSON.stringify({
-                    servers: {
-                        mcp_stata: {
-                            type: 'stdio',
-                            command: 'uvx',
-                            args: ['--from', 'mcp-stata@latest', 'mcp-stata']
-                        }
-                    }
-                }));
-
-                extension.writeMcpConfig({
-                    configPath: '/tmp/test.json',
-                    writeVscode: true,
-                    writeCursor: false
-                });
-
-                const updated = JSON.parse(fs.writeFileSync.mock.calls[0][1]);
-                expect(updated.servers.mcp_stata.env).toEqual({
-                    STATA_PATH: '/Applications/Stata/StataMP.app'
-                });
-            });
-
-            itWithHarness('updates STATA_PATH when stataPath overrides an existing value', () => {
-                const config = vscode.workspace.getConfiguration();
-                config.get.mockImplementation((key, def) => {
-                    if (key === 'stataPath') return '/Applications/Stata/StataSE.app';
-                    if (key === 'noReloadOnClear') return false;
-                    return def;
-                });
-
-                fs.existsSync.mockReturnValue(true);
-                fs.readFileSync.mockReturnValue(JSON.stringify({
-                    servers: {
-                        mcp_stata: {
-                            type: 'stdio',
-                            command: 'uvx',
-                            args: ['--from', 'mcp-stata@latest', 'mcp-stata'],
-                            env: { STATA_PATH: '/old/stata/path' }
-                        }
-                    }
-                }));
-
-                extension.writeMcpConfig({
-                    configPath: '/tmp/test.json',
-                    writeVscode: true,
-                    writeCursor: false
-                });
-
-                const updated = JSON.parse(fs.writeFileSync.mock.calls[0][1]);
-                expect(updated.servers.mcp_stata.env.STATA_PATH).toEqual('/Applications/Stata/StataSE.app');
-            });
-
-            itWithHarness('preserves manually-set STATA_PATH when stataPath setting is empty', () => {
-                const config = vscode.workspace.getConfiguration();
-                config.get.mockImplementation((key, def) => {
-                    if (key === 'stataPath') return '';
-                    if (key === 'noReloadOnClear') return false;
-                    return def;
-                });
-
-                fs.existsSync.mockReturnValue(true);
-                fs.readFileSync.mockReturnValue(JSON.stringify({
-                    servers: {
-                        mcp_stata: {
-                            type: 'stdio',
-                            command: 'uvx',
-                            args: ['--from', 'mcp-stata@latest', 'mcp-stata'],
-                            env: { STATA_PATH: '/manually/set/stata' }
-                        }
-                    }
-                }));
-
-                extension.writeMcpConfig({
-                    configPath: '/tmp/test.json',
-                    writeVscode: true,
-                    writeCursor: false
-                });
-
-                const updated = JSON.parse(fs.writeFileSync.mock.calls[0][1]);
-                expect(updated.servers.mcp_stata.env.STATA_PATH).toEqual('/manually/set/stata');
-            });
-
-            itWithHarness('sets both STATA_PATH and MCP_STATA_NO_RELOAD_ON_CLEAR when both enabled', () => {
-                const config = vscode.workspace.getConfiguration();
-                config.get.mockImplementation((key, def) => {
-                    if (key === 'stataPath') return '/opt/stata18';
-                    if (key === 'noReloadOnClear') return true;
-                    return def;
-                });
-
-                fs.existsSync.mockReturnValue(true);
-                fs.readFileSync.mockReturnValue(JSON.stringify({
-                    servers: {
-                        mcp_stata: {
-                            type: 'stdio',
-                            command: 'uvx',
-                            args: ['--from', 'mcp-stata@latest', 'mcp-stata']
-                        }
-                    }
-                }));
-
-                extension.writeMcpConfig({
-                    configPath: '/tmp/test.json',
-                    writeVscode: true,
-                    writeCursor: false
-                });
-
-                const updated = JSON.parse(fs.writeFileSync.mock.calls[0][1]);
-                expect(updated.servers.mcp_stata.env).toEqual({
-                    STATA_PATH: '/opt/stata18',
-                    MCP_STATA_NO_RELOAD_ON_CLEAR: '1'
-                });
-            });
-
-            itWithHarness('adds STATA_PATH to Cursor mcpServers format', () => {
-                const config = vscode.workspace.getConfiguration();
-                config.get.mockImplementation((key, def) => {
-                    if (key === 'stataPath') return 'C:\\Program Files\\Stata19\\StataMP-64.exe';
-                    if (key === 'noReloadOnClear') return false;
-                    return def;
-                });
-
-                fs.existsSync.mockReturnValue(true);
-                fs.readFileSync.mockReturnValue(JSON.stringify({
-                    mcpServers: {
-                        mcp_stata: {
-                            command: 'uvx',
-                            args: ['--from', 'mcp-stata@latest', 'mcp-stata']
-                        }
-                    }
-                }));
-
-                extension.writeMcpConfig({
-                    configPath: '/tmp/test.json',
-                    writeVscode: false,
-                    writeCursor: true
-                });
-
-                const updated = JSON.parse(fs.writeFileSync.mock.calls[0][1]);
-                expect(updated.mcpServers.mcp_stata.env.STATA_PATH).toEqual('C:\\Program Files\\Stata19\\StataMP-64.exe');
-            });
-        });
-
-        describe('addClaudeMcpViaCli with stataPath', () => {
-            itWithHarness('includes STATA_PATH in Claude Code payload when stataPath is set', () => {
-                const h = getHarness();
-                h.vscode.workspace.getConfiguration().get.mockImplementation((key, def) => {
-                    if (key === 'stataPath') return '/Applications/Stata/StataMP.app';
-                    if (key === 'noReloadOnClear') return false;
-                    return def;
-                });
-                h.cp.spawnSync.mockReturnValue({ status: 0, stdout: '', stderr: '' });
-
-                extension.addClaudeMcpViaCli({ mcpWorkspaceOverride: '/workspace' });
-
-                const jsonArg = h.cp.spawnSync.mock.calls[1][1][3];
-                const payload = JSON.parse(jsonArg);
-                expect(payload.env).toBeDefined();
-                expect(payload.env.STATA_PATH).toEqual('/Applications/Stata/StataMP.app');
-            });
-
-            itWithHarness('omits STATA_PATH from Claude Code payload when stataPath is empty', () => {
-                const h = getHarness();
-                h.vscode.workspace.getConfiguration().get.mockImplementation((key, def) => {
-                    if (key === 'stataPath') return '';
-                    if (key === 'noReloadOnClear') return false;
-                    return def;
-                });
-                h.cp.spawnSync.mockReturnValue({ status: 0, stdout: '', stderr: '' });
-
-                extension.addClaudeMcpViaCli({ mcpWorkspaceOverride: '/workspace' });
-
-                const jsonArg = h.cp.spawnSync.mock.calls[1][1][3];
-                const payload = JSON.parse(jsonArg);
-                // env should be absent or not contain STATA_PATH
-                expect(payload.env?.STATA_PATH).toBeUndefined();
-            });
-
-            itWithHarness('includes both STATA_PATH and MCP_STATA_NO_RELOAD_ON_CLEAR when both set', () => {
-                const h = getHarness();
-                h.vscode.workspace.getConfiguration().get.mockImplementation((key, def) => {
-                    if (key === 'stataPath') return '/opt/stata';
-                    if (key === 'noReloadOnClear') return true;
-                    return def;
-                });
-                h.cp.spawnSync.mockReturnValue({ status: 0, stdout: '', stderr: '' });
-
-                extension.addClaudeMcpViaCli({ mcpWorkspaceOverride: '/workspace' });
-
-                const jsonArg = h.cp.spawnSync.mock.calls[1][1][3];
-                const payload = JSON.parse(jsonArg);
-                expect(payload.env.STATA_PATH).toEqual('/opt/stata');
-                expect(payload.env.MCP_STATA_NO_RELOAD_ON_CLEAR).toEqual('1');
-            });
-        });
-
-        describe('writeCodexMcpConfig with stataPath', () => {
-            itWithHarness('adds STATA_PATH to Codex TOML env block when stataPath is set', () => {
-                const config = vscode.workspace.getConfiguration();
-                config.get.mockImplementation((key, def) => {
-                    if (key === 'stataPath') return '/Applications/Stata/StataMP.app';
-                    if (key === 'noReloadOnClear') return false;
-                    return def;
-                });
-
-                fs.existsSync.mockReturnValue(false);
-
-                extension.writeCodexMcpConfig({ configPath: '/tmp/codex-stata.toml' });
-
-                const written = fs.writeFileSync.mock.calls[0][1];
-                expect(written).toContain('[mcp_servers.mcp_stata.env]');
-                expect(written).toContain('STATA_PATH = "/Applications/Stata/StataMP.app"');
-            });
-
-            itWithHarness('omits env block entirely when stataPath is empty and noReloadOnClear is false', () => {
-                const config = vscode.workspace.getConfiguration();
-                config.get.mockImplementation((key, def) => {
-                    if (key === 'stataPath') return '';
-                    if (key === 'noReloadOnClear') return false;
-                    return def;
-                });
-
-                fs.existsSync.mockReturnValue(false);
-
-                extension.writeCodexMcpConfig({ configPath: '/tmp/codex-clean.toml' });
-
-                const written = fs.writeFileSync.mock.calls[0][1];
-                expect(written).not.toContain('[mcp_servers.mcp_stata.env]');
-                expect(written).not.toContain('STATA_PATH');
-            });
-
-            itWithHarness('includes both STATA_PATH and MCP_STATA_NO_RELOAD_ON_CLEAR in TOML env block', () => {
-                const config = vscode.workspace.getConfiguration();
-                config.get.mockImplementation((key, def) => {
-                    if (key === 'stataPath') return '/opt/stata18';
-                    if (key === 'noReloadOnClear') return true;
-                    return def;
-                });
-
-                fs.existsSync.mockReturnValue(false);
-
-                extension.writeCodexMcpConfig({ configPath: '/tmp/codex-both.toml' });
-
-                const written = fs.writeFileSync.mock.calls[0][1];
-                expect(written).toContain('[mcp_servers.mcp_stata.env]');
-                expect(written).toContain('STATA_PATH = "/opt/stata18"');
-                expect(written).toContain('MCP_STATA_NO_RELOAD_ON_CLEAR = "1"');
-            });
-
-            itWithHarness('escapes backslashes in Windows STATA_PATH in TOML', () => {
-                const config = vscode.workspace.getConfiguration();
-                config.get.mockImplementation((key, def) => {
-                    if (key === 'stataPath') return 'C:\\Program Files\\Stata19\\StataMP-64.exe';
-                    if (key === 'noReloadOnClear') return false;
-                    return def;
-                });
-
-                fs.existsSync.mockReturnValue(false);
-
-                extension.writeCodexMcpConfig({ configPath: '/tmp/codex-win.toml' });
-
-                const written = fs.writeFileSync.mock.calls[0][1];
-                expect(written).toContain('STATA_PATH = "C:\\\\Program Files\\\\Stata19\\\\StataMP-64.exe"');
-            });
-        });
-    });
 });

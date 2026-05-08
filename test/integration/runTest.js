@@ -46,6 +46,8 @@ async function main() {
 
         const extensionDevelopmentPath = path.resolve(__dirname, '../../');
         const extensionTestsPath = path.resolve(__dirname, './suite/index');
+        process.stderr.write(`[INTEGRATION] extensionDevelopmentPath: ${extensionDevelopmentPath}\n`);
+        process.stderr.write(`[INTEGRATION] extensionTestsPath: ${extensionTestsPath}\n`);
 
         // Use a real workspace folder so integration tests can write Workspace settings.
         // Use a temp folder to avoid mutating this repo's .vscode/settings.json.

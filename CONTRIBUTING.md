@@ -1,7 +1,6 @@
 ## Development
 - Node.js version: `>=22.14.0` (or Bun v1.2+)
 - Install dependencies: `bun install`
-- **Download uv binaries**: `bun run download-uv` (fetches platform-specific binaries for bundling)
 - Bundle for development: `bun run compile`
 - Production build: `bun run bundle` (local builds default to development mode unless `CI=true` is set)
 - Watch mode: `bun run watch`

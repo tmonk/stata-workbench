@@ -11,7 +11,13 @@ const createExtensionHarness = (overrides = {}) => {
         mkdirSync: jest.fn()
     };
     const cp = overrides.cp || {
-        spawnSync: jest.fn().mockReturnValue({ status: 0, stdout: '', stderr: '' })
+        spawnSync: jest.fn().mockReturnValue({ status: 0, stdout: '', stderr: '' }),
+        spawn: jest.fn().mockReturnValue({
+            on: jest.fn(),
+            unref: jest.fn(),
+            stdout: { on: jest.fn() },
+            stderr: { on: jest.fn() }
+        })
     };
 
     const mcpClientMock = overrides.mcpClientMock || {

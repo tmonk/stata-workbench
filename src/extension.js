@@ -102,22 +102,131 @@ function applyNoReloadOnClearSetting(enabled) {
     }
 }
 
-function getUvInstallCommand(platform = process.platform) {
+function getMcpInstallCommand(platform = process.platform, args = [], context = null) {
+    const ctx = context || globalContext;
+    // When invoking a local script directly, pass args normally.
+    // When piping into a shell, use "-s --" so stdin is treated as the script and args become $1... for the script.
+    const localExtraArgs = args.length ? ` ${args.join(' ')}` : '';
+    const pipedBashExtraArgs = args.length ? ` -s -- ${args.join(' ')}` : '';
+    
+    // Attempt to use bundled script if available
+    let localPath = null;
+    try {
+        const extensionRoot =
+            (typeof ctx === 'string' ? ctx : null) ||
+            (ctx?.extensionPath ? ctx.extensionPath : null);
+
+        if (extensionRoot) {
+            const scriptName = platform === 'win32' ? 'install.ps1' : 'install.sh';
+            const candidate = path.join(extensionRoot, 'mcp-stata', 'plugin', scriptName);
+            debugLog(`[Installer] Checking candidate: ${candidate}`);
+            if (fs.existsSync(candidate)) {
+                localPath = candidate;
+                debugLog(`[Installer] Found local installer: ${localPath}`);
+            }
+        }
+    } catch (_err) {}
+
     if (platform === 'win32') {
-        const display = 'powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -Command "iwr https://astral.sh/uv/install.ps1 -useb | iex"';
+        const display = localPath
+            ? `& "${localPath}"${localExtraArgs}`
+            : `& ([ScriptBlock]::Create((irm https://mcp-stata-install.tdmonk.com/install.ps1)))${localExtraArgs}`;
+        
+        const psArgs = ['-NoLogo', '-NoProfile', '-ExecutionPolicy', 'Bypass'];
+        if (localPath) {
+            psArgs.push('-File', localPath);
+            if (args.length) psArgs.push(...args);
+        } else {
+            psArgs.push('-Command', display);
+        }
+
         return {
             command: 'powershell',
-            args: ['-NoLogo', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', 'iwr https://astral.sh/uv/install.ps1 -useb | iex'],
+            args: psArgs,
             display
         };
     }
 
-    const display = 'curl -LsSf https://astral.sh/uv/install.sh | sh';
+    const display = localPath
+        ? `bash "${localPath}"${localExtraArgs}`
+        : `curl -LsSf https://mcp-stata-install.tdmonk.com/install.sh | bash${pipedBashExtraArgs}`;
+    
+    const bashArgs = ['-c', display];
+
     return {
-        command: 'sh',
-        args: ['-c', display],
+        command: 'bash',
+        args: bashArgs,
         display
     };
+}
+
+/**
+ * Runs the official mcp-stata installer script in the background or foreground.
+ * Handles both installation/update and uninstallation.
+ */
+async function runMcpInstaller(options = {}) {
+    const { uninstall = false, background = false, dryRun = false, mcpPlatformOverride = null } = options;
+    const platform = mcpPlatformOverride || process.platform;
+    const scope = options.scope || 'user';
+    const args = uninstall ? ['--uninstall'] : [];
+    if (dryRun) args.push('--dry-run');
+    if (scope) args.push('--scope', scope);
+    const installCmd = getMcpInstallCommand(platform, args, options);
+
+    const spawnEnv = { ...getEnv(), NO_COLOR: '1' };
+    if (options.env) {
+        Object.assign(spawnEnv, options.env);
+    }
+
+    appendLine(`${uninstall ? 'Uninstalling' : 'Installing/Updating'} mcp-stata toolkit...`);
+    debugLog(`Executing: ${installCmd.display}`);
+
+    if (background) {
+        // Run in background without awaiting; errors will be logged but not block activation.
+        const child = cp.spawn(installCmd.command, installCmd.args, {
+            env: spawnEnv,
+            detached: true,
+            stdio: 'ignore'
+        });
+        child.unref();
+        return;
+    }
+
+    return vscode.window.withProgress({
+        location: vscode.ProgressLocation.Notification,
+        title: uninstall ? "Uninstalling mcp-stata" : "Setting up mcp-stata toolkit",
+        cancellable: false
+    }, async (progress) => {
+        return new Promise((resolve, reject) => {
+            const child = cp.spawn(installCmd.command, installCmd.args, {
+                env: spawnEnv
+            });
+
+            child.stdout.on('data', (data) => {
+                const msg = data.toString().trim();
+                if (msg) {
+                    debugLog(`[Installer] ${msg}`);
+                    progress.report({ message: msg });
+                }
+            });
+
+            child.stderr.on('data', (data) => {
+                const msg = data.toString().trim();
+                if (msg) appendLine(`[Installer Error] ${msg}`);
+            });
+
+            child.on('close', (code) => {
+                if (code === 0) {
+                    appendLine(`mcp-stata ${uninstall ? 'uninstallation' : 'setup'} complete.`);
+                    resolve();
+                } else {
+                    const err = `${uninstall ? 'Uninstall' : 'Setup'} failed with exit code ${code}`;
+                    appendLine(`[ERROR] ${err}`);
+                    reject(new Error(err));
+                }
+            });
+        });
+    });
 }
 
 function activate(context) {
@@ -205,7 +314,8 @@ function activate(context) {
         vscode.commands.registerCommand('stata-workbench.runFile', runFile),
         vscode.commands.registerCommand('stata-workbench.testMcpServer', testConnection),
         vscode.commands.registerCommand('stata-workbench.viewData', viewData),
-        vscode.commands.registerCommand('stata-workbench.installMcpCli', () => promptInstallMcpCli(globalContext, true)),
+        vscode.commands.registerCommand('stata-workbench.installMcpCli', () => runMcpInstaller({ background: false })),
+        vscode.commands.registerCommand('stata-workbench.uninstallMcpToolkit', () => runMcpInstaller({ uninstall: true })),
         vscode.commands.registerCommand('stata-workbench.cancelRequest', cancelRequest),
         vscode.commands.registerCommand('stata-workbench.openTerminal', openTerminal),
         mcpClient.onStatusChanged(updateStatusBar)
@@ -295,9 +405,13 @@ function activate(context) {
     }
 
     if (!missingCli) {
-        // Sync configs immediately with current (possibly cached) version info
+        // Sync configs via installer if enabled and needed
+        const config = vscode.workspace.getConfiguration('stataMcp');
+        if (config.get('autoConfigureMcp', true) && !isWorking) {
+            runMcpInstaller({ background: true });
+        }
+        
         mcpPackageVersion = getMcpPackageVersion();
-        syncMcpConfigsFromSettings(context);
 
         appendLine(`mcp-stata version: ${mcpPackageVersion}`);
         try {
@@ -312,7 +426,7 @@ function activate(context) {
                     mcpPackageVersion = refreshed;
                     appendLine(`mcp-stata updated to ${mcpPackageVersion}`);
                     try { Sentry.setTag("mcp.version", mcpPackageVersion); } catch (_e) { }
-                    syncMcpConfigsFromSettings(context);
+                    // No longer need to sync manually; next run will use the new version.
                 }
             } catch (_err) {
                 appendLine(`Deferred mcp-stata refresh failed: ${_err.message}`);
@@ -343,13 +457,13 @@ function activate(context) {
                 }
                 if (
                     e.affectsConfiguration('stataMcp.autoConfigureMcp') ||
-                    e.affectsConfiguration('stataMcp.configureClaudeCode') ||
-                    e.affectsConfiguration('stataMcp.configureCodex') ||
-                    e.affectsConfiguration('stataMcp.codexConfigPath') ||
                     e.affectsConfiguration('stataMcp.stataPath') ||
                     e.affectsConfiguration('stataMcp.noReloadOnClear')
                 ) {
-                    if (!missingCli) syncMcpConfigsFromSettings(context);
+                    const auto = vscode.workspace.getConfiguration('stataMcp').get('autoConfigureMcp', true);
+                    if (!missingCli && auto) {
+                        runMcpInstaller({ background: true });
+                    }
                 }
             }
         })
@@ -365,57 +479,60 @@ function activate(context) {
             refreshMcpPackage,
             getUvCommand: () => uvCommand,
             getMcpPackageVersion,
-            reDiscoverUv: () => {
+            runMcpInstaller,
+            reDiscoverUv: (optionalInstallDir) => {
                 _cachedUvBinary = undefined; // invalidate cache for re-discovery
-                ensureMcpCliAvailable(context);
+                if (optionalInstallDir) {
+                    if (optionalInstallDir.extensionPath) {
+                        // Special case for passing a mock context-like object in tests
+                        uvCommand = findUvBinary(optionalInstallDir.extensionPath);
+                    } else {
+                        uvCommand = findUvBinary(optionalInstallDir);
+                    }
+                } else {
+                    ensureMcpCliAvailable(context);
+                }
                 return uvCommand;
             },
             isMcpConfigWorking,
-            isMcpConfigCurrent,
-            logRunToOutput
+            logRunToOutput,
+            // runMcpInstaller already exported above
         };
     }
 }
 
 function ensureMcpCliAvailable(context) {
     const env = getEnv();
+
     const found = findUvBinary();
     if (found) {
         uvCommand = found;
         debugLog(`Using uv binary at: ${uvCommand}`);
         // Only set the env var if it's not already set to this value
-        // or if we want to ensure it's propagated to children.
-        // For tests, we want to AVOID overwriting a specific path override with "uvx"
         if (!env.MCP_STATA_UVX_CMD || env.MCP_STATA_UVX_CMD !== uvCommand) {
             env.MCP_STATA_UVX_CMD = uvCommand;
         }
         return true;
     }
 
-    const installDir = path.join(context.globalStoragePath, 'uv');
-    try {
-        fs.mkdirSync(installDir, { recursive: true });
-    } catch (_err) {
-        // ignore mkdir failures; fall back to prompt
-    }
-
-    const installCmd = getUvInstallCommand();
-    debugLog('uvx not found on PATH; attempting automatic installation via uv installer.');
+    debugLog('uvx not found on PATH; attempting automatic installation via mcp-stata installer.');
     revealOutput();
-    const installEnv = { ...env, UV_INSTALL_DIR: installDir };
-    const result = cp.spawnSync(installCmd.command, installCmd.args, { env: installEnv, encoding: 'utf8' });
+    
+    // Use the installer to bootstrap uv and configure the server
+    runMcpInstaller({ background: false }).then(() => {
+        const installed = findUvBinary();
+        if (installed) {
+            uvCommand = installed;
+            env.MCP_STATA_UVX_CMD = uvCommand;
+            missingCli = false;
+            updateStatusBar('idle');
+        }
+    }).catch((err) => {
+        debugLog(`Automatic mcp-stata install failed: ${err.message}`);
+        revealOutput();
+        promptInstallMcpCli();
+    });
 
-    const installed = findUvBinary(installDir);
-    if (result.status === 0 && installed) {
-        uvCommand = installed;
-        debugLog(`Using uv binary at: ${uvCommand} (automatically installed)`);
-        env.MCP_STATA_UVX_CMD = uvCommand;
-        return true;
-    }
-
-    debugLog('Automatic uv install failed or uvx still missing. You can copy the install command from the prompt.');
-    revealOutput();
-    promptInstallMcpCli();
     return false;
 }
 
@@ -553,18 +670,18 @@ function promptInstallMcpCli(context, force = false) {
         return false;
     }
 
-    const installCmd = getUvInstallCommand().display;
-    const message = 'uvx (uv) not found on PATH. Install uv to run mcp-stata via uvx.';
+    const installCmd = getMcpInstallCommand().display;
+    const message = 'mcp-stata toolkit is missing. Install it to use Stata Workbench.';
     vscode.window.showErrorMessage(
         message,
-        'Copy uv install',
-        'Open uv docs'
+        'Copy install command',
+        'Open documentation'
     ).then(async (choice) => {
-        if (choice === 'Copy uv install') {
+        if (choice === 'Copy install command') {
             await vscode.env.clipboard.writeText(installCmd);
             vscode.window.showInformationMessage(`Copied: ${installCmd}`);
-        } else if (choice === 'Open uv docs') {
-            vscode.env.openExternal(vscode.Uri.parse('https://docs.astral.sh/uv/getting-started/installation/'));
+        } else if (choice === 'Open documentation') {
+            vscode.env.openExternal(vscode.Uri.parse('https://github.com/tmonk/mcp-stata#quickstart'));
         }
     });
     missingCli = true;
@@ -602,38 +719,7 @@ function findUvBinary(optionalInstallDir) {
         }
     }
 
-    // 2. Check for bundled binary as fallback
-    if (globalContext && globalContext.extensionUri && globalContext.extensionUri.fsPath) {
-        const platform = process.platform;
-        const arch = process.arch;
-        const binNames = isWin ? ['uvx.exe', 'uv.exe'] : ['uvx', 'uv'];
-
-        for (const binName of binNames) {
-            // Try platform-specific subdirectory first
-            const platformSpecific = path.join(globalContext.extensionUri.fsPath, 'bin', `${platform}-${arch}`, binName);
-            if (fs.existsSync(platformSpecific)) {
-                const result = cp.spawnSync(platformSpecific, ['--version'], { encoding: 'utf8', shell: isWin });
-                const stderr = (result.stderr || '').toString();
-                if (!result.error && result.status === 0 && !stderr.includes('command not found')) {
-                    _cachedUvBinary = platformSpecific;
-                    return platformSpecific;
-                }
-            }
-
-            // Fallback to generic bin directory
-            const genericBundled = path.join(globalContext.extensionUri.fsPath, 'bin', binName);
-            if (fs.existsSync(genericBundled)) {
-                const result = cp.spawnSync(genericBundled, ['--version'], { encoding: 'utf8', shell: isWin });
-                const stderr = (result.stderr || '').toString();
-                if (!result.error && result.status === 0 && !stderr.includes('command not found')) {
-                    _cachedUvBinary = genericBundled;
-                    return genericBundled;
-                }
-            }
-        }
-    }
-
-    // 3. Check common installation directories
+    // 2. Check common installation directories
     const candidates = [];
     const defaultDirs = new Set();
     const home = typeof os.homedir === 'function' ? os.homedir() : null;
@@ -644,9 +730,20 @@ function findUvBinary(optionalInstallDir) {
         defaultDirs.add(path.join(localApp, 'uv', 'bin'));
     }
 
+    // 3. Check bundled binary location
+    if (globalContext?.extensionPath) {
+        const platform = process.platform;
+        const arch = process.arch;
+        defaultDirs.add(path.join(globalContext.extensionPath, 'bin', `${platform}-${arch}`));
+    }
+
     if (optionalInstallDir) {
         defaultDirs.add(optionalInstallDir);
         defaultDirs.add(path.join(optionalInstallDir, 'bin'));
+        // Also check as if it were an extensionPath (bin/platform-arch)
+        const platform = process.platform;
+        const arch = process.arch;
+        defaultDirs.add(path.join(optionalInstallDir, 'bin', `${platform}-${arch}`));
     }
 
     for (const dir of defaultDirs) {
@@ -667,6 +764,7 @@ function findUvBinary(optionalInstallDir) {
     return null;
 }
 
+
 function isMcpConfigWorking(config) {
     if (!config || !config.command) return false;
     try {
@@ -676,722 +774,6 @@ function isMcpConfigWorking(config) {
     } catch (_err) {
         return false;
     }
-}
-
-function isClaudeCodeInstalled() {
-    try {
-        const result = cp.spawnSync('claude', ['--version'], { encoding: 'utf8', shell: process.platform === 'win32', timeout: 3000 });
-        const stderr = (result.stderr || '').toString();
-        return !result.error && result.status === 0 && !stderr.includes('command not found');
-    } catch (_err) {
-        return false;
-    }
-}
-
-/**
- * Register mcp_stata with Claude Code via `claude mcp add-json`. Uses Claude's official
- * mechanism so both CLI and VS Code extension see the server. Per https://code.claude.com/docs/en/mcp
- * Removes first if already exists (add-json fails with "already exists").
- */
-function addClaudeMcpViaCli(context) {
-    const config = vscode.workspace.getConfiguration('stataMcp');
-    const noReloadOnClear = !!config.get('noReloadOnClear', false);
-    const stataPath = (config.get('stataPath', '') || '').trim();
-
-    const resolvedCommand = uvCommand || 'uvx';
-    const isDevVersion = mcpPackageVersion && /\.dev\d+$|\.post\d+$|[ab]\d+$/.test(mcpPackageVersion);
-    const activeSpec = (mcpPackageVersion && mcpPackageVersion !== 'unknown' && !isDevVersion)
-        ? `${MCP_PACKAGE_NAME}==${mcpPackageVersion}`
-        : MCP_PACKAGE_SPEC;
-    const isRunUv = resolvedCommand.endsWith('uv') || resolvedCommand.endsWith('uv.exe');
-    const args = isRunUv
-        ? ['tool', 'run', '--refresh', '--refresh-package', MCP_PACKAGE_NAME, '--from', activeSpec, MCP_PACKAGE_NAME]
-        : ['--refresh', '--refresh-package', MCP_PACKAGE_NAME, '--from', activeSpec, MCP_PACKAGE_NAME];
-
-    const payloadEnv = {
-        ...(noReloadOnClear && { MCP_STATA_NO_RELOAD_ON_CLEAR: '1' }),
-        ...(stataPath && { STATA_PATH: stataPath })
-    };
-    const payload = {
-        type: 'stdio',
-        command: resolvedCommand,
-        args,
-        ...(Object.keys(payloadEnv).length && { env: payloadEnv })
-    };
-    const jsonArg = JSON.stringify(payload);
-
-    try {
-        // Remove first to avoid "MCP server mcp_stata already exists" error (add-json does not overwrite)
-        cp.spawnSync('claude', ['mcp', 'remove', MCP_SERVER_ID], {
-            encoding: 'utf8',
-            shell: process.platform === 'win32',
-            timeout: 5000
-        });
-        // Ignore remove failures (e.g. not found) - we'll add regardless
-
-        const result = cp.spawnSync('claude', ['mcp', 'add-json', MCP_SERVER_ID, jsonArg, '--scope', 'user'], {
-            encoding: 'utf8',
-            shell: process.platform === 'win32',
-            timeout: 15000
-        });
-        const out = (result.stdout || '').trim();
-        const err = (result.stderr || '').trim();
-        if (result.status !== 0) {
-            outputChannel?.appendLine?.(`claude mcp add-json failed (${result.status}): ${err || out}`);
-            return;
-        }
-        outputChannel?.appendLine?.(`Registered ${MCP_SERVER_ID} with Claude Code via CLI (user scope)`);
-    } catch (err) {
-        outputChannel?.appendLine?.(`Failed to run claude mcp add-json: ${err.message || err}`);
-    }
-}
-
-/**
- * Remove mcp_stata from Claude Code. Runs `claude mcp remove` and also cleans config files directly,
- * since the CLI only removes from global scope (per anthropics/claude-code#7936).
- */
-function removeClaudeMcpViaCli(context) {
-    const home = os.homedir();
-    const workspaceRoot = resolveWorkspaceRoot(context);
-
-    // 1. CLI remove - user scope, works from anywhere (no cwd needed)
-    try {
-        const result = cp.spawnSync('claude', ['mcp', 'remove', MCP_SERVER_ID], {
-            encoding: 'utf8',
-            shell: process.platform === 'win32',
-            timeout: 5000
-        });
-        const err = (result.stderr || '').trim();
-        if (result.status !== 0 && !err.includes('not found') && !err.includes('No MCP servers')) {
-            outputChannel?.appendLine?.(`claude mcp remove: ${err}`);
-        }
-    } catch (err) {
-        outputChannel?.appendLine?.(`claude mcp remove failed: ${err.message || err}`);
-    }
-
-    // 2. Direct file cleanup - CLI only removes from global; project/local scopes persist (anthropics/claude-code#7936)
-    const cursorTarget = { configPath: null, writeVscode: false, writeCursor: true, cleanClaudeProjects: true };
-    if (home) {
-        removeFromMcpConfig({ ...cursorTarget, configPath: path.join(home, '.claude.json') });
-        removeFromMcpConfig({ ...cursorTarget, configPath: path.join(home, '.claude', '.claude.json') });
-    }
-    if (workspaceRoot) {
-        removeFromMcpConfig({ configPath: path.join(workspaceRoot, '.mcp.json'), writeVscode: false, writeCursor: true });
-    }
-    outputChannel?.appendLine?.(`Removed ${MCP_SERVER_ID} from Claude Code config`);
-}
-
-/**
- * Checks if the existing MCP config matches what we expect to be "current".
- * If mcp-stata has released a new version, the config might be "working" but not "current".
- */
-function isMcpConfigCurrent(config, expectedUv, expectedVersion) {
-    if (!config || !config.command || !config.args) return false;
-
-    // Check if the command matches our resolved uv command (or is a valid equivalent)
-    if (config.command !== expectedUv) {
-        // If we expect 'uvx' and they have an absolute path to it, that's fine.
-        // But if they have some other command, it's not our "current" preferred setup.
-        if (!config.command.includes('uv')) return false;
-    }
-
-    // Check args for at least the package and version.
-    const argsStr = config.args.join(' ');
-    if (!argsStr.includes(MCP_PACKAGE_NAME)) return false;
-
-    // If we have a specific version we expect, check for it.
-    if (expectedVersion && expectedVersion !== 'unknown') {
-        if (!argsStr.includes(expectedVersion) && !argsStr.includes('@latest')) return false;
-    }
-
-    return true;
-}
-
-function ensureMcpConfigs(context) {
-    const target = getMcpConfigTarget(context);
-    if (!target) {
-        outputChannel?.appendLine?.('Skipping MCP config update: no user-level mcp.json path resolved');
-        return;
-    }
-
-    writeMcpConfig(target);
-}
-
-/**
- * Sync all MCP configs to match current settings. Adds or updates entries when settings
- * are enabled; removes entries cleanly when settings are disabled. Runs on extension load
- * and when autoConfigureMcp, configureClaudeCode, or configureCodex are toggled.
- */
-function syncMcpConfigsFromSettings(context) {
-    const config = vscode.workspace.getConfiguration('stataMcp');
-    const autoConfigureMcp = config.get('autoConfigureMcp', true);
-    const configureClaudeCode = config.get('configureClaudeCode', false);
-    const configureCodex = config.get('configureCodex', false);
-
-    // Host mcp.json (VS Code, Cursor, Windsurf, Antigravity)
-    // When autoConfigureMcp is disabled, leave the file untouched entirely.
-    const hostTarget = getMcpConfigTarget(context);
-    if (hostTarget && autoConfigureMcp) {
-        const isCurrent = mcpClient.getServerConfig && isMcpConfigCurrent(mcpClient.getServerConfig(), uvCommand, mcpPackageVersion);
-        if (!isCurrent) ensureMcpConfigs(context);
-    }
-
-    // Claude Code (via claude mcp add-json / remove - ensures CLI and extension both see it)
-    if (configureClaudeCode && isClaudeCodeInstalled()) {
-        addClaudeMcpViaCli(context);
-    } else {
-        removeClaudeMcpViaCli(context);
-    }
-
-    // Codex (~/.codex/config.toml)
-    const codexTarget = getCodexMcpConfigTarget(context);
-    if (codexTarget) {
-        if (configureCodex) {
-            const existing = loadCodexMcpConfigFromPath(codexTarget);
-            if (!isMcpConfigCurrent(existing, uvCommand, mcpPackageVersion)) {
-                writeCodexMcpConfig(codexTarget);
-            }
-        } else {
-            removeFromCodexMcpConfig(codexTarget);
-        }
-    }
-}
-
-/**
- * Remove mcp_stata entry from JSON MCP config (host or Claude).
- * @param {object} target - { configPath, writeVscode, writeCursor, cleanClaudeProjects? }
- * @param {boolean} target.cleanClaudeProjects - when true, also remove from projects[path].mcpServers (Claude ~/.claude.json)
- */
-function removeFromMcpConfig(target) {
-    const { configPath, writeVscode, writeCursor, cleanClaudeProjects } = target || {};
-    if (!configPath || (!writeVscode && !writeCursor)) return;
-    try {
-        if (!fs.existsSync(configPath)) return;
-        const raw = fs.readFileSync(configPath, 'utf8');
-        const parsed = safeParseJson(raw);
-        if (parsed.error) return;
-        const json = parsed.data && typeof parsed.data === 'object' ? parsed.data : {};
-        let changed = false;
-        if (json.servers?.[MCP_SERVER_ID]) {
-            delete json.servers[MCP_SERVER_ID];
-            changed = true;
-        }
-        if (json.mcpServers?.[MCP_SERVER_ID]) {
-            delete json.mcpServers[MCP_SERVER_ID];
-            changed = true;
-        }
-        if (cleanClaudeProjects && json.projects && typeof json.projects === 'object') {
-            for (const proj of Object.values(json.projects)) {
-                if (proj?.mcpServers?.[MCP_SERVER_ID]) {
-                    delete proj.mcpServers[MCP_SERVER_ID];
-                    changed = true;
-                }
-                if (proj.mcpServers && Object.keys(proj.mcpServers).length === 0) delete proj.mcpServers;
-            }
-        }
-        if (json.servers && Object.keys(json.servers).length === 0) delete json.servers;
-        if (json.mcpServers && Object.keys(json.mcpServers).length === 0) delete json.mcpServers;
-        if (changed) {
-            fs.writeFileSync(configPath, JSON.stringify(json, null, 2));
-            outputChannel?.appendLine?.(`Removed ${MCP_SERVER_ID} from ${configPath}`);
-        }
-    } catch (err) {
-        console.error('Failed to remove from MCP config', configPath, err.message);
-    }
-}
-
-/**
- * Remove mcp_stata entry from Codex config.toml.
- */
-function removeFromCodexMcpConfig(target) {
-    const configPath = target?.configPath;
-    if (!configPath) return;
-    try {
-        if (!fs.existsSync(configPath)) return;
-        let raw = fs.readFileSync(configPath, 'utf8');
-        const escapedId = MCP_SERVER_ID.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        const mainSectionRegex = new RegExp(
-            `\\n?\\[mcp_servers\\.${escapedId}\\][\\s\\S]*?(?=\\n\\[mcp_servers\\.|\\n\\[\\w|\\n\\[[\\w.]|$)`,
-            'i'
-        );
-        const envSectionRegex = new RegExp(
-            `\\n?\\[mcp_servers\\.${escapedId}\\.env\\][\\s\\S]*?(?=\\n\\[|$)`,
-            'i'
-        );
-        const hadMain = mainSectionRegex.test(raw);
-        mainSectionRegex.lastIndex = 0;
-        raw = raw.replace(mainSectionRegex, '');
-        raw = raw.replace(envSectionRegex, '');
-        if (hadMain) {
-            raw = raw.replace(/\n{3,}/g, '\n\n').trimEnd();
-            fs.writeFileSync(configPath, raw + (raw && !raw.endsWith('\n') ? '\n' : ''));
-            outputChannel?.appendLine?.(`Removed ${MCP_SERVER_ID} from ${configPath}`);
-        }
-    } catch (err) {
-        console.error('Failed to remove from Codex MCP config', configPath, err.message);
-    }
-}
-
-function resolveWorkspaceRoot(context) {
-    if (context?.mcpWorkspaceOverride) return context.mcpWorkspaceOverride;
-    return vscode.workspace.workspaceFolders?.[0]?.uri?.fsPath || null;
-}
-
-/**
- * Resolves a config path from settings: expands ~ to home and ${workspaceFolder} to workspace root.
- * @param {string} rawPath - Path from settings (e.g. ~/.claude/.claude.json, ${workspaceFolder}/.mcp.json)
- * @param {object} context - Extension context (for test overrides)
- * @returns {string} Absolute path, or original path if expansions cannot be applied
- */
-function resolveConfigPath(rawPath, context) {
-    if (!rawPath || typeof rawPath !== 'string') return '';
-    const hasHomeOverride = context && Object.prototype.hasOwnProperty.call(context, 'mcpHomeOverride');
-    const home = hasHomeOverride ? context.mcpHomeOverride : (context?.extensionMode === vscode.ExtensionMode.Test ? null : os.homedir());
-    const workspaceRoot = resolveWorkspaceRoot(context) || '';
-    let resolved = rawPath.replace(/\$\{workspaceFolder\}/g, workspaceRoot);
-    if (resolved.startsWith('~/') && home) {
-        resolved = path.join(home, resolved.slice(2));
-    } else if (resolved.startsWith('~') && home) {
-        resolved = path.join(home, resolved.slice(1));
-    } else if (resolved.startsWith('~')) {
-        return ''; // cannot expand ~ without home (e.g. in test mode)
-    }
-    return resolved;
-}
-
-/**
- * Returns Codex MCP config target from user-configured path.
- * Default: ~/.codex/config.toml
- */
-function getCodexMcpConfigTarget(context) {
-    const config = vscode.workspace.getConfiguration('stataMcp');
-    const rawPath = config.get('codexConfigPath', '~/.codex/config.toml');
-    const resolved = resolveConfigPath(rawPath, context);
-    if (!resolved) return null;
-    return { configPath: resolved };
-}
-
-/**
- * Parse Codex config.toml and extract mcp_stata entry. Returns { command, args, env, configPath }.
- */
-function loadCodexMcpConfigFromPath(target) {
-    const configPath = target?.configPath;
-    if (!configPath) return { command: null, args: null, env: {}, configPath: null };
-    try {
-        if (!fs.existsSync(configPath)) {
-            return { command: null, args: null, env: {}, configPath };
-        }
-        const raw = fs.readFileSync(configPath, 'utf8');
-        const escapedId = MCP_SERVER_ID.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        const sectionRegex = new RegExp(
-            `\\[mcp_servers\\.${escapedId}\\]([\\s\\S]*?)(?=\\n\\[mcp_servers\\.|\\n\\[\\w|$)`,
-            'i'
-        );
-        const match = raw.match(sectionRegex);
-        if (!match) return { command: null, args: null, env: {}, configPath };
-
-        const block = match[1];
-        const commandMatch = block.match(/command\s*=\s*"((?:[^"\\\\]|\\\\["\\\\])*)"/);
-        const argsMatch = block.match(/args\s*=\s*(\[[^\]]*\])/);
-        const envSectionRegex = new RegExp(`\\[mcp_servers\\.${escapedId}\\.env\\]([\\s\\S]*?)(?=\\n\\[|$)`, 'im');
-        const envBlockMatch = raw.match(envSectionRegex);
-        let env = {};
-        if (envBlockMatch) {
-            const envLines = envBlockMatch[1].split('\n');
-            for (const line of envLines) {
-                const kv = line.trim().match(/^"?([^"=\s]+)"?\s*=\s*"([^"]*)"$/);
-                if (kv) env[kv[1]] = kv[2];
-            }
-        }
-        let args = null;
-        if (argsMatch) {
-            try {
-                const decoded = argsMatch[1].replace(/\\"/g, '"');
-                args = JSON.parse(decoded);
-            } catch (_e) {
-                const inner = argsMatch[1].slice(1, -1).replace(/"/g, '');
-                args = inner ? inner.split(',').map((s) => s.trim()).filter(Boolean) : [];
-            }
-        }
-        const cmd = commandMatch ? commandMatch[1].replace(/\\\\/g, '\\').replace(/\\"/g, '"') : null;
-        return {
-            command: cmd,
-            args: Array.isArray(args) ? args : null,
-            env,
-            configPath
-        };
-    } catch (_err) {
-        return { command: null, args: null, env: {}, configPath };
-    }
-}
-
-/**
- * Write or merge mcp_stata entry into Codex config.toml (TOML format).
- */
-function writeCodexMcpConfig(target) {
-    const configPath = target?.configPath;
-    if (!configPath) return;
-    const config = vscode.workspace.getConfiguration('stataMcp');
-    const noReloadOnClear = !!config.get('noReloadOnClear', false);
-    const stataPath = (config.get('stataPath', '') || '').trim();
-    const resolvedCommand = uvCommand || 'uvx';
-    const isTest = globalContext?.extensionMode === vscode.ExtensionMode.Test;
-    if (resolvedCommand.includes('/mock/') && !isTest) {
-        outputChannel?.appendLine?.('Skipping Codex MCP config write: resolved command appears to be a mock path');
-        return;
-    }
-    const isDevVersion = mcpPackageVersion && /\.dev\d+$|\.post\d+$|[ab]\d+$/.test(mcpPackageVersion);
-    const activeSpec = (mcpPackageVersion && mcpPackageVersion !== 'unknown' && !isDevVersion)
-        ? `${MCP_PACKAGE_NAME}==${mcpPackageVersion}`
-        : MCP_PACKAGE_SPEC;
-    const expectedArgs = (resolvedCommand.endsWith('uv') || resolvedCommand.endsWith('uv.exe'))
-        ? ['tool', 'run', '--refresh', '--refresh-package', MCP_PACKAGE_NAME, '--from', activeSpec, MCP_PACKAGE_NAME]
-        : ['--refresh', '--refresh-package', MCP_PACKAGE_NAME, '--from', activeSpec, MCP_PACKAGE_NAME];
-
-    const argsStr = JSON.stringify(expectedArgs);
-    let tomlBlock = `[mcp_servers.${MCP_SERVER_ID}]\ncommand = "${resolvedCommand.replace(/"/g, '\\"')}"\nargs = ${argsStr}\n`;
-    const envEntries = [
-        ...(noReloadOnClear ? [`MCP_STATA_NO_RELOAD_ON_CLEAR = "1"`] : []),
-        ...(stataPath ? [`STATA_PATH = "${stataPath.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`] : [])
-    ];
-    if (envEntries.length) {
-        tomlBlock += `[mcp_servers.${MCP_SERVER_ID}.env]\n${envEntries.join('\n')}\n`;
-    }
-
-    try {
-        const dir = path.dirname(configPath);
-        fs.mkdirSync(dir, { recursive: true });
-        let raw = fs.existsSync(configPath) ? fs.readFileSync(configPath, 'utf8') : '';
-        const escapedId = MCP_SERVER_ID.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        // Use non-multiline regex so $ matches only end of string, not before newlines
-        const mainSectionRegex = new RegExp(
-            `\\n?\\[mcp_servers\\.${escapedId}\\][\\s\\S]*?(?=\\n\\[mcp_servers\\.|\\n\\[\\w|\\n\\[[\\w.]|$)`,
-            'i'
-        );
-        const envSectionRegex = new RegExp(
-            `\\n?\\[mcp_servers\\.${escapedId}\\.env\\][\\s\\S]*?(?=\\n\\[|$)`,
-            'i'
-        );
-        const hadMain = mainSectionRegex.test(raw);
-        mainSectionRegex.lastIndex = 0;
-        raw = raw.replace(mainSectionRegex, '');
-        raw = raw.replace(envSectionRegex, '');
-        raw = raw.replace(/\n{3,}/g, '\n\n').trimEnd();
-        if (raw && !raw.endsWith('\n')) raw += '\n';
-        raw += (hadMain ? '' : '\n') + tomlBlock;
-        fs.writeFileSync(configPath, raw);
-        outputChannel?.appendLine?.(`Updated Codex MCP config at ${configPath} for ${MCP_SERVER_ID}`);
-    } catch (err) {
-        console.error('Failed to write Codex MCP config', configPath, err.message);
-    }
-}
-
-function loadMcpConfigFromPath(configPath) {
-    if (!configPath) return { command: null, args: null, env: {}, configPath: null };
-    try {
-        if (!fs.existsSync(configPath)) {
-            return { command: null, args: null, env: {}, configPath };
-        }
-        const raw = fs.readFileSync(configPath, 'utf8');
-        const parsed = safeParseJson(raw);
-        const json = parsed.data && typeof parsed.data === 'object' ? parsed.data : {};
-        const entry = json?.servers?.[MCP_SERVER_ID] || json?.mcpServers?.[MCP_SERVER_ID];
-        if (!entry) {
-            return { command: null, args: null, env: {}, configPath };
-        }
-        const env = (typeof entry.env === 'object' && entry.env !== null) ? entry.env : {};
-        return {
-            command: entry.command || null,
-            args: Array.isArray(entry.args) ? entry.args : null,
-            env,
-            configPath
-        };
-    } catch (_err) {
-        return { command: null, args: null, env: {}, configPath };
-    }
-}
-
-function hasExistingMcpConfig(context) {
-    const target = getMcpConfigTarget(context);
-    if (!target) return false;
-
-    try {
-        if (!fs.existsSync(target.configPath)) return false;
-        const raw = fs.readFileSync(target.configPath, 'utf8');
-        if (!raw) return false;
-        const json = JSON.parse(raw);
-        return !!(json?.servers?.[MCP_SERVER_ID] || json?.mcpServers?.[MCP_SERVER_ID]);
-    } catch (_err) {
-        Sentry.captureException(_err);
-        return false;
-    }
-}
-
-function getMcpConfigTarget(context) {
-    const appName = (context?.mcpAppNameOverride || vscode.env?.appName || '').toLowerCase();
-    const hasHomeOverride = context && Object.prototype.hasOwnProperty.call(context, 'mcpHomeOverride');
-
-    // In tests, we must not default to the real home directory unless explicitly requested.
-    // This prevents unit tests from accidentally writing to the user's real mcp.json.
-    let home;
-    if (hasHomeOverride) {
-        home = context.mcpHomeOverride;
-    } else if (context && context.extensionMode === vscode.ExtensionMode.Test) {
-        home = null;
-    } else {
-        home = os.homedir();
-    }
-
-    const overridePath = context?.mcpConfigPath;
-    const platform = context?.mcpPlatformOverride || process.platform;
-    const resolved = resolveHostMcpPath(appName, home, overridePath, platform, hasHomeOverride);
-    if (!resolved) {
-        outputChannel?.appendLine?.('Skipping MCP config update: no home directory or host path could be resolved');
-        return null;
-    }
-
-    const { configPath, prefersCursorFormat } = resolved;
-    return {
-        configPath,
-        // Only one entry per host:
-        // - VS Code / Insiders -> servers
-        // - Cursor / Windsurf / Antigravity -> mcpServers
-        writeVscode: !prefersCursorFormat,
-        writeCursor: !!prefersCursorFormat
-    };
-}
-
-function resolveHostMcpPath(appName, home, overridePath, platform, _hasHomeOverride = false) {
-    const env = getEnv();
-    if (overridePath) {
-        return { configPath: overridePath, prefersCursorFormat: true };
-    }
-
-    if (!home) return null;
-
-    const codePath = (codeDir) => {
-        if (platform === 'darwin') return path.join(home, 'Library', 'Application Support', codeDir, 'User', 'mcp.json');
-        if (platform === 'win32') {
-            const envAppData = (env.APPDATA && env.APPDATA !== 'undefined' && env.APPDATA !== 'null' && env.APPDATA !== '')
-                ? env.APPDATA
-                : null;
-            const roaming = envAppData || (home ? path.join(home, 'AppData', 'Roaming') : null);
-            if (!roaming) return null;
-            return path.join(roaming, codeDir, 'User', 'mcp.json');
-        }
-        return path.join(home, '.config', codeDir, 'User', 'mcp.json');
-    };
-
-    if (appName.includes('cursor')) {
-        return { configPath: path.join(home, '.cursor', 'mcp.json'), prefersCursorFormat: true };
-    }
-
-    if (appName.includes('windsurf')) {
-        const isNext = appName.includes('next');
-        const dirName = isNext ? 'windsurf-next' : 'windsurf';
-        return { configPath: path.join(home, '.codeium', dirName, 'mcp_config.json'), prefersCursorFormat: true };
-    }
-
-    if (appName.includes('antigravity')) {
-        if (platform === 'darwin') {
-            return { configPath: path.join(home, 'Library', 'Application Support', 'Antigravity', 'User', 'mcp.json'), prefersCursorFormat: true };
-        }
-        if (platform === 'win32') {
-            const roaming = env.APPDATA || path.join(home, 'AppData', 'Roaming');
-            return { configPath: path.join(roaming, 'Antigravity', 'User', 'mcp.json'), prefersCursorFormat: true };
-        }
-        return { configPath: path.join(home, '.antigravity', 'mcp.json'), prefersCursorFormat: true };
-    }
-
-    // Default to VS Code family (stable + insiders).
-    const isInsiders = appName.includes('insider');
-    const codeDir = isInsiders ? 'Code - Insiders' : 'Code';
-    return { configPath: codePath(codeDir), prefersCursorFormat: false };
-}
-
-function writeMcpConfig(target) {
-    const { configPath, writeVscode, writeCursor } = target || {};
-    if (!configPath) return;
-    if (!writeVscode && !writeCursor) {
-        outputChannel?.appendLine?.('Skipping MCP config write: neither VS Code nor cursor-style config selected');
-        return;
-    }
-
-    try {
-        const dir = path.dirname(configPath);
-        fs.mkdirSync(dir, { recursive: true });
-        const raw = fs.existsSync(configPath) ? fs.readFileSync(configPath, 'utf8') : '';
-        const parsed = safeParseJson(raw);
-        if (parsed.error) {
-            outputChannel?.appendLine?.(`Skipping MCP config update: could not parse ${configPath} (${parsed.error.message || parsed.error})`);
-            return;
-        }
-        const json = parsed.data && typeof parsed.data === 'object' ? parsed.data : {};
-
-        const config = vscode.workspace.getConfiguration('stataMcp');
-        const noReloadOnClear = !!config.get('noReloadOnClear', false);
-        const stataPath = (config.get('stataPath', '') || '').trim();
-        const applySettingsEnv = (env) => {
-            const next = { ...(env || {}) };
-            if (noReloadOnClear) {
-                next.MCP_STATA_NO_RELOAD_ON_CLEAR = '1';
-            } else {
-                delete next.MCP_STATA_NO_RELOAD_ON_CLEAR;
-            }
-            if (stataPath) {
-                next.STATA_PATH = stataPath;
-            }
-            // When stataPath is empty we leave any pre-existing STATA_PATH untouched,
-            // since the user may have set it manually before this setting existed.
-            return next;
-        };
-        // Keep backward-compat alias
-        const applyNoReloadEnv = applySettingsEnv;
-
-        // Only write the format appropriate for the host app.
-        const shouldWriteCursor = !!writeCursor;
-        const shouldWriteVscode = !!writeVscode;
-
-        const resolvedCommand = uvCommand || 'uvx';
-
-        // Safeguard: never write a path that looks like a mock to the user's config.
-        const isTest = globalContext?.extensionMode === vscode.ExtensionMode.Test;
-        if (resolvedCommand.includes('/mock/') && !isTest) {
-            outputChannel?.appendLine?.('Skipping MCP config write: resolved command appears to be a mock path');
-            return;
-        }
-
-        // Use the most current version we've resolved, or fallback to @latest.
-        // Dev/pre-release versions (e.g. 1.25.1.dev0) should not be pinned into
-        // the config because they don't exist on PyPI.
-        const isDevVersion = mcpPackageVersion && /\.dev\d+$|\.post\d+$|[ab]\d+$/.test(mcpPackageVersion);
-        const activeSpec = (mcpPackageVersion && mcpPackageVersion !== 'unknown' && !isDevVersion)
-            ? `${MCP_PACKAGE_NAME}==${mcpPackageVersion}`
-            : MCP_PACKAGE_SPEC;
-
-        const isRunUv = resolvedCommand.endsWith('uv') || resolvedCommand.endsWith('uv.exe');
-        const expectedArgs = isRunUv
-            ? ['tool', 'run', '--refresh', '--refresh-package', MCP_PACKAGE_NAME, '--from', activeSpec, MCP_PACKAGE_NAME]
-            : ['--refresh', '--refresh-package', MCP_PACKAGE_NAME, '--from', activeSpec, MCP_PACKAGE_NAME];
-
-        const existingCursor = json.mcpServers?.[MCP_SERVER_ID];
-        const existingVscode = json.servers?.[MCP_SERVER_ID];
-
-        const mergedEnvForCursor = applyNoReloadEnv({
-            ...(existingVscode?.env || {}),
-            ...(existingCursor?.env || {})
-        });
-        const mergedEnvForVscode = applyNoReloadEnv({
-            ...(existingCursor?.env || {}),
-            ...(existingVscode?.env || {})
-        });
-
-        if (shouldWriteCursor) {
-            json.mcpServers = json.mcpServers || {};
-            const expectedCursor = {
-                command: resolvedCommand,
-                args: expectedArgs
-            };
-
-            const baseCursor = existingCursor ? { ...existingCursor } : {};
-            if (Object.keys(mergedEnvForCursor).length) {
-                baseCursor.env = mergedEnvForCursor;
-            }
-
-            const nextCursor = mergeConfigEntry(baseCursor, expectedCursor);
-            const changed = JSON.stringify(nextCursor) !== JSON.stringify(existingCursor || {});
-            json.mcpServers[MCP_SERVER_ID] = nextCursor;
-            if (changed) {
-                outputChannel?.appendLine?.(`Updated Cursor MCP config at ${configPath} for ${MCP_SERVER_ID}`);
-            }
-
-            // Do not touch non-mcp_stata entries. Only remove mcp_stata from the opposite container.
-            if (json.servers && json.servers[MCP_SERVER_ID]) {
-                delete json.servers[MCP_SERVER_ID];
-                outputChannel?.appendLine?.(`Removed VS Code MCP entry for ${MCP_SERVER_ID} to keep single source (Cursor host).`);
-            }
-        }
-
-        if (shouldWriteVscode) {
-            json.servers = json.servers || {};
-            const expectedVscode = {
-                type: 'stdio',
-                command: resolvedCommand,
-                args: expectedArgs
-            };
-
-            const baseVscode = existingVscode ? { ...existingVscode } : {};
-            if (Object.keys(mergedEnvForVscode).length) {
-                baseVscode.env = mergedEnvForVscode;
-            }
-
-            const nextVscode = mergeConfigEntry(baseVscode, expectedVscode);
-            const changed = JSON.stringify(nextVscode) !== JSON.stringify(existingVscode || {});
-            json.servers[MCP_SERVER_ID] = nextVscode;
-            if (changed) {
-                outputChannel?.appendLine?.(`Updated VS Code MCP config at ${configPath} for ${MCP_SERVER_ID}`);
-            }
-
-            // Do not touch non-mcp_stata entries. Only remove mcp_stata from the opposite container.
-            if (json.mcpServers && json.mcpServers[MCP_SERVER_ID]) {
-                delete json.mcpServers[MCP_SERVER_ID];
-                outputChannel?.appendLine?.(`Removed Cursor MCP entry for ${MCP_SERVER_ID} to keep single source (VS Code host).`);
-            }
-        }
-
-        // Clean up empty containers
-        if (json.servers && Object.keys(json.servers).length === 0) {
-            delete json.servers;
-        }
-        if (json.mcpServers && Object.keys(json.mcpServers).length === 0) {
-            delete json.mcpServers;
-        }
-
-        fs.writeFileSync(configPath, JSON.stringify(json, null, 2));
-
-        const hasServers = !!json.servers?.[MCP_SERVER_ID];
-        const hasMcpServers = !!json.mcpServers?.[MCP_SERVER_ID];
-        if (!hasServers && !hasMcpServers) {
-            outputChannel?.appendLine?.(`Warning: MCP config at ${configPath} has no mcp_stata entries after write`);
-        }
-    } catch (err) {
-        console.error('Failed to write MCP config', configPath, err.message);
-    }
-}
-
-function configsMatch(existing, expected, hasType) {
-    if (!existing) return false;
-    if (hasType && existing.type !== expected.type) return false;
-    if (existing.command !== expected.command) return false;
-    if (!Array.isArray(existing.args) || existing.args.length !== expected.args.length) return false;
-    return existing.args.every((v, i) => v === expected.args[i]);
-}
-
-function safeParseJson(raw) {
-    if (!raw) return { data: {} };
-    try {
-        return { data: JSON.parse(raw) };
-    } catch (_err) {
-        const stripped = raw
-            // Remove // and /* */ comments
-            .replace(/\/\*[^]*?\*\//g, '')
-            .replace(/(^|\s)\/\/.*$/gm, '')
-            // Remove trailing commas before } or ]
-            .replace(/,\s*([}\]])/g, '$1');
-        try {
-            return { data: JSON.parse(stripped) };
-        } catch (err) {
-            return { data: {}, error: err };
-        }
-    }
-}
-
-function mergeConfigEntry(existing, expected) {
-    const base = (existing && typeof existing === 'object') ? { ...existing } : {};
-    base.type = expected.type ?? base.type;
-    base.command = expected.command ?? base.command;
-    base.args = expected.args ?? base.args;
-    return base;
 }
 
 async function deactivate() {
@@ -1448,6 +830,12 @@ function updateStatusBar(status) {
 }
 
 async function refreshDatasetSummary() {
+    // Integration tests should exit cleanly; avoid spawning background HTTP work.
+    // (The UI summary refresh is non-essential for tests.)
+    if (globalContext?.extensionMode === vscode.ExtensionMode.Test || process.env.MCP_STATA_INTEGRATION === '1') {
+        return;
+    }
+
     // Only refresh if the user is actually using the extension UI
     if (!TerminalPanel.currentPanel && !DataBrowserPanel.currentPanel) {
         return;
@@ -2379,24 +1767,13 @@ module.exports = {
     activate,
     deactivate,
     refreshMcpPackage,
-    writeMcpConfig,
-    getUvInstallCommand,
+    runMcpInstaller,
+    getMcpInstallCommand,
     promptInstallMcpCli,
-    hasExistingMcpConfig,
-    getMcpConfigTarget,
-    addClaudeMcpViaCli,
-    removeClaudeMcpViaCli,
-    getCodexMcpConfigTarget,
-    resolveConfigPath,
-    syncMcpConfigsFromSettings,
-    removeFromMcpConfig,
-    removeFromCodexMcpConfig,
-    writeCodexMcpConfig,
     downloadGraphAsPdf,
     mcpClient,
     DataBrowserPanel,
     TerminalPanel,
     findUvBinary,
     isMcpConfigWorking,
-    isMcpConfigCurrent
 };

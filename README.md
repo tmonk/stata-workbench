@@ -78,7 +78,7 @@ Offline fallback:
 
 ## Requirements
 - Stata 17+ on macOS, Windows, or Linux.
-- **uv/uvx**: The extension includes bundled `uv` binaries for standard platforms. It will automatically use the system `uv` if available on your `PATH`, or fall back to the bundled version. No manual installation is required for most users.
+- **mcp-stata**: The extension requires the `mcp-stata` toolkit. If it is not found, you will be prompted to run the installation script.
 
 ## Features
 
@@ -97,7 +97,7 @@ Stata Workbench is a unified **agentic toolkit** for Stata development, providin
 - **Status Bar + Cancel** (`stata-workbench.cancelRequest`): Live request states with one-click cancellation.
 - **Test MCP Server** (`stata-workbench.testMcpServer`): Quick smoke checks to verify your Stata connection.
 - **Syntax Highlighting**: Full support for `.do`, `.ado`, `.mata`, Dyndoc Markdown, and Dyndoc LaTeX.
-- **Install MCP CLI helper** (`stata-workbench.installMcpCli`): Bootstraps `uv` locally when it is missing from the environment.
+- **Install MCP CLI helper** (`stata-workbench.installMcpCli`): Bootstraps the `mcp-stata` toolkit locally when it is missing from the environment.
 - **Durable logs**: All run results are logged to the `Stata Workbench` output channel for persistent reference.
 
 For a detailed breakdown of all capabilities, see [FEATURES.md](FEATURES.md).
@@ -133,7 +133,7 @@ MCP configuration is **synced on extension load and when you toggle the relevant
 
 The extension detects your editor and writes to the appropriate config file(s).
 - User-level `mcp.json` with Stata MCP server entry
-- Uses `uvx --refresh --refresh-package mcp-stata --from mcp-stata@latest mcp-stata` for auto-updates
+- The extension delegates initial server configuration to the `mcp-stata` installer.
 - Works for: VS Code, Cursor, Windsurf, Antigravity
 - Optional: Claude Code CLI and extension when `stataMcp.configureClaudeCode` is enabled
 - Optional: Codex CLI and extension when `stataMcp.configureCodex` is enabled
@@ -167,7 +167,7 @@ If you want to manage the file yourself, here is the content to add. User-level 
 ## Troubleshooting
 - **Claude Code extension doesn't see MCPs**: We use `claude mcp add-json` so both CLI and extension share the same config. Ensure `claude` is on PATH and `stataMcp.configureClaudeCode` is enabled. Restart the Claude Code panel after changes.
 - **Icons not visible in editor title bar**: If the play, run, and graph icons don't appear when you open a `.do` file, click the `...` menu in the editor title bar and enable the Stata Workbench icons to make them visible.
-- **Status bar says "CLI missing"**: This usually only occurs on unsupported platforms where a bundled binary is not provided. Install `uv` manually with `curl -LsSf https://astral.sh/uv/install.sh | sh` (macOS/Linux) or `powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -Command "iwr https://astral.sh/uv/install.ps1 -useb | iex"` (Windows).
+- **Status bar says "CLI missing"**: Install `mcp-stata` manually with `curl -LsSf https://mcp-stata-install.tdmonk.com/install.sh | bash` (macOS/Linux) or `irm irm https://mcp-stata-install.tdmonk.com/install.ps1 | iex | iex` (Windows).
 - **Requests time out**: raise `stataMcp.requestTimeoutMs`.
 - Unexpected MCP errors: open the output channel for a structured error message.
 - Cancel a stuck run: run `Stata: Cancel Current Request` from the command palette.
