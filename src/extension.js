@@ -169,11 +169,21 @@ async function runMcpInstaller(options = {}) {
     const platform = mcpPlatformOverride || process.platform;
     const scope = options.scope || 'user';
     const args = uninstall ? ['--uninstall'] : [];
+    // Always tell the installer which MCP host this install is for.
+    // This is used purely for analytics/telemetry segmentation.
+    args.push('--agent', 'vscode');
     if (dryRun) args.push('--dry-run');
     if (scope) args.push('--scope', scope);
     const installCmd = getMcpInstallCommand(platform, args, options);
 
-    const spawnEnv = { ...getEnv(), NO_COLOR: '1' };
+    const spawnEnv = {
+        ...getEnv(),
+        NO_COLOR: '1',
+        // Mark installs launched from Stata Workbench (vs direct curl/bash).
+        MCP_STATA_INSTALL_SOURCE: 'workbench',
+        // Useful for correlating installer behavior with extension releases.
+        MCP_STATA_SCRIPT_VERSION: pkg?.version || 'unknown'
+    };
     if (options.env) {
         Object.assign(spawnEnv, options.env);
     }
