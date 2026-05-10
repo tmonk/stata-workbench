@@ -1,3 +1,10 @@
+# [1.1.0](https://github.com/tmonk/stata-workbench/compare/v1.0.2...v1.1.0) (2026-05-08)
+
+
+### Features
+
+* move to install.sh/ps1 installation, rather than bootstrapping uv directly ([40aaff1](https://github.com/tmonk/stata-workbench/commit/40aaff1a922c4463df900ccf038dbb8089c1aaf6))
+
 ## [1.0.2](https://github.com/tmonk/stata-workbench/compare/v1.0.1...v1.0.2) (2026-05-07)
 
 
