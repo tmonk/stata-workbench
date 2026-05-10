@@ -1,3 +1,10 @@
+## [1.1.1](https://github.com/tmonk/stata-workbench/compare/v1.1.0...v1.1.1) (2026-05-10)
+
+
+### Bug Fixes
+
+*  MCP installer agent ([a7ec559](https://github.com/tmonk/stata-workbench/commit/a7ec5597600bf971fddd44c1a58106e854270d67))
+
 # [1.1.0](https://github.com/tmonk/stata-workbench/compare/v1.0.2...v1.1.0) (2026-05-08)
 
 
