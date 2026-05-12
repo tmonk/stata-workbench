@@ -11,96 +11,6 @@ const vscode = new Proxy({}, {
 const fs = require('fs');
 const { filterMcpLogs } = require('./log-utils');
 const { getTmpDir } = require('./fs-utils');
-/**
- * Parse SMCL text and extract formatted error information
- * @param {string} smclText -Raw SMCL text
- * @returns {{rc: number|null, formattedText: string}}
- */
-function parseSMCL(smclText) {
-  if (!smclText) return { rc: null, formattedText: '' };
-  const lines = smclText.split('\n');
-  let extractedRC = null;
-  let callStack = [];
-  let commandHistory = [];
-  let errorMessages = [];
-  let errorLineIndex = -1;
-  let hasError = false;
-
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    const trimmedLine = line.trim();
-    if (!trimmedLine) continue;
-    if (!extractedRC) {
-      const searchMatch = line.match(/\{search r\((\d+)\)/i);
-      if (searchMatch) {
-        extractedRC = parseInt(searchMatch[1], 10);
-      } else {
-        const standaloneRC = trimmedLine.match(/^r\((\d+)\);$/);
-        if (standaloneRC) {
-          extractedRC = parseInt(standaloneRC[1], 10);
-        }
-      }
-    }
-    const errMatch = line.match(/^\{err\}(.+)$/);
-    if (errMatch) {
-      hasError = true;
-      const errorText = errMatch[1].trim().replace(/\{[^}]+\}/g, '');
-      if (errorText) {
-        errorMessages.push(errorText);
-        if (errorLineIndex === -1) errorLineIndex = i;
-      }
-    }
-    const beginMatch = line.match(/begin\s+(\S+)/);
-    if (beginMatch) {
-      const funcName = beginMatch[1];
-      if (errorLineIndex === -1 || i < errorLineIndex) callStack.push(funcName);
-    }
-    const endMatch = line.match(/end\s+(\S+)/);
-    if (endMatch && callStack.length > 0) {
-      if (errorLineIndex === -1 || i < errorLineIndex) {
-        const funcName = endMatch[1];
-        if (callStack[callStack.length - 1] === funcName) callStack.pop();
-      }
-    }
-    if (trimmedLine.startsWith('= ')) {
-      let cmd = trimmedLine.substring(2).trim();
-      cmd = cmd.replace(/^((cap(ture)?|qui(etly)?|noi(sily)?)\s+)+/gi, '').trim();
-      const isUtilityCmd = /^(loc(al)?|if|else|args|return|exit|scalar|matrix|global|tempvar|tempname|tempfile|macro|while|foreach|forvalues|continue|Cleanup|Drop|Clear)\b/i.test(cmd);
-      if (!isUtilityCmd && cmd.length > 0 && (errorLineIndex === -1 || i < errorLineIndex)) {
-        commandHistory.push(cmd);
-        if (commandHistory.length > 3) commandHistory.shift();
-      }
-    } else {
-      const comMatch = line.match(/^\{com\}(.+)$/);
-      if (comMatch) {
-        let cmd = comMatch[1].trim().replace(/\{[^}]+\}/g, '');
-        if (cmd.startsWith('. ')) cmd = cmd.substring(2).trim();
-        cmd = cmd.replace(/^((cap(ture)?|qui(etly)?|noi(sily)?)\s+)+/gi, '').trim();
-        const isUtilityCmd = /^(loc(al)?|if|else|args|\.|\*|while|foreach|forvalues|continue|Cleanup|Drop|Clear)\b/i.test(cmd);
-        if (!isUtilityCmd && cmd.length > 0 && (errorLineIndex === -1 || i < errorLineIndex)) {
-          commandHistory.push(cmd);
-          if (commandHistory.length > 3) commandHistory.shift();
-        }
-      }
-    }
-  }
-  if (errorMessages.length === 0) return { rc: extractedRC, formattedText: '', hasError: hasError };
-  let filteredErrors = errorMessages.filter(e => e.length > 0);
-  if (filteredErrors.length > 1) {
-    const hasSpecificError = filteredErrors.some(e => !e.match(/^error \d+$/i));
-    if (hasSpecificError) filteredErrors = filteredErrors.filter(e => !e.match(/^error \d+$/i));
-  }
-  const uniqueErrors = [...new Set(filteredErrors)];
-  let parts = [];
-  if (callStack.length > 0) parts.push(`In: ${callStack.join(' → ')}`);
-  if (commandHistory.length > 0) {
-    const cmd = commandHistory[commandHistory.length - 1];
-    const formattedCmd = cmd.replace(/,\s+/g, ',\n    ').replace(/\s+(if|in|using)\s+/gi, '\n    $1 ').trim();
-    parts.push(`\nCommand:\n  ${formattedCmd}`);
-  }
-  if (uniqueErrors.length > 0) parts.push(`\nError: ${uniqueErrors.join('\n       ')}`);
-  return { rc: extractedRC, formattedText: parts.join('\n').trim(), hasError: hasError };
-}
 
 class TerminalPanel {
   static currentPanel = null;
@@ -425,60 +335,20 @@ class TerminalPanel {
 
         const result = await runCommand(trimmed, hooks);
 
-        // Parse SMCL stdout + stderr to extract RC and format
-        let finalRC = typeof result?.rc === 'number' ? result.rc : null;
-        let finalStderr = result?.stderr || '';
-
-        const combinedForRC = (result?.stdout || result?.contentText || '') + '\n' + (result?.stderr || '');
-        const parsed = parseSMCL(combinedForRC);
-
-        if (parsed.rc !== null) {
-          finalRC = parsed.rc;
-        }
-
-        if (finalRC === -1 || finalRC === null) {
-          if (combinedForRC.includes('unrecognized command') || combinedForRC.includes('is unrecognized')) {
-            finalRC = 199;
-          }
-        }
-
-        if (parsed.formattedText) {
-          const smclContext = parsed.formattedText
-            .split('\n')
-            .map(line => {
-              if (line.startsWith('In:') || line.startsWith('Command:')) {
-                return `{txt}${line}`;
-              }
-              if (line.startsWith('Error:')) {
-                return `{err}${line}`;
-              }
-              return `{txt}${line}`;
-            })
-            .join('\n');
-
-          if (finalStderr) {
-            finalStderr = `${smclContext}\n{res}{hline}\n${finalStderr}`;
-          } else {
-            finalStderr = smclContext;
-          }
-        }
-
-        // Determine success using parsed RC
-        const success = determineSuccess(result, finalRC);
+        const finalRC = typeof result?.rc === 'number' ? result.rc : (result?.ok === false ? -1 : 0);
+        const success = finalRC === 0;
 
         TerminalPanel._postMessage({
-          type: 'runFinished',
-          runId,
-          rc: finalRC,
-          success,
-          hasError: parsed.hasError,
-          durationMs: result?.durationMs ?? null,
-          stdout: success ? (result?.stdout || result?.contentText || '') : '',
-          // fullStdout: always available for the 'Log' tab.
-          fullStdout: (result?.stdout || result?.contentText || ''),
-          stderr: success ? '' : finalStderr,
-          artifacts: normalizeArtifacts(result),
-          baseDir: result?.cwd || ''
+            type: 'runFinished',
+            runId,
+            rc: finalRC,
+            success,
+            durationMs: result?.durationMs ?? null,
+            stdout: result?.stdout || '',
+            fullStdout: result?.stdout || '',
+            stderr: success ? '' : (result?.error || ''),
+            artifacts: normalizeArtifacts(result),
+            baseDir: result?.cwd || ''
         });
       } catch (error) {
         TerminalPanel._postMessage({ type: 'runFailed', runId, message: error?.message || String(error) });
@@ -602,57 +472,32 @@ class TerminalPanel {
   static finishStreamingEntry(runId, result) {
     if (!TerminalPanel.currentPanel || !runId) return;
 
-    // Parse SMCL stdout + stderr to extract RC and format
-    let finalRC = typeof result?.rc === 'number' ? result.rc : null;
-    let finalStderr = result?.stderr || '';
-
-    const combinedForRC = (result?.stdout || result?.contentText || '') + '\n' + (result?.stderr || '');
-    const parsed = parseSMCL(combinedForRC);
-
-    if (parsed.rc !== null) {
-      finalRC = parsed.rc;
-    }
-
-    if (finalRC === -1 || finalRC === null) {
-      if (combinedForRC.includes('unrecognized command') || combinedForRC.includes('is unrecognized')) {
-        console.log('[RC Fallback] Unrecognized command detected -> RC 199');
-        finalRC = 199;
-      }
-    }
-
-    if (parsed.formattedText) {
-      finalStderr = parsed.formattedText;
-    }
-
-    // NOW determine success using the parsed RC
-    const success = determineSuccess(result, finalRC);
+    const finalRC = typeof result?.rc === 'number' ? result.rc : (result?.ok === false ? -1 : 0);
+    const success = finalRC === 0;
 
     let logSize = 0;
     if (result?.logPath) {
-      try {
-        const stats = fs.statSync(result.logPath);
-        logSize = stats.size;
-      } catch (e) {
-        if (e.code !== 'ENOENT') {
-          console.error('Failed to stat log file:', e);
+        try {
+            const stats = fs.statSync(result.logPath);
+            logSize = stats.size;
+        } catch (e) {
+            if (e.code !== 'ENOENT') console.error('Failed to stat log file:', e);
         }
-      }
     }
 
     TerminalPanel._postMessage({
-      type: 'runFinished',
-      runId,
-      rc: finalRC,
-      success,
-      durationMs: result?.durationMs ?? null,
-      // Apply smclToHtml to the final result
-      stdout: success ? (result?.stdout || result?.contentText || '') : '',
-      fullStdout: result?.stdout || result?.contentText || '',
-      stderr: success ? '' : finalStderr,
-      logPath: result?.logPath || null,
-      logSize,
-      artifacts: normalizeArtifacts(result),
-      baseDir: result?.cwd || ''
+        type: 'runFinished',
+        runId,
+        rc: finalRC,
+        success,
+        durationMs: result?.durationMs ?? null,
+        stdout: success ? (result?.stdout || '') : '',
+        fullStdout: result?.stdout || '',
+        stderr: success ? '' : (result?.error || ''),
+        logPath: result?.logPath || null,
+        logSize,
+        artifacts: normalizeArtifacts(result),
+        baseDir: result?.cwd || ''
     });
     TerminalPanel._postMessage({ type: 'busy', value: false });
   }
@@ -809,7 +654,7 @@ class TerminalPanel {
 
 }
 
-module.exports = { TerminalPanel, toEntry, normalizeArtifacts, parseSMCL, determineSuccess };
+module.exports = { TerminalPanel, toEntry, normalizeArtifacts, determineSuccess };
 
 function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = []) {
   const designUri = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'src', 'ui-shared', 'design.css'));
@@ -2971,67 +2816,21 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
 }
 
 function toEntry(code, result) {
-  // Parse SMCL stderr to extract RC and format
-  let finalRC = typeof result?.rc === 'number' ? result.rc : null;
-  let finalStderr = result?.stderr || '';
+    const finalRC = typeof result?.rc === 'number' ? result.rc : (result?.ok === false ? -1 : 0);
+    const success = finalRC === 0;
 
-  // Search for context (Commands, call stacks, etc.) in both stdout and stderr.
-  // This is crucial for do-files where commands are in stdout but errors are in stderr.
-  const combinedOutput = (result?.stdout || '') + '\n' + (result?.stderr || '');
-  const parsed = parseSMCL(combinedOutput);
-
-  if (parsed.rc !== null) {
-    finalRC = parsed.rc;
-  }
-
-  if (finalRC === -1 || finalRC === null) {
-    // Extra fallback for unrecognized command pattern
-    if (combinedOutput.includes('unrecognized command') || combinedOutput.includes('is unrecognized')) {
-      finalRC = 199;
-    }
-  }
-
-  if (parsed.formattedText) {
-    const smclContext = parsed.formattedText
-      .split('\n')
-      .map(line => {
-        if (line.startsWith('In:') || line.startsWith('Command:')) {
-          return `{txt}${line}`;
-        }
-        if (line.startsWith('Error:')) {
-          return `{err}${line}`;
-        }
-        return `{txt}${line}`;
-      })
-      .join('\n');
-
-    if (finalStderr) {
-      // Separate context from raw output with a horizontal line
-      finalStderr = `${smclContext}\n{res}{hline}\n${finalStderr}`;
-    } else {
-      finalStderr = smclContext;
-    }
-  }
-
-  // Determine success using parsed RC
-  const success = determineSuccess(result, finalRC);
-
-  let stdout = success ? (result?.stdout || result?.contentText || '') : '';
-  let stderr = success ? '' : finalStderr;
-
-  // Return the complete entry object
-  return {
-    code,
-    success,
-    hasError: parsed.hasError,
-    rc: finalRC,
-    durationMs: result?.durationMs ?? null,
-    stdout,
-    fullStdout: result?.stdout || result?.contentText || '',
-    stderr,
-    artifacts: normalizeArtifacts(result),
-    timestamp: Date.now()
-  };
+    return {
+        code,
+        success,
+        hasError: !success,
+        rc: finalRC,
+        durationMs: result?.durationMs ?? null,
+        stdout: success ? (result?.stdout || '') : '',
+        fullStdout: result?.stdout || '',
+        stderr: success ? '' : (result?.error || ''),
+        artifacts: normalizeArtifacts(result),
+        timestamp: Date.now()
+    };
 }
 
 /**
@@ -3108,11 +2907,6 @@ function escapeHtml(text) {
     .replace(/'/g, '&#039;');
 }
 
-function stripSmclTags(text) {
-  return String(text ?? '')
-    .replace(/\{hline\}/g, '--------------------------------------------------')
-    .replace(/\{[^}]+\}/g, '');
-}
 
 function formatStreamChunk(text) {
   return String(text ?? '').replace(/\r\n/g, '\n');

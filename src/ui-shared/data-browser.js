@@ -100,18 +100,14 @@ const perf = {
 
 // --- State and Constants ---
 let state = {
-    baseUrl: '',
-    token: '',
-    datasetId: '',
-    viewId: null,
     vars: [],
     selectedVars: [],
-    sortBy: [],
     offset: 0,
     limit: 100,
     totalObs: 0,
     filter: '',
-    isLoading: false
+    isLoading: false,
+    currentPageData: null,
 };
 
 const dom = {
@@ -140,58 +136,36 @@ const dom = {
 };
 
 let isInitialized = false;
-let pendingRefresh = false;
-const pendingRequests = new Map();
 
 // --- Message Listener (Register early) ---
-window.addEventListener('message', (event) => {
+window.addEventListener('message', async (event) => {
     const message = event.data;
     switch (message.type) {
         case 'init':
-            console.log('[DataBrowser Webview] Received init message. BaseURL:', message.baseUrl);
-            if (isInitialized && state.baseUrl === message.baseUrl && state.token === message.token) {
-                console.log('[DataBrowser Webview] Already initialized with same credentials. Ignoring duplicate init.');
-                return;
-            }
-            isInitialized = true;
-            if (message.baseUrl && message.token) {
-                // Store config if provided
-                if (message.config) {
-                    state.config = message.config;
-                }
-                initBrowser(message.baseUrl, message.token);
-            } else {
-                console.error('[DataBrowser Webview] Init message missing credentials');
-                showError('Initialization failed: Missing credentials');
+            if (message.variables) {
+                state.totalObs = message.obs_count || 0;
+                updateDataSummary(state.totalObs, message.var_count || message.variables.length);
+                populateVariableSelector(message.variables);
+                if (message.config) state.config = message.config;
+                isInitialized = true;
+                await loadPage();
             }
             break;
-        case 'refresh':
-            console.log('[DataBrowser Webview] Received refresh message.');
-            if (isInitialized && state.baseUrl && state.token) {
-                initBrowser(state.baseUrl, state.token);
-            } else {
-                pendingRefresh = true;
-            }
+        case 'arrow-page':
+            await handleArrowPage(message);
             break;
-        case 'apiResponse':
-            handleApiResponse(message);
+        case 'filterResult':
+            handleFilterResult(message);
             break;
-        default:
-            console.warn('[DataBrowser Webview] Unknown message type:', message.type);
+        case 'error':
+            showError(message.message);
+            break;
     }
 });
 
 // Notify the extension that we are starting
 console.log("[DataBrowser Webview] Webview script booting...");
 vscode.postMessage({ type: 'ready' });
-
-function sendReady() {
-    if (isInitialized) return;
-    console.log('[DataBrowser Webview] Sending ready message...');
-    vscode.postMessage({ type: 'ready' });
-    setTimeout(sendReady, 1000);
-}
-sendReady();
 
 // --- Utility Functions ---
 
@@ -203,45 +177,6 @@ function log(message, isError = false) {
     }
 }
 
-function handleApiResponse(msg) {
-    const { reqId, success, data, error, isBinary } = msg;
-
-    if (pendingRequests.has(reqId)) {
-        const { resolve, reject } = pendingRequests.get(reqId);
-        pendingRequests.delete(reqId);
-
-        if (success) {
-            const isBinaryData = isBinary && data && (data instanceof Uint8Array || data.buffer instanceof ArrayBuffer || typeof data.byteLength === 'number');
-            if (isBinaryData) {
-                try {
-                    perf.start('arrowParse');
-                    const table = tableFromIPC(data);
-                    // Optimization: Do NOT convert to rows array.
-                    // Just extract vars for metadata, but keep table for lazy access.
-                    const vars = table.schema.fields.map(f => f.name);
-
-                    const parseTime = perf.end('arrowParse');
-                    perf.log('Arrow Parse & Convert', parseTime);
-
-                    resolve({ vars, table, totalObs: state.totalObs, datasetId: state.datasetId });
-                } catch (e) {
-                    reject(new Error(`Arrow Parsing Failed: ${e.message}`));
-                }
-            } else {
-                resolve(data);
-            }
-        } else {
-            // Check for Dataset ID conflict
-            if (error && (error.includes('409') || error.includes('datasetId') || error.includes('identity'))) {
-                console.warn('[DataBrowser] Dataset changed detected. Re-initializing...');
-                if (state.baseUrl && state.token) {
-                    initBrowser(state.baseUrl, state.token);
-                }
-            }
-            reject(new Error(error));
-        }
-    }
-}
 
 function setLoading(loading) {
     state.isLoading = loading;
@@ -376,237 +311,68 @@ function populateVariableSelector(variables) {
     perf.log('Variables Population', duration);
 }
 
-class ApiError extends Error {
-    constructor(message, status, code, details) {
-        super(message);
-        this.status = status;
-        this.code = code;
-        this.details = details;
-    }
-}
 
-async function apiCall(endpoint, method = 'GET', body = null) {
-    const url = `${state.baseUrl}${endpoint}`;
-    log(`API Call (Proxy): ${method} ${url}`);
-    const reqId = `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-
-    return new Promise((resolve, reject) => {
-        pendingRequests.set(reqId, { resolve, reject });
-        vscode.postMessage({
-            type: 'apiCall',
-            reqId,
-            url,
-            options: {
-                method,
-                headers: {
-                    'Authorization': `Bearer ${state.token}`,
-                    'Content-Type': body ? 'application/json' : undefined
-                },
-                body: body ? JSON.stringify(body) : undefined
-            },
-        });
-
-        setTimeout(() => {
-            if (pendingRequests.has(reqId)) {
-                pendingRequests.delete(reqId);
-                reject(new Error('Request timed out'));
-            }
-        }, 30000);
-    }).catch(err => {
-        const match = err.message.match(/API Request Failed \((\d+)\): (.+)/);
-        if (match) {
-            const status = parseInt(match[1], 10);
-            try {
-                const json = JSON.parse(match[2]);
-                const code = json.error?.code;
-                const msg = json.error?.message || err.message;
-                throw new ApiError(msg, status, code, json);
-            } catch (e) { }
-        }
-        log(`API Proxy Failed: ${err.message}`, true);
-        throw err;
-    });
-}
-
-function initBrowser(baseUrl, token) {
-    if (!baseUrl || !token) {
-        console.warn('[DataBrowser] Cannot initialize without baseUrl and token');
-        pendingRefresh = true;
-        return;
-    }
-
-    console.log('[DataBrowser Webview] Initializing Browser...');
-    state.baseUrl = baseUrl;
-    state.token = token;
-    isInitialized = true;
-    pendingRefresh = false;
-
-    hideError();
-    showLoading();
-
-    apiCall('/v1/dataset', 'GET')
-        .then(response => {
-            const datasetInfo = response.dataset || response;
-            state.datasetId = datasetInfo.id;
-            state.totalObs = datasetInfo.n || 0;
-            log(`Dataset Info: ${JSON.stringify(response)}`);
-            updateDataSummary(state.totalObs, 0);
-            return apiCall('/v1/vars', 'GET');
-        })
-        .then(response => {
-            const variables = response.vars || [];
-            log(`Loaded ${variables.length} variables`);
-            populateVariableSelector(variables);
-            updateDataSummary(state.totalObs, variables.length);
-            return loadPage();
-        })
-        .then(() => {
-            hideLoading();
-            console.log('[DataBrowser Webview] Initialization complete');
-            if (pendingRefresh) {
-                pendingRefresh = false;
-                initBrowser(state.baseUrl, state.token);
-            }
-        })
-        .catch(err => {
-            console.error('[DataBrowser Webview Error]', err);
-            showError(`Initialization failed: ${err.message}`);
-            hideLoading();
-        });
+function requestVariables() {
+    vscode.postMessage({ type: 'requestVariables' });
 }
 
 async function loadPage() {
     if (state.totalObs === 0) return;
-    log(`Loading page. Offset: ${state.offset}, Limit: ${state.limit}, View: ${state.viewId}`);
     showLoading();
+    vscode.postMessage({
+        type: 'requestPage',
+        start: state.offset,
+        count: state.limit,
+        varlist: state.selectedVars,
+    });
+}
+
+async function handleArrowPage(message) {
     try {
-        let endpoint = '/v1/arrow';
-        const parsedOffset = parseInt(state.offset, 10);
-        const parsedLimit = parseInt(state.limit, 10);
-        const safeOffset = Number.isFinite(parsedOffset) && parsedOffset >= 0 ? parsedOffset : 0;
-        const safeLimit = Number.isFinite(parsedLimit) && parsedLimit > 0 ? parsedLimit : 100;
-        state.offset = safeOffset;
-        state.limit = safeLimit;
+        perf.start('arrowParse');
+        const data = new Uint8Array(message.data);
+        const table = tableFromIPC(data);
+        const vars = table.schema.fields.map(f => f.name);
+        const parseTime = perf.end('arrowParse');
+        perf.log('Arrow Parse', parseTime);
 
-        let body = {
-            datasetId: state.datasetId,
-            offset: safeOffset,
-            limit: safeLimit,
-            vars: state.selectedVars,
-            sortBy: state.sortBy,
-            includeObsNo: true
-        };
-
-        if (state.viewId) endpoint = `/v1/views/${state.viewId}/arrow`;
-
-        perf.start('dataFetch');
-        const data = await apiCall(endpoint, 'POST', body);
-        const fetchTime = perf.end('dataFetch');
-        perf.log('Data Fetch', fetchTime);
-
-        if (data) {
-            const numRows = data.table ? data.table.numRows : 0;
-            log(`Page loaded. Records: ${numRows}`);
-
-            perf.start('renderGrid');
-            renderGrid(data);
-            const renderTime = perf.end('renderGrid');
-            perf.log('Render Grid', renderTime);
-
-            updatePagination(data);
-            if (data.datasetId && data.datasetId !== state.datasetId) {
-                log('Response datasetId mismatch. Re-initializing.', true);
-                initBrowser(state.baseUrl, state.token);
-            }
-        }
-    } catch (err) {
-        if (err instanceof ApiError && err.code === 'no_data_in_memory') {
-            initBrowser(state.baseUrl, state.token);
-            return;
-        }
-        showError(`Failed to load page: ${err.message}`);
-    } finally {
+        state.currentPageData = { table, vars };
+        hideLoading();
+        renderGrid({ table, vars });
+        updatePagination({ table });
+    } catch (e) {
+        showError(`Arrow parsing failed: ${e.message}`);
         hideLoading();
     }
 }
 
 async function applyFilter() {
     const filterExpr = dom.filterInput.value.trim();
-    log(`Applying filter: "${filterExpr}"`);
-
     if (!filterExpr) {
-        if (state.viewId) {
-            await apiCall(`/v1/views/${state.viewId}`, 'DELETE').catch(() => { });
-            state.viewId = null;
-        }
         state.offset = 0;
         await loadPage();
         return;
     }
-
     showLoading();
-    try {
-        const valid = await apiCall('/v1/filters/validate', 'POST', {
-            datasetId: state.datasetId,
-            filterExpr: filterExpr
-        });
-        const isOk = valid && (valid.ok === true || valid.isValid === true || valid.valid === true);
-        if (!isOk) throw new Error(valid?.error || `Invalid filter expression`);
-
-        const viewRes = await apiCall('/v1/views', 'POST', {
-            datasetId: state.datasetId,
-            filterExpr: filterExpr
-        });
-        const viewData = viewRes.view || viewRes;
-
-        if (viewData && viewData.id) {
-            log(`View created: ${viewData.id}`);
-            state.viewId = viewData.id;
-            state.offset = 0;
-            if (viewData.filteredN !== undefined) {
-                if (dom.obsCount) dom.obsCount.textContent = viewData.filteredN.toLocaleString();
-            }
-            await loadPage();
-        }
-    } catch (err) {
-        showError(`Filter failed: ${err.message}`);
-    } finally {
-        hideLoading();
-    }
+    vscode.postMessage({ type: 'filter', expr: filterExpr });
 }
 
-function handleSort(varName, isMulti = false) {
-    const currentSort = state.sortBy || [];
-    let newSort = [];
-    const existingIdx = currentSort.findIndex(s => s === varName || s === `-${varName}` || s === `+${varName}`);
-
-    if (existingIdx === -1) {
-        newSort = isMulti ? [...currentSort, varName] : [varName];
+function handleFilterResult(msg) {
+    hideLoading();
+    if (msg.valid) {
+        state.filteredIndices = msg.indices;
+        state.offset = 0;
+        loadPage();
     } else {
-        const existing = currentSort[existingIdx];
-        const isDesc = existing.startsWith('-');
-        if (!isDesc) {
-            newSort = [...currentSort];
-            newSort[existingIdx] = `-${varName}`;
-            if (!isMulti) newSort = [`-${varName}`];
-        } else {
-            newSort = isMulti ? currentSort.filter((_, i) => i !== existingIdx) : [];
-        }
+        showError('Filter: ' + msg.error);
     }
-
-    state.sortBy = newSort;
-    state.offset = 0;
-    loadPage();
 }
+
 
 function renderGrid(pageData) {
-    const varCount = pageData.vars?.length || 0;
     const table = pageData.table;
-    const rows = [];
-    if (!table) {
-        throw new Error('Expected Arrow table in /v1/arrow response');
-    }
-    log(`Render Grid. Vars: ${varCount}, Rows: ${table.numRows}`);
+    if (!table) return;
+
     dom.header.innerHTML = '';
     const obsTh = document.createElement('th');
     obsTh.textContent = '#';
@@ -616,56 +382,23 @@ function renderGrid(pageData) {
     const displayVars = state.vars.filter(v => state.selectedVars.includes(v.name));
     displayVars.forEach(v => {
         const th = document.createElement('th');
-        th.classList.add('sortable');
-        th.onclick = (e) => handleSort(v.name, e.shiftKey || e.metaKey || e.ctrlKey);
-
-        let sortIcon = '';
-        const sortState = (state.sortBy || []).find(s => s === v.name || s === `-${v.name}` || s === `+${v.name}`);
-        if (sortState) {
-            sortIcon = `<span class="sort-icon">${sortState.startsWith('-') ? '↓' : '↑'}</span>`;
-            th.classList.add('sorted');
-        }
-
-        th.innerHTML = `
-            <div style="display:flex; align-items:center; justify-content: space-between;">
-                <div style="display:flex; align-items:center;">
-                    <span class="type-indicator type-${getTypeClass(v.type)}"></span>
-                    <span title="${v.label || v.name}">${v.name}</span>
-                </div>
-                ${sortIcon}
-            </div>
-        `;
+        th.innerHTML = `<div style="display:flex; align-items:center;"><span class="type-indicator type-${getTypeClass(v.type)}"></span><span title="${v.label || v.name}">${v.name}</span></div>`;
         dom.header.appendChild(th);
     });
 
     dom.grid.innerHTML = '';
-    const returnedVars = pageData.vars || [];
-    const obsIndex = returnedVars.indexOf('_n');
-
-    const numRows = table.numRows;
-
-    for (let i = 0; i < numRows; i++) {
+    for (let i = 0; i < table.numRows; i++) {
         const tr = document.createElement('tr');
         const tdObs = document.createElement('td');
-
-        let obsVal = '';
-        if (obsIndex !== -1) {
-            obsVal = table.getChildAt(obsIndex).get(i);
-        }
-
-        tdObs.textContent = obsVal || '';
+        tdObs.textContent = state.offset + i + 1;
         tdObs.style.color = 'var(--text-tertiary)';
         tr.appendChild(tdObs);
 
         displayVars.forEach(v => {
             const td = document.createElement('td');
-            const idx = returnedVars.indexOf(v.name);
+            const idx = pageData.vars.indexOf(v.name);
             let val = null;
-
-            if (idx !== -1) {
-                val = table.getChildAt(idx).get(i);
-            }
-
+            if (idx !== -1) val = table.getChildAt(idx).get(i);
             td.textContent = (val === null || val === undefined) ? '.' : String(val);
             tr.appendChild(td);
         });
@@ -707,7 +440,7 @@ if (dom.nextBtn) dom.nextBtn.addEventListener('click', () => {
 });
 
 if (dom.refreshBtn) dom.refreshBtn.addEventListener('click', () => {
-    if (state.baseUrl && state.token) initBrowser(state.baseUrl, state.token);
+    requestVariables();
 });
 
 if (dom.btnVariables) {

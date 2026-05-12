@@ -1,7 +1,7 @@
 {
   "name": "stata-workbench",
   "displayName": "Stata Workbench",
-  "description": "Allows Stata code to be run directly from the IDE. Enables AI agents to directly interact with Stata, powered by mcp-stata.",
+  "description": "Run Stata code directly from VS Code. AI-powered assistance via Stata Agent.",
   "author": "Thomas Monk",
   "publisher": "tmonk",
   "license": "AGPL-3.0-or-later",
@@ -22,7 +22,7 @@
     "stata",
     "statistics",
     "data science",
-    "mcp",
+    "stata-agent",
     "ai"
   ],
   "categories": [
@@ -52,18 +52,9 @@
         "icon": "$(run-all)"
       },
       {
-        "command": "stata-workbench.testMcpServer",
-        "title": "Stata: Test MCP Server Connection"
-      },
-      {
         "command": "stata-workbench.viewData",
         "title": "Stata: View Data",
         "icon": "$(table)"
-      },
-      {
-        "command": "stata-workbench.installMcpCli",
-        "title": "Stata: Install MCP CLI",
-        "icon": "$(cloud-download)"
       },
       {
         "command": "stata-workbench.cancelRequest",
@@ -74,6 +65,14 @@
         "command": "stata-workbench.openTerminal",
         "title": "Stata: Open Interactive Terminal",
         "icon": "$(terminal)"
+      },
+      {
+        "command": "stata-workbench.restartDaemon",
+        "title": "Stata: Restart Daemon"
+      },
+      {
+        "command": "stata-workbench.showDaemonStatus",
+        "title": "Stata: Show Daemon Status"
       }
     ],
     "menus": {
@@ -122,84 +121,64 @@
       }
     ],
     "configuration": {
-      "title": "Stata Workbench",
+      "title": "Stata",
       "properties": {
-        "stataMcp.requestTimeoutMs": {
+        "stata.requestTimeoutMs": {
           "type": "number",
           "default": 100000,
-          "description": "Timeout (ms) for Stata metadata/UI requests (e.g., getting variable lists). To enable timeout for long-running execution commands (Run File, Run Selection), use stataMcp.enableExecuteTimeout."
+          "description": "Timeout (ms) for Stata metadata/UI requests (e.g., getting variable lists). To enable timeout for long-running execution commands (Run File, Run Selection), use stata.enableExecuteTimeout."
         },
-        "stataMcp.enableExecuteTimeout": {
+        "stata.enableExecuteTimeout": {
           "type": "boolean",
           "default": false,
           "description": "Enable timeout for Stata execution commands (Run File, Run Selection). If disabled, these commands will run indefinitely unless manually cancelled."
         },
-        "stataMcp.loadStataOnStartup": {
+        "stata.loadStataOnStartup": {
           "type": "boolean",
           "default": true,
           "description": "Load Stata automatically when VS Code starts. This makes the first run faster but consumes memory immediately."
         },
-        "stataMcp.autoRevealOutput": {
+        "stata.autoRevealOutput": {
           "type": "boolean",
           "default": false,
           "description": "Automatically show the Stata output channel after runs."
         },
-        "stataMcp.showAllLogsInOutput": {
+        "stata.showAllLogsInOutput": {
           "type": "boolean",
           "default": false,
-          "description": "Stream all raw mcp-stata logs to the Stata Workbench Output channel."
+          "description": "Stream all raw Stata logs to the Output channel."
         },
-        "stataMcp.logStataCode": {
+        "stata.logStataCode": {
           "type": "boolean",
           "default": false,
           "description": "Log the Stata code sent to the server in the Output channel (useful for debugging agentic commands)."
         },
-        "stataMcp.autoConfigureMcp": {
-          "type": "boolean",
-          "default": true,
-          "description": "On extension load and when toggled: add/update mcp-stata in host MCP config (mcp.json). When disabled: remove mcp-stata from host config."
-        },
-        "stataMcp.configureClaudeCode": {
-          "type": "boolean",
-          "default": false,
-          "description": "On load and when toggled: register mcp-stata via 'claude mcp add-json' (CLI). Ensures both Claude Code CLI and VS Code extension see the server. When disabled: runs 'claude mcp remove mcp_stata'."
-        },
-        "stataMcp.configureCodex": {
-          "type": "boolean",
-          "default": false,
-          "description": "On load and when toggled: add/update mcp-stata in Codex config. When disabled: remove mcp_stata from the configured path."
-        },
-        "stataMcp.codexConfigPath": {
-          "type": "string",
-          "default": "~/.codex/config.toml",
-          "description": "Path to Codex MCP config file. Supports ~ for home and ${workspaceFolder} for project root."
-        },
-        "stataMcp.runFileWorkingDirectory": {
+        "stata.runFileWorkingDirectory": {
           "type": "string",
           "default": "",
           "description": "Working directory when running .do files. Supports an absolute path, ~, ${workspaceFolder} or ${fileDir}; empty uses the .do file's folder."
         },
-        "stataMcp.stataPath": {
+        "stata.stataPath": {
           "type": "string",
           "default": "",
-          "description": "Path to your Stata installation. Can be a directory (e.g. /Applications/Stata/StataMP.app) or the full path to the Stata binary. Leave empty to use auto-discovery. Maps to the STATA_PATH environment variable for mcp-stata."
+          "description": "Path to your Stata installation. Can be a directory (e.g. /Applications/Stata/StataMP.app) or the full path to the Stata binary. Leave empty to use auto-discovery. Maps to the STATA_PATH environment variable."
         },
-        "stataMcp.setupTimeoutSeconds": {
+        "stata.setupTimeoutSeconds": {
           "type": "number",
           "default": 60,
-          "description": "Timeout (seconds) for Stata initialization (stata_setup.config preflight). Passed to STATA_SETUP_TIMEOUT for mcp-stata."
+          "description": "Timeout (seconds) for Stata initialization (stata_setup.config preflight). Passed to STATA_SETUP_TIMEOUT."
         },
-        "stataMcp.noReloadOnClear": {
+        "stata.noReloadOnClear": {
           "type": "boolean",
           "default": false,
-          "description": "Disable reloading startup/profile do files after clear all/program drop. Maps to MCP_STATA_NO_RELOAD_ON_CLEAR."
+          "description": "Disable reloading startup/profile do files after clear all/program drop."
         },
-        "stataMcp.maxOutputLines": {
+        "stata.maxOutputLines": {
           "type": "number",
           "default": 0,
           "description": "Maximum lines of output to return from Stata commands (0 = unlimited). Useful for limiting token usage with verbose commands like regress or codebook."
         },
-        "stataMcp.runFileBehavior": {
+        "stata.runFileBehavior": {
           "type": "string",
           "enum": [
             "runDirtyFile",
@@ -208,12 +187,12 @@
           "default": "runDirtyFile",
           "description": "Choose whether 'Run File' should run the current editor content (including unsaved changes) or the version saved on disk."
         },
-        "stataMcp.defaultVariableLimit": {
+        "stata.defaultVariableLimit": {
           "type": "number",
           "default": 100,
           "description": "Default number of variables to select when opening the Data Browser (0 = all). Useful for huge datasets with thousands of variables."
         },
-        "stata-workbench.telemetry.enabled": {
+        "stata.telemetry.enabled": {
           "type": "boolean",
           "default": true,
           "description": "Enable Sentry telemetry to help improve Stata Workbench. No personal data or Stata content is collected."
@@ -303,11 +282,10 @@
   "capabilities": {
     "untrustedWorkspaces": {
       "supported": "limited",
-      "description": "MCP services require a trusted workspace."
+      "description": "Stata daemon requires a trusted workspace."
     }
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.24.3",
     "@sentry/browser": "^10.35.0",
     "@sentry/node": "^10.35.0",
     "@vscode/codicons": "^0.0.44",

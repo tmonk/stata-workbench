@@ -5,9 +5,7 @@ const vscode = new Proxy({}, {
         return getVscode()?.[prop];
     }
 });
-const http = require('http');
 const Sentry = require("@sentry/node");
-const { client: mcpClient } = require('./mcp-client');
 
 class DataBrowserPanel {
     static currentPanel = null;
@@ -18,11 +16,6 @@ class DataBrowserPanel {
         DataBrowserPanel._log = logger;
     }
 
-    static refresh() {
-        if (DataBrowserPanel.currentPanel) {
-            DataBrowserPanel.currentPanel._fetchCredentials();
-        }
-    }
 
     /**
      * @param {vscode.Uri} extensionUri
@@ -51,14 +44,14 @@ class DataBrowserPanel {
             }
         );
 
-        DataBrowserPanel.currentPanel = new DataBrowserPanel(panel, extensionUri);
+        DataBrowserPanel.currentPanel = new DataBrowserPanel(panel, extensionUri, DataBrowserPanel._stataClient);
     }
 
-    constructor(panel, extensionUri) {
+    constructor(panel, extensionUri, stataClient) {
         this._panel = panel;
         this._extensionUri = extensionUri;
+        this._stataClient = stataClient;
         this._disposables = [];
-        this._credentials = null;
         this._isWebviewReady = false;
 
         // Listen for messages from the webview FIRST
@@ -66,15 +59,20 @@ class DataBrowserPanel {
             async message => {
                 switch (message.type) {
                     case 'ready':
-                        DataBrowserPanel._log('[DataBrowserPanel] Webview reported ready.');
                         this._isWebviewReady = true;
-                        if (this._credentials) {
-                            DataBrowserPanel._log('[DataBrowserPanel] Credentials available, sending init.');
+                        try {
+                            const vars = await this._stataClient.listVariables();
+                            const state = await this._stataClient.getDatasetState();
                             this._panel.webview.postMessage({
                                 type: 'init',
-                                ...this._credentials,
-                                config: this._config
+                                variables: vars,
+                                obs_count: state.obs_count,
+                                var_count: state.var_count,
+                                dataset_name: state.dataset_name,
+                                config: { variableLimit: this._config?.variableLimit || 0 },
                             });
+                        } catch (err) {
+                            this._panel.webview.postMessage({ type: 'error', message: err.message });
                         }
                         break;
                     case 'log':
@@ -84,41 +82,52 @@ class DataBrowserPanel {
                         Sentry.captureException(new Error(`Data Browser Webview Error: ${message.message}`));
                         DataBrowserPanel._log(`[DataBrowser Webview Error] ${message.message}`);
                         break;
-                    case 'apiCall':
+                    case 'requestVariables':
                         try {
-                            // Validate URL to prevent SSRF — only allow requests to the local mcp-stata server
-                            const parsedUrl = new URL(message.url);
-                            if (parsedUrl.hostname !== '127.0.0.1' && parsedUrl.hostname !== 'localhost') {
-                                throw new Error(`Blocked request to non-local host: ${parsedUrl.hostname}`);
-                            }
-                            const isArrow = message.url.endsWith('/arrow');
-                            const result = await DataBrowserPanel._performRequest(message.url, message.options, isArrow);
-
-                            // Convert Buffer to Uint8Array for structured clone to webview
-                            const dataToPost = (result instanceof Buffer) ? new Uint8Array(result) : result;
-
-                            // Check if panel is still alive before posting
-                            if (DataBrowserPanel.currentPanel === this) {
+                            const vars = await this._stataClient.listVariables();
+                            const state = await this._stataClient.getDatasetState();
+                            this._panel.webview.postMessage({
+                                type: 'variables',
+                                variables: vars,
+                                obs_count: state.obs_count,
+                                var_count: state.var_count,
+                                dataset_name: state.dataset_name,
+                            });
+                        } catch (err) {
+                            this._panel.webview.postMessage({ type: 'error', message: err.message });
+                        }
+                        break;
+                    case 'requestPage':
+                        try {
+                            const { start, count, varlist } = message;
+                            const buffer = await this._stataClient.getDataPage(start, count, varlist);
+                            this._panel.webview.postMessage({
+                                type: 'arrow-page',
+                                data: Array.from(new Uint8Array(buffer)),
+                            });
+                        } catch (err) {
+                            this._panel.webview.postMessage({ type: 'error', message: err.message });
+                        }
+                        break;
+                    case 'filter':
+                        try {
+                            const result = await this._stataClient.validateFilterExpr(message.expr);
+                            if (result.valid) {
+                                const indices = await this._stataClient.computeViewIndices(message.expr);
                                 this._panel.webview.postMessage({
-                                    type: 'apiResponse',
-                                    reqId: message.reqId,
-                                    success: true,
-                                    data: dataToPost,
-                                    isBinary: isArrow
+                                    type: 'filterResult',
+                                    valid: true,
+                                    indices: indices,
+                                });
+                            } else {
+                                this._panel.webview.postMessage({
+                                    type: 'filterResult',
+                                    valid: false,
+                                    error: result.error,
                                 });
                             }
                         } catch (err) {
-                            DataBrowserPanel._log(`[DataBrowser Proxy Error] ${err.message}`);
-
-                            // Check if panel is still alive before posting
-                            if (DataBrowserPanel.currentPanel === this) {
-                                this._panel.webview.postMessage({
-                                    type: 'apiResponse',
-                                    reqId: message.reqId,
-                                    success: false,
-                                    error: err.message
-                                });
-                            }
+                            this._panel.webview.postMessage({ type: 'filterResult', valid: false, error: err.message });
                         }
                         break;
                 }
@@ -131,45 +140,8 @@ class DataBrowserPanel {
         this._update();
 
         this._panel.onDidDispose(() => this.dispose(), null, this._disposables);
-
-        // Fetch connection details
-        this._fetchCredentials();
     }
 
-    async _fetchCredentials() {
-        return Sentry.startSpan({ name: 'databrowser.fetchCredentials', op: 'extension.operation' }, async () => {
-            DataBrowserPanel._log('[DataBrowserPanel] Fetching UI channel details...');
-            try {
-                const channel = await mcpClient.getUiChannel();
-                if (channel && channel.baseUrl && channel.token) {
-                    this._credentials = {
-                        baseUrl: channel.baseUrl,
-                        token: channel.token
-                    };
-
-                    const config = vscode.workspace.getConfiguration('stataMcp');
-                    this._config = {
-                        variableLimit: config.get('defaultVariableLimit', 0)
-                    };
-
-                    DataBrowserPanel._log('[DataBrowserPanel] Credentials fetched.');
-
-                    if (this._isWebviewReady) {
-                        DataBrowserPanel._log('[DataBrowserPanel] Webview already ready, sending init.');
-                        this._panel.webview.postMessage({
-                            type: 'init',
-                            ...this._credentials,
-                            config: this._config
-                        });
-                    } else {
-                        DataBrowserPanel._log('[DataBrowserPanel] Waiting for webview ready signal...');
-                    }
-                }
-            } catch (err) {
-                DataBrowserPanel._log(`[DataBrowserPanel] Error fetching channel: ${err.message}`);
-            }
-        });
-    }
 
     dispose() {
         DataBrowserPanel.currentPanel = null;
@@ -189,76 +161,6 @@ class DataBrowserPanel {
         this._panel.webview.html = this._getHtmlForWebview(this._panel.webview, this._extensionUri);
     }
 
-    static _performRequest(urlStr, options, expectBinary = false) {
-        return Sentry.startSpan({ name: 'stata.databrowser.apiCall', op: 'extension.operation' }, () => {
-            return new Promise((resolve, reject) => {
-                try {
-                    const url = new URL(urlStr);
-                    const body = options.body;
-                    const headers = { ...options.headers };
-
-                    if (body) {
-                        DataBrowserPanel._log(`[DataBrowser Proxy] Sending ${options.method} request to ${url.toString()} with body length ${Buffer.byteLength(body)}`);
-                        headers['Content-Length'] = Buffer.byteLength(body);
-                        if (!headers['Content-Type']) {
-                            headers['Content-Type'] = 'application/json';
-                        }
-                    } else {
-                        DataBrowserPanel._log(`[DataBrowser Proxy] Sending ${options.method} request to ${url.toString()}`);
-                    }
-
-                    // Force close connection so single-threaded python server doesn't hang in keep-alive
-                    headers['Connection'] = 'close';
-
-                    const opts = {
-                        method: options.method,
-                        headers: headers,
-                        timeout: 30000
-                    };
-
-                    const req = http.request(url, opts, (res) => {
-                        const chunks = [];
-                        res.on('data', (chunk) => chunks.push(chunk));
-                        res.on('end', () => {
-                            const buffer = Buffer.concat(chunks);
-                            DataBrowserPanel._log(`[DataBrowser Proxy] Response from ${url.pathname}: Status ${res.statusCode}, Body length: ${buffer.byteLength}`);
-                            if (res.statusCode >= 200 && res.statusCode < 300) {
-                                if (expectBinary) {
-                                    resolve(buffer);
-                                } else {
-                                    try {
-                                        resolve(JSON.parse(buffer.toString()));
-                                    } catch (e) {
-                                        Sentry.captureException(e);
-                                        reject(new Error(`Failed to parse JSON: ${e.message}`));
-                                    }
-                                }
-                            } else {
-                                reject(new Error(`API Request Failed (${res.statusCode}): ${buffer.toString()}`));
-                            }
-                        });
-                    });
-
-                    req.on('timeout', () => {
-                        req.destroy();
-                        reject(new Error('Proxy request timed out from Stata server'));
-                    });
-
-                    req.on('error', (e) => {
-                        Sentry.captureException(e);
-                        reject(e);
-                    });
-
-                    if (body) {
-                        req.write(body);
-                    }
-                    req.end();
-                } catch (err) {
-                    reject(err);
-                }
-            });
-        });
-    }
 
     _getHtmlForWebview(webview, extensionUri) {
         const scriptUri = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'dist', 'ui-shared', 'data-browser.js'));
@@ -374,4 +276,4 @@ function getNonce() {
     return text;
 }
 
-module.exports = { DataBrowserPanel, _performRequest: DataBrowserPanel._performRequest };
+module.exports = { DataBrowserPanel };

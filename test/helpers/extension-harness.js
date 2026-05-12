@@ -8,27 +8,44 @@ const createExtensionHarness = (overrides = {}) => {
         existsSync: jest.fn(),
         readFileSync: jest.fn(),
         writeFileSync: jest.fn(),
-        mkdirSync: jest.fn()
+        mkdirSync: jest.fn(),
+        statSync: jest.fn().mockReturnValue({ size: 0 }),
+        openSync: jest.fn(),
+        readSync: jest.fn(),
+        closeSync: jest.fn(),
+        unlinkSync: jest.fn(),
     };
     const cp = overrides.cp || {
         spawnSync: jest.fn().mockReturnValue({ status: 0, stdout: '', stderr: '' }),
         spawn: jest.fn().mockReturnValue({
             on: jest.fn(),
             unref: jest.fn(),
+            kill: jest.fn(),
             stdout: { on: jest.fn() },
             stderr: { on: jest.fn() }
         })
     };
 
-    const mcpClientMock = overrides.mcpClientMock || {
-        setLogger: jest.fn(),
-        onStatusChanged: jest.fn().mockReturnValue({ dispose: jest.fn() }),
-        dispose: jest.fn(),
-        connect: jest.fn().mockResolvedValue({}),
-        runSelection: jest.fn().mockResolvedValue({}),
-        getUiChannel: jest.fn().mockResolvedValue(null),
-        hasConfig: jest.fn().mockReturnValue(false),
-        getServerConfig: jest.fn().mockReturnValue({ command: null, args: null, env: {}, configPath: null })
+    const stataClientMock = overrides.stataClientMock || {
+        on: jest.fn().mockReturnValue({ dispose: jest.fn() }),
+        ensureConnected: jest.fn().mockResolvedValue(),
+        disconnect: jest.fn().mockResolvedValue(),
+        isConnected: jest.fn().mockReturnValue(true),
+        runCode: jest.fn().mockResolvedValue({ ok: true, rc: 0, stdout: '' }),
+        runFile: jest.fn().mockResolvedValue({ ok: true, rc: 0, stdout: '' }),
+        cancel: jest.fn().mockResolvedValue({ acknowledged: true }),
+        cancelTask: jest.fn().mockResolvedValue({ cancelled: true }),
+        listVariables: jest.fn().mockResolvedValue([]),
+        getDatasetState: jest.fn().mockResolvedValue({ obs_count: 0, var_count: 0, dataset_name: '' }),
+        getDataPage: jest.fn().mockResolvedValue(Buffer.from([])),
+        health: jest.fn().mockResolvedValue({ status: 'ok', pid: 12345, sessions: ['default'] }),
+    };
+
+    const daemonMgrMock = overrides.daemonMgrMock || {
+        ensureRunning: jest.fn().mockResolvedValue(),
+        stop: jest.fn().mockResolvedValue(),
+        health: jest.fn().mockResolvedValue({ status: 'ok', pid: 12345, sessions: ['default'] }),
+        onCrash: jest.fn(),
     };
 
     const terminalPanel = overrides.terminalPanel || {
@@ -61,7 +78,9 @@ const createExtensionHarness = (overrides = {}) => {
     const extension = proxyquire('../../src/extension', {
         './terminal-panel': { TerminalPanel: terminalPanel },
         './data-browser-panel': { DataBrowserPanel: dataBrowserPanel },
-        './artifact-utils': artifactUtils
+        './artifact-utils': artifactUtils,
+        './daemon-manager': { DaemonManager: jest.fn().mockImplementation(() => daemonMgrMock) },
+        './stata-client': { StataClient: jest.fn().mockImplementation(() => stataClientMock) },
     });
 
     return {
@@ -69,7 +88,8 @@ const createExtensionHarness = (overrides = {}) => {
         vscode,
         fs,
         cp,
-        mcpClientMock,
+        stataClientMock,
+        daemonMgrMock,
         terminalPanel,
         dataBrowserPanel,
         artifactUtils
