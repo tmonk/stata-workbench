@@ -1,4 +1,4 @@
-const { describe, it, expect } = require('bun:test');
+const { describe, it, expect, jest } = require('bun:test');
 const sinon = require('sinon');
 const proxyquire = require('proxyquire').noCallThru().noPreserveCache();
 const { withTestContext } = require('../helpers/test-context');
@@ -12,13 +12,7 @@ const loadTerminalPanel = () => proxyquire('../../src/terminal-panel', {
     }
 });
 
-const loadDataBrowserPanel = () => proxyquire('../../src/data-browser-panel', {
-    './mcp-client': {
-        client: {
-            getUiChannel: () => Promise.resolve({ baseUrl: 'http://test', token: 'token' })
-        }
-    }
-});
+const loadDataBrowserPanel = () => proxyquire('../../src/data-browser-panel', {});
 
 const itWithContext = (name, fn) => it(name, () => withTestContext({}, fn));
 

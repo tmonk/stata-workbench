@@ -43,7 +43,7 @@ describe('HTML Output Consistency (Streaming vs Final)', () => {
     function testConsistency(chunks) {
         const fullInput = chunks.join('');
 
-        // 1. Simulate Streaming with Line Buffering ( mirroring mcp-client.js fix)
+        // 1. Simulate Streaming with Line Buffering (mirroring client fix)
         let streamedHtml = '';
         let lineBuffer = '';
         chunks.forEach(chunk => {
@@ -51,7 +51,7 @@ describe('HTML Output Consistency (Streaming vs Final)', () => {
             let lines = lineBuffer.split(/\r?\n/);
             lineBuffer = lines.pop() || '';
 
-            // Mirror the SPECIAL logic in mcp-client.js
+            // Mirror the SPECIAL logic in the client
             if (lines.length > 0) {
                 const lastLine = lines[lines.length - 1];
                 if (lastLine.trim() === '.') {
