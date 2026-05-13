@@ -1,7 +1,7 @@
 
 . capture noisily {
-.     display "post-cancel"
-post-cancel
+.     display "stata-live-ok"
+stata-live-ok
 . }
 
 . if _rc != 0 {
@@ -9,16 +9,3 @@ post-cancel
 .     display as error "[MCP-MSG] `:display _rc[message]\'
 . }
 
-. 
-. capture noisily {
-.     sysuse auto
-(1978 automobile data)
-. }
-
-. if _rc != 0 {
-.     display as error "[MCP-ERROR] rc=" _rc
-.     display as error "[MCP-MSG] `:display _rc[message]\'
-. }
-
-. "gint invalid name
-r(198);

@@ -81,7 +81,7 @@ describe('Run Dirty File Integration', () => {
                 `file open pf using "${proofFile}", write replace`,
                 'file write pf "UNSAVED-VERSION"',
                 'file close pf',
-                'do "side.do"',
+                `do "${sideFile}"`,
             ].join('\n');
             await editor.edit(editBuilder => {
                 editBuilder.replace(new vscode.Range(0, 0, doc.lineCount, 0), unsavedContent);

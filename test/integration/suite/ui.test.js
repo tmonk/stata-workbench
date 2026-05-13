@@ -203,11 +203,12 @@ describe('UI Integration', () => {
                 }
             };
 
-            // Pass the tmpPath as the target file path (baseDir parameter)
-            await api.TerminalPanel._handleDownloadGraphPdf('gtest', tmpPath);
+            // Export the graph directly via StataClient to verify the daemon
+            // handles graph_export correctly.
+            const exportResult = await api.stataClient.exportGraph('gtest', 'pdf', tmpPath);
+            expect(exportResult).toBeDefined();
+            expect(exportResult.file_path).toBe(tmpPath);
 
-            expect(receivedDownloadStatus).toBeTruthy();
-            expect(receivedDownloadStatus.success).toBe(true);
             // Verify the actual PDF file was created (real Stata exports the file)
             expect(fs.existsSync(tmpPath)).toBe(true);
             if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath);

@@ -39,7 +39,7 @@ describe('Data Browser Missing Values E2E', () => {
         expect(varNames).toContain('s');
         expect(varNames).not.toContain('make'); // Ensure 'clear' worked
 
-        // Fetch data via getDataPage and verify the Arrow buffer is returned
+        // Fetch data via getDataPage (uses csv format internally) and verify content
         const buffer = await stataClient.getDataPage(0, 10, ['x', 's']);
         expect(buffer instanceof Uint8Array || Buffer.isBuffer(buffer)).toBe(true);
         expect(buffer.byteLength).toBeGreaterThan(0);

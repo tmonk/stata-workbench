@@ -124,14 +124,14 @@ async function startDaemon(sessionName) {
     // Always use uv run from the dev directory so the latest development
     // version of stata-agent is used, even when not installed on PATH.
     const cmd = 'uv';
-    const args = ['run', 'stata-agent', 'daemon', 'start', '--session', sessionName, '--mock'];
+    const args = ['run', 'stata-agent', 'daemon', 'start', '--session', sessionName];
 
     console.error(`[INTEGRATION] Starting daemon: ${cmd} ${args.join(' ')} (cwd=${STATA_AGENT_DIR})`);
 
     const proc = spawn(cmd, args, {
         cwd: STATA_AGENT_DIR,
         stdio: ['ignore', 'pipe', 'pipe'],
-        env: { ...process.env, STATA_AGENT_MOCK: '1' },
+        env: { ...process.env },
         detached: process.platform !== 'win32',
     });
 
