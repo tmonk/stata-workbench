@@ -7,6 +7,13 @@ const { runTests } = require('@vscode/test-electron');
 const SESSION_NAME = 'integration-test';
 const SESSION_DIR = path.join(os.homedir(), '.cache', 'stata-agent', 'sessions');
 
+// Resolve stata-agent binary (fallback for when it's not on PATH)
+const STATA_AGENT_DIR = path.join(os.homedir(), 'projects', 'stata-agent');
+const VENV_BIN = path.join(STATA_AGENT_DIR, '.venv', 'bin', 'stata-agent');
+if (!process.env.STATA_AGENT_PATH && fs.existsSync(VENV_BIN)) {
+    process.env.STATA_AGENT_PATH = VENV_BIN;
+}
+
 async function main() {
     const shardTotal = Math.max(1, parseInt(process.env.TEST_SHARD_TOTAL || '1', 10));
     const shardIndexEnv = process.env.TEST_SHARD_INDEX;
