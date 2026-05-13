@@ -1,31 +1,22 @@
 const vscode = require('vscode');
-const http = require('http');
 const { tableFromArrays, tableToIPC } = require('apache-arrow');
 
+/**
+ * Data Browser Benchmark — migrated from MCP HTTP API to StataClient.
+ *
+ * In the new architecture, DataBrowserPanel uses StataClient methods
+ * (listVariables, getDatasetState, getDataPage) directly instead of
+ * making HTTP requests to an MCP API server.
+ */
 describe('Data Browser Benchmark', () => {
     jest.setTimeout(180000); // 3 minutes total
-    let dummyServer;
-    let dummyUrl;
     let DataBrowserPanel; // Will be hydrated from extension exports
+    let currentVars = [];
+    let currentArrowBuffer = null;
 
     const N_ROWS = 1000;
 
     beforeEach(async () => {
-        // Start dummy server
-        await new Promise(resolve => {
-            dummyServer = http.createServer((req, res) => {
-                // Initial handlers will be overwritten by the test logic
-                res.writeHead(404);
-                res.end();
-            });
-            dummyServer.listen(0, '127.0.0.1', () => {
-                const addr = dummyServer.address();
-                dummyUrl = `http://127.0.0.1:${addr.port}`;
-                resolve();
-            });
-        });
-
-        // Mock getting credentials to point to our dummy server
         const extension = vscode.extensions.getExtension('tmonk.stata-workbench');
         if (!extension.isActive) await extension.activate();
 
@@ -35,32 +26,22 @@ describe('Data Browser Benchmark', () => {
         // Use the DataBrowserPanel that the extension is actually using
         DataBrowserPanel = api.DataBrowserPanel;
 
-        api.mcpClient.getUiChannel = async () => ({
-            baseUrl: dummyUrl,
-            token: 'dummy-token'
-        });
-
-        // Track sockets for cleanup
-        if (dummyServer) {
-            dummyServer.sockets = new Set();
-            dummyServer.on('connection', (socket) => {
-                dummyServer.sockets.add(socket);
-                socket.on('close', () => dummyServer.sockets.delete(socket));
-            });
-        }
+        // Mock StataClient methods directly (DataBrowserPanel no longer uses HTTP).
+        // The mock methods read from shared variables updated per scenario.
+        DataBrowserPanel._stataClient = {
+            listVariables: async () => currentVars,
+            getDatasetState: async () => ({
+                obs_count: N_ROWS,
+                var_count: currentVars.length,
+                dataset_name: 'benchmark',
+            }),
+            getDataPage: async (_start, _count, _varlist) => currentArrowBuffer,
+            validateFilterExpr: async () => ({ valid: true, error: null }),
+            computeViewIndices: async () => [],
+        };
     });
 
     afterEach(async () => {
-        if (dummyServer && dummyServer.sockets) {
-            // Force destroy all sockets
-            for (const socket of dummyServer.sockets) {
-                socket.destroy();
-            }
-            await new Promise(resolve => dummyServer.close(resolve));
-        } else if (dummyServer) {
-            await new Promise(resolve => dummyServer.close(resolve));
-        }
-
         if (DataBrowserPanel && DataBrowserPanel.currentPanel) {
             DataBrowserPanel.currentPanel.dispose();
         }
@@ -73,10 +54,7 @@ describe('Data Browser Benchmark', () => {
             { cols: 5000, name: 'Large (5000)' }
         ];
 
-        let currentVars = [];
-        let currentArrowBuffer = null;
-
-        // Function to update server data
+        // Function to update shared data (read by mock StataClient methods)
         const updateServerData = (cols) => {
             console.log(`Generating data for ${cols} columns...`);
             const data = {};
@@ -91,24 +69,6 @@ describe('Data Browser Benchmark', () => {
             currentVars = vars;
             currentArrowBuffer = arrowBuffer;
         };
-
-        // Initialize server handler to use dynamic data
-        dummyServer.removeAllListeners('request');
-        dummyServer.on('request', (req, res) => {
-            if (req.url === '/v1/dataset') {
-                res.writeHead(200, { 'Content-Type': 'application/json' });
-                res.end(JSON.stringify({ dataset: { id: `bench-id-${Date.now()}`, n: N_ROWS, frame: 'default' } }));
-            } else if (req.url === '/v1/vars') {
-                res.writeHead(200, { 'Content-Type': 'application/json' });
-                res.end(JSON.stringify({ vars: currentVars })); // Use dynamic var list
-            } else if (req.url === '/v1/arrow' || req.url.endsWith('/arrow')) {
-                res.writeHead(200, { 'Content-Type': 'application/octet-stream' });
-                res.end(currentArrowBuffer); // Use dynamic buffer
-            } else {
-                res.writeHead(404);
-                res.end();
-            }
-        });
 
         const allResults = [];
 

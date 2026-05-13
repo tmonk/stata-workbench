@@ -4,6 +4,9 @@ const os = require('os');
 const { spawn } = require('child_process');
 const { runTests } = require('@vscode/test-electron');
 
+const SESSION_NAME = 'integration-test';
+const SESSION_DIR = path.join(os.homedir(), '.cache', 'stata-agent', 'sessions');
+
 async function main() {
     const shardTotal = Math.max(1, parseInt(process.env.TEST_SHARD_TOTAL || '1', 10));
     const shardIndexEnv = process.env.TEST_SHARD_INDEX;
@@ -35,13 +38,9 @@ async function main() {
     let userDataDir;
     let extDir;
     let workspacePath;
+    let daemonProcess = null;
     let restoredEnv = null;
     try {
-        // Integration tests may run from a VS Code extension-host environment
-        // (for example when launched from Codex/IDE terminals). Those inherited
-        // vars can force spawned Electron binaries into Node mode and break
-        // argument parsing (e.g. "--user-data-dir" rejected as an unknown flag).
-        // Sanitize them for the duration of this test process.
         restoredEnv = sanitizeHostElectronEnv();
 
         const extensionDevelopmentPath = path.resolve(__dirname, '../../');
@@ -50,44 +49,19 @@ async function main() {
         process.stderr.write(`[INTEGRATION] extensionTestsPath: ${extensionTestsPath}\n`);
 
         // Use a real workspace folder so integration tests can write Workspace settings.
-        // Use a temp folder to avoid mutating this repo's .vscode/settings.json.
         workspacePath = fs.mkdtempSync(path.join(os.tmpdir(), 'stata-wb-ws-'));
-
-        // Optional: run via "uvx --refresh --refresh-package mcp-stata --from mcp-stata@latest mcp-stata" 
-        // against a local mcp-stata repo instead of PyPI.
-        // This is intended for integration tests in this mono-workspace.
-        if (!process.env.MCP_STATA_PACKAGE_SPEC) {
-            const localRepo = process.env.MCP_STATA_LOCAL_REPO || path.resolve(__dirname, '../../mcp-stata');
-            if (fs.existsSync(localRepo)) {
-                process.env.MCP_STATA_PACKAGE_SPEC = localRepo;
-            }
-        }
 
         // Use fresh temp dirs per run to avoid mutex/file-lock issues on Windows between runs.
         userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vscode-test-user-'));
         extDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vscode-test-exts-'));
 
-        // Ensure the test workspace has the local dev server config
-        const dotVscode = path.join(workspacePath, '.vscode');
-        if (!fs.existsSync(dotVscode)) fs.mkdirSync(dotVscode);
-        const mcpJson = path.join(dotVscode, 'mcp.json');
+        // Start the stata-agent daemon (mock mode) before launching VS Code.
+        daemonProcess = await startDaemon(SESSION_NAME);
 
-        const localRepo = process.env.MCP_STATA_LOCAL_REPO || path.resolve(__dirname, '../../mcp-stata');
-
-        const config = {
-            servers: {
-                mcp_stata: {
-                    command: "uv",
-                    args: [
-                        "run",
-                        "--directory",
-                        localRepo,
-                        "mcp-stata"
-                    ]
-                }
-            }
-        };
-        fs.writeFileSync(mcpJson, JSON.stringify(config, null, 2));
+        // Set env vars for the spawned VS Code process so extension uses the
+        // correct daemon and mock mode.
+        process.env.STATA_AGENT_INTEGRATION = '1';
+        process.env.STATA_AGENT_MOCK = '1';
 
         await runTests({
             extensionDevelopmentPath,
@@ -96,24 +70,140 @@ async function main() {
         });
 
         console.log('Test completed successfully. Dumping logs...');
-        dumpMcpLogs(userDataDir);
+        dumpLogs(userDataDir);
     } catch (err) {
         console.error('Failed to run integration tests', err);
         if (userDataDir) {
-            dumpMcpLogs(userDataDir);
+            dumpLogs(userDataDir);
         }
         process.exit(1);
-    }
+    } finally {
+        // Stop the daemon
+        if (daemonProcess) {
+            try {
+                daemonProcess.kill('SIGTERM');
+                // Also try NDJSON stop request
+                try {
+                    const metaPath = path.join(SESSION_DIR, `${SESSION_NAME}.json`);
+                    if (fs.existsSync(metaPath)) {
+                        const meta = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
+                        const net = require('net');
+                        const sock = meta.transport === 'unix'
+                            ? net.createConnection({ path: meta.path })
+                            : net.createConnection({ port: meta.port, host: meta.host || '127.0.0.1' });
+                        sock.write(JSON.stringify({ id: 'stop-int', method: 'stop', args: {} }) + '\n');
+                        sock.end();
+                        setTimeout(() => sock.destroy(), 1000);
+                    }
+                } catch {}
+                // Give it a moment before forced kill
+                await new Promise(r => setTimeout(r, 2000));
+                try { daemonProcess.kill('SIGKILL'); } catch {}
+            } catch {}
+        }
 
-    if (workspacePath && fs.existsSync(workspacePath)) {
-        try {
-            fs.rmSync(workspacePath, { recursive: true, force: true });
-        } catch (_err) {
+        // Clean up temp workspace
+        if (workspacePath && fs.existsSync(workspacePath)) {
+            try {
+                fs.rmSync(workspacePath, { recursive: true, force: true });
+            } catch (_err) {}
+        }
+
+        if (typeof restoredEnv === 'function') {
+            restoredEnv();
         }
     }
-    if (typeof restoredEnv === 'function') {
-        restoredEnv();
+}
+
+/**
+ * Start the stata-agent daemon for the given session.
+ * Returns the ChildProcess once the daemon is ready (meta file exists).
+ */
+async function startDaemon(sessionName) {
+    // Determine the stata-agent binary
+    const stataBin = findStataAgentBinary();
+
+    const args = [
+        'daemon', 'start',
+        '--session', sessionName,
+        '--mock',
+    ];
+
+    console.error(`[INTEGRATION] Starting daemon: ${stataBin} ${args.join(' ')}`);
+
+    const proc = spawn(stataBin, args, {
+        stdio: ['ignore', 'pipe', 'pipe'],
+        env: { ...process.env, STATA_AGENT_MOCK: '1' },
+        detached: process.platform !== 'win32',
+    });
+
+    proc.stderr.on('data', (d) => {
+        process.stderr.write(`[daemon:stderr] ${d}`);
+    });
+    proc.stdout.on('data', (d) => {
+        process.stderr.write(`[daemon:stdout] ${d}`);
+    });
+
+    // Poll for the meta file to confirm daemon is ready
+    const metaPath = path.join(SESSION_DIR, `${sessionName}.json`);
+    const startTime = Date.now();
+    const timeout = 30000;
+
+    while (Date.now() - startTime < timeout) {
+        if (fs.existsSync(metaPath)) {
+            try {
+                const meta = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
+                if (meta.transport === 'unix' ? fs.existsSync(meta.path) : true) {
+                    console.error(`[INTEGRATION] Daemon ready for session '${sessionName}'`);
+                    return proc;
+                }
+            } catch {}
+        }
+        await new Promise(r => setTimeout(r, 200));
     }
+
+    // Timeout — kill and throw
+    try { proc.kill('SIGKILL'); } catch {}
+    throw new Error(`Daemon failed to start within ${timeout}ms for session '${sessionName}'`);
+}
+
+/**
+ * Find the stata-agent binary path.
+ */
+function findStataAgentBinary() {
+    if (process.env.STATA_AGENT_PATH) {
+        return process.env.STATA_AGENT_PATH;
+    }
+
+    // Try direct command first
+    const { spawnSync } = require('child_process');
+    try {
+        const r = spawnSync('stata-agent', ['--version'], { timeout: 3000 });
+        if (r.status === 0) return 'stata-agent';
+    } catch {}
+
+    // Fallback: try via uv in the parent stata-agent directory
+    const stataAgentDir = path.resolve(__dirname, '../../stata-agent');
+    if (fs.existsSync(stataAgentDir)) {
+        try {
+            const r = spawnSync('uv', ['run', 'stata-agent', '--version'], {
+                cwd: stataAgentDir,
+                timeout: 5000,
+            });
+            if (r.status === 0) return 'stata-agent';
+        } catch {}
+    }
+
+    // Fallback: try uv run with the full module path
+    try {
+        const r = spawnSync('uv', ['run', 'python', '-m', 'stata_agent.cli', '--version'], {
+            cwd: stataAgentDir,
+            timeout: 5000,
+        });
+        if (r.status === 0) return 'uv';
+    } catch {}
+
+    return 'stata-agent';
 }
 
 function sanitizeHostElectronEnv() {
@@ -141,7 +231,7 @@ function sanitizeHostElectronEnv() {
     };
 }
 
-function dumpMcpLogs(userDataDir) {
+function dumpLogs(userDataDir) {
     try {
         const logsRoot = path.join(userDataDir, 'logs');
         if (!fs.existsSync(logsRoot)) {
@@ -159,7 +249,7 @@ function dumpMcpLogs(userDataDir) {
                 const stat = fs.statSync(full);
                 if (stat.isDirectory()) {
                     walk(full);
-                } else if (/Stata Workbench\.log$/i.test(entry) || /mcp-stata/i.test(entry)) {
+                } else if (/Stata Workbench\.log$/i.test(entry)) {
                     candidates.push(full);
                 }
             }
@@ -167,7 +257,7 @@ function dumpMcpLogs(userDataDir) {
 
         walk(stampPath);
         if (!candidates.length) {
-            console.error(`No MCP logs found under ${stampPath}`);
+            console.error(`No logs found under ${stampPath}`);
             return;
         }
 
@@ -176,13 +266,13 @@ function dumpMcpLogs(userDataDir) {
                 const content = fs.readFileSync(file, 'utf8');
                 const lines = content.split(/\r?\n/);
                 const tail = lines.slice(-200).join('\n');
-                console.error(`\n--- MCP log tail: ${file} ---\n${tail}\n--- end MCP log tail ---`);
+                console.error(`\n--- Log tail: ${file} ---\n${tail}\n--- end log tail ---`);
             } catch (readErr) {
                 console.error(`Failed to read log ${file}: ${readErr.message}`);
             }
         }
     } catch (logErr) {
-        console.error(`Failed to dump MCP logs: ${logErr.message}`);
+        console.error(`Failed to dump logs: ${logErr.message}`);
     }
 }
 

@@ -3,7 +3,7 @@ const vscode = require('vscode');
 describe('Terminal Panel Serialization Integration', () => {
     jest.setTimeout(60000);
 
-    const enabled = process.env.MCP_STATA_INTEGRATION === '1';
+    const enabled = process.env.STATA_AGENT_INTEGRATION === '1';
 
     test('Extension should register WebviewPanelSerializer for stataTerminal without error', async () => {
         if (!enabled) return;

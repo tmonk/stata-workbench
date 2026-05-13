@@ -3,7 +3,7 @@ const http = require('http');
 
 describe('Data Browser Integration', () => {
     jest.setTimeout(60000);
-    const enabled = process.env.MCP_STATA_INTEGRATION === '1';
+    const enabled = process.env.STATA_AGENT_INTEGRATION === '1';
     let dummyServer;
     let dummyUrl;
 
@@ -75,7 +75,10 @@ describe('Data Browser Integration', () => {
         jest.clearAllTimers();
     });
 
-    test('DataBrowserPanel should proxy API requests correctly', async () => {
+    // MCP-specific: DataBrowserPanel no longer proxys HTTP API requests.
+    // It uses StataClient methods directly. See unit/panels.test.js for
+    // the new DataBrowserPanel test coverage.
+    test.skip('DataBrowserPanel should proxy API requests correctly', async () => {
         const extension = vscode.extensions.getExtension('tmonk.stata-workbench');
         if (!extension.isActive) await extension.activate();
         const api = extension.exports;
@@ -89,7 +92,8 @@ describe('Data Browser Integration', () => {
         expect(result).toEqual({ dataset: { id: 'test-id', n: 50, frame: 'default' } });
     });
 
-    test('DataBrowserPanel proxy should handle POST requests with body', async () => {
+    // MCP-specific: HTTP proxy tests replaced by StataClient method tests.
+    test.skip('DataBrowserPanel proxy should handle POST requests with body', async () => {
         const extension = vscode.extensions.getExtension('tmonk.stata-workbench');
         const api = extension.exports;
 
@@ -105,7 +109,8 @@ describe('Data Browser Integration', () => {
         expect(result).toEqual(bodyObj);
     });
 
-    test('DataBrowserPanel proxy should handle binary Arrow IPC responses', async () => {
+    // MCP-specific: HTTP proxy tests replaced by StataClient method tests.
+    test.skip('DataBrowserPanel proxy should handle binary Arrow IPC responses', async () => {
         const extension = vscode.extensions.getExtension('tmonk.stata-workbench');
         const api = extension.exports;
 
@@ -116,8 +121,8 @@ describe('Data Browser Integration', () => {
     });
 
     test('DataBrowserPanel should work with LIVE server if configured', async () => {
-        if (process.env.MCP_STATA_LIVE !== '1') {
-            console.log('Skipping live server test (MCP_STATA_LIVE !== 1)');
+        if (process.env.STATA_AGENT_LIVE !== '1') {
+            console.log('Skipping live server test (STATA_AGENT_LIVE !== 1)');
             return;
         }
 
@@ -125,54 +130,39 @@ describe('Data Browser Integration', () => {
         if (!extension.isActive) await extension.activate();
         const api = extension.exports;
         console.log('[Live Test] Extension API keys:', Object.keys(api || {}));
-        const mcpClient = api.mcpClient;
+        const stataClient = api.stataClient;
 
-        if (!mcpClient) {
-            throw new Error(`mcpClient is undefined in extension.exports! Keys: ${Object.keys(api || {}).join(', ')}`);
+        if (!stataClient) {
+            throw new Error(`stataClient is undefined in extension.exports! Keys: ${Object.keys(api || {}).join(', ')}`);
         }
-
-        // Wait for client to be ready and get UI channel
-        console.log('[Live Test] Fetching UI channel from real MCP server...');
-        const channel = await mcpClient.getUiChannel();
-        expect(channel.baseUrl).toBeTruthy();
-        expect(channel.token).toBeTruthy();
-
-        console.log(`[Live Test] Real Server BaseURL: ${channel.baseUrl}`);
 
         // Load some data first
         console.log('[Live Test] Loading auto.dta...');
-        await mcpClient.runSelection('sysuse auto, clear');
+        await stataClient.runCode('sysuse auto, clear');
 
-        // Try /v1/dataset first
-        const dsResult = await api.DataBrowserPanel._performRequest(`${channel.baseUrl}/v1/dataset`, {
-            method: 'GET',
-            headers: { 'Authorization': `Bearer ${channel.token}` }
-        });
-        const ds = dsResult.dataset || dsResult;
+        // Verify dataset state
+        console.log('[Live Test] Fetching dataset state...');
+        const state = await stataClient.getDatasetState();
+        expect(state.obs_count).toBeGreaterThan(0);
+        expect(state.var_count).toBeGreaterThan(0);
+        console.log(`[Live Test] Dataset: ${state.obs_count} obs, ${state.var_count} vars`);
 
-        // Fetch data via arrow
-        const endpoint = `${channel.baseUrl}/v1/arrow`;
-        const body = {
-            datasetId: ds.id,
-            frame: ds.frame || 'default',
-            limit: 10
-        };
+        // List variables
+        const variables = await stataClient.listVariables();
+        expect(variables.length).toBeGreaterThan(0);
+        const varNames = variables.map(v => v.name);
+        console.log(`[Live Test] Variables: ${varNames.slice(0, 10).join(', ')}...`);
 
-        const result = await api.DataBrowserPanel._performRequest(endpoint, {
-            method: 'POST',
-            body: JSON.stringify(body),
-            headers: {
-                'Authorization': `Bearer ${channel.token}`,
-                'Content-Type': 'application/json'
-            }
-        }, true);
-
+        // Fetch data via StataClient
+        const varlist = varNames.slice(0, 5);
+        const result = await stataClient.getDataPage(0, 10, varlist);
         expect(result instanceof Uint8Array || Buffer.isBuffer(result)).toBe(true);
         expect(result.byteLength).toBeGreaterThan(0);
-        console.log(`[Live Test] Successfully fetched ${result.byteLength} bytes of Arrow data from real server.`);
+        console.log(`[Live Test] Successfully fetched ${result.byteLength} bytes of Arrow data from StataClient.`);
     });
 
-    test('DataBrowserPanel proxy should handle errors', async () => {
+    // MCP-specific: HTTP proxy tests replaced by StataClient method tests.
+    test.skip('DataBrowserPanel proxy should handle errors', async () => {
         const extension = vscode.extensions.getExtension('tmonk.stata-workbench');
         const api = extension.exports;
 

@@ -8,9 +8,9 @@ async function run() {
     const suiteDir = __dirname;
 
     // Set environment variable to indicate integration test mode
-    process.env.MCP_STATA_INTEGRATION = '1';
+    process.env.STATA_AGENT_INTEGRATION = '1';
     global.realVscode = require('vscode');
-    console.log('[INTEGRATION] MCP_STATA_INTEGRATION:', process.env.MCP_STATA_INTEGRATION);
+    console.log('[INTEGRATION] STATA_AGENT_INTEGRATION:', process.env.STATA_AGENT_INTEGRATION);
 
     try {
         const testPattern = process.env.TEST_PATTERN;
@@ -30,7 +30,7 @@ async function run() {
             delete options._;
         } else if (shardTotal > 1) {
             const allTests = fs.readdirSync(suiteDir)
-                .filter((file) => file.endsWith('.test.js') && file !== 'benchmark.test.js')
+                .filter((file) => file.endsWith('.test.js') && file !== 'benchmark.test.js' && file !== 'integration.test.js')
                 .sort()
                 .map((file) => path.join(suiteDir, file));
 

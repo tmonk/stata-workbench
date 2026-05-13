@@ -3,7 +3,7 @@ const vscode = require('vscode');
 describe('Terminal Output E2E', () => {
     jest.setTimeout(180000);
 
-    const enabled = process.env.MCP_STATA_INTEGRATION === '1';
+    const enabled = process.env.STATA_AGENT_INTEGRATION === '1';
 
     test('Should hide internal commands and highlight output', async () => {
         if (!enabled) {
@@ -52,7 +52,7 @@ describe('Terminal Output E2E', () => {
             .join('');
 
         // 1. Verify internal command stripping
-        // The mcp-stata server sends 'capture log close _mcp_smcl_...' at the end of runs if it uses log streaming
+        // The stata-agent server sends 'capture log close _mcp_smcl_...' at the end of runs if it uses log streaming
         expect(combined).not.toContain('capture log close _mcp_smcl_');
 
         // 2. Verify SMCL tags are present (representing original output)

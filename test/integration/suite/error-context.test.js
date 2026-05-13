@@ -3,7 +3,7 @@ const vscode = require('vscode');
 describe('Error Context E2E', () => {
     jest.setTimeout(60000);
 
-    const enabled = process.env.MCP_STATA_INTEGRATION === '1';
+    const enabled = process.env.STATA_AGENT_INTEGRATION === '1';
 
     test('Error context should be displayed in Terminal Panel on failure', async () => {
         if (!enabled) {

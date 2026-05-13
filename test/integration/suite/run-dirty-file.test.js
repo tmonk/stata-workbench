@@ -6,7 +6,7 @@ const os = require('os');
 describe('Run Dirty File Integration', () => {
     jest.setTimeout(60000);
 
-    const enabled = process.env.MCP_STATA_INTEGRATION === '1';
+    const enabled = process.env.STATA_AGENT_INTEGRATION === '1';
 
     let testDir;
     let diskFile;

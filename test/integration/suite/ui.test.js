@@ -6,7 +6,7 @@ const fs = require('fs');
 describe('UI Integration', () => {
     jest.setTimeout(60000);
 
-    const enabled = process.env.MCP_STATA_INTEGRATION === '1';
+    const enabled = process.env.STATA_AGENT_INTEGRATION === '1';
 
     test('Extension should activate and register commands', async () => {
         const extension = vscode.extensions.getExtension('tmonk.stata-workbench');
