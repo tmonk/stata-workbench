@@ -3,7 +3,7 @@
 <img src="https://raw.githubusercontent.com/tmonk/stata-workbench/refs/heads/main/img/icon.png" width="200">
 </p>
 
-**Stata Workbench** is unified agentic toolkit for Stata development. The toolkit gives AI agents native control over Stata - run commands, inspect variables, export graphs, and build more quickly and reliably than native Stata alone. Built as a VS Code extension (Cursor, Windsurf, Antigravity), so your agent works inside your editor. Powered by [mcp-stata](https://github.com/tmonk/mcp-stata). Featured in <a href="https://www.stata.com/stata-news/news41-2/community-corner-ai-tools/"><img src="https://raw.githubusercontent.com/tmonk/stata-workbench/refs/heads/main/img/stata.png"  height="10px" alt="Stata" style="vertical-align:middle; margin-top: -5px;"/> News</a>.
+**Stata Workbench** is unified agentic toolkit for Stata development. The toolkit gives AI agents native control over Stata - run commands, inspect variables, export graphs, and build more quickly and reliably than native Stata alone. Built as a VS Code extension (Cursor, Windsurf, Antigravity), so your agent works inside your editor. Powered by [stata-agent](https://github.com/tmonk/stata-agent). Featured in <a href="https://www.stata.com/stata-news/news41-2/community-corner-ai-tools/"><img src="https://raw.githubusercontent.com/tmonk/stata-workbench/refs/heads/main/img/stata.png"  height="10px" alt="Stata" style="vertical-align:middle; margin-top: -5px;"/> News</a>.
 
 Built by [Thomas Monk](https://tdmonk.com), London School of Economics.
 
@@ -78,7 +78,7 @@ Offline fallback:
 
 ## Requirements
 - Stata 17+ on macOS, Windows, or Linux.
-- **mcp-stata**: The extension requires the `mcp-stata` toolkit. If it is not found, you will be prompted to run the installation script.
+- **stata-agent**: The extension requires the `stata-agent` toolkit. If it is not found, you will be prompted to run the installation script.
 
 ## Features
 
@@ -93,11 +93,11 @@ Stata Workbench is a unified **agentic toolkit** for Stata development, providin
 - **Code Linting** (`stata_inspect_data` action="lint"): Static analysis of `.do` and `.ado` files to identify style violations and potential errors.
 - **Modern Stata Skill**: A specialized knowledge base for agents to use frames, `gtools`, and other modern Stata features instead of legacy anti-patterns.
 - **Setup Toolkit** (`scripts/setup_toolkit.py`): Automated registration for Claude Desktop, Codex, VS Code, and Cursor in one command.
-- **Auto-manage MCP configs**: Synchronizes your host MCP settings (`mcp.json`) across your favorite AI editors.
+
 - **Status Bar + Cancel** (`stata-workbench.cancelRequest`): Live request states with one-click cancellation.
 - **Test MCP Server** (`stata-workbench.testMcpServer`): Quick smoke checks to verify your Stata connection.
 - **Syntax Highlighting**: Full support for `.do`, `.ado`, `.mata`, Dyndoc Markdown, and Dyndoc LaTeX.
-- **Install MCP CLI helper** (`stata-workbench.installMcpCli`): Bootstraps the `mcp-stata` toolkit locally when it is missing from the environment.
+- **Install Stata Agent CLI** (`stata-workbench.installMcpCli`): Bootstraps the `stata-agent` toolkit locally when it is missing from the environment.
 - **Durable logs**: All run results are logged to the `Stata Workbench` output channel for persistent reference.
 
 For a detailed breakdown of all capabilities, see [FEATURES.md](FEATURES.md).
@@ -105,8 +105,6 @@ For a detailed breakdown of all capabilities, see [FEATURES.md](FEATURES.md).
 ## Settings
 - `stataMcp.requestTimeoutMs` (default `100000`): timeout for MCP requests.
 - `stataMcp.autoRevealOutput` (default `false`): automatically show the output channel after runs.
-- `stataMcp.autoConfigureMcp` (default `true`): automatically add/update the mcp-stata server entry in your host MCP config (`mcp.json`).
-- `stataMcp.configureClaudeCode` (default `false`): register mcp-stata via `claude mcp add-json` at user scope. Ensures both Claude Code CLI and VS Code extension see the server. Requires `claude` on PATH.
 - `stataMcp.configureCodex` (default `false`): also configure Codex CLI and VS Code extension MCP settings.
 - `stataMcp.codexConfigPath` (default `~/.codex/config.toml`): path to Codex MCP config. Supports `~` and `${workspaceFolder}`.
 - `stataMcp.runFileWorkingDirectory` (default empty): working directory when running .do files. Supports an absolute path, ~, ${workspaceFolder} or ${fileDir}; empty uses the .do file's folder.
@@ -119,67 +117,16 @@ For a detailed breakdown of all capabilities, see [FEATURES.md](FEATURES.md).
 
 
 
-## AI Assistant Integration
-
-### Automatic Configuration
-
-MCP configuration is **synced on extension load and when you toggle the relevant settings**. When a setting is enabled, the extension adds or updates the mcp-stata entry in that config. When you turn the setting off, the extension **removes** the mcp_stata entry cleanly.
-
-| When | Behaviour |
-|------|-----------|
-| Extension loads | Adds/updates mcp-stata in each enabled config target |
-| Setting toggled ON | Adds/updates mcp-stata in that config |
-| Setting toggled OFF | Removes mcp_stata from that config |
-
-The extension detects your editor and writes to the appropriate config file(s).
-- User-level `mcp.json` with Stata MCP server entry
-- The extension delegates initial server configuration to the `mcp-stata` installer.
-- Works for: VS Code, Cursor, Windsurf, Antigravity
-- Optional: Claude Code CLI and extension when `stataMcp.configureClaudeCode` is enabled
-- Optional: Codex CLI and extension when `stataMcp.configureCodex` is enabled
-
-**Config file locations:**
-
-| Editor | macOS | Windows | Linux |
-|--------|-------|---------|-------|
-| **VS Code** | `~/Library/Application Support/Code/User/mcp.json` | `%APPDATA%/Code/User/mcp.json` | `~/.config/Code/User/mcp.json` |
-| **VS Code Insiders** | `~/Library/Application Support/Code - Insiders/User/mcp.json` | `%APPDATA%/Code - Insiders/User/mcp.json` | `~/.config/Code - Insiders/User/mcp.json` |
-| **Cursor** | `~/.cursor/mcp.json` | `%USERPROFILE%/.cursor/mcp.json` | `~/.cursor/mcp.json` |
-| **Windsurf** | `~/.codeium/windsurf/mcp_config.json` | `%USERPROFILE%/.codeium/windsurf/mcp_config.json` | `~/.codeium/windsurf/mcp_config.json` |
-| **Windsurf Next** | `~/.codeium/windsurf-next/mcp_config.json` | `%USERPROFILE%/.codeium/windsurf-next/mcp_config.json` | `~/.codeium/windsurf-next/mcp_config.json` |
-| **Antigravity** | `~/Library/Application Support/Antigravity/User/mcp.json` | `%APPDATA%/Antigravity/User/mcp.json` | `~/.antigravity/mcp.json` |
-| **Claude Code CLI & extension** | Via `claude mcp add-json` (user scope) | same | same |
-| **Codex CLI & extension** | `stataMcp.codexConfigPath` (default `~/.codex/config.toml`) | same | same |
-
-If you want to manage the file yourself, here is the content to add. User-level `mcp.json`:
-```json
-{
-  "servers": {
-    "mcp_stata": {
-      "type": "stdio",
-      "command": "uvx",
-      "args": ["--refresh", "--refresh-package", "mcp-stata", "--from", "mcp-stata@latest", "mcp-stata"]
-    }
-  }
-}
-```
-
 ## Troubleshooting
-- **Claude Code extension doesn't see MCPs**: We use `claude mcp add-json` so both CLI and extension share the same config. Ensure `claude` is on PATH and `stataMcp.configureClaudeCode` is enabled. Restart the Claude Code panel after changes.
+
 - **Icons not visible in editor title bar**: If the play, run, and graph icons don't appear when you open a `.do` file, click the `...` menu in the editor title bar and enable the Stata Workbench icons to make them visible.
-- **Status bar says "CLI missing"**: Install `mcp-stata` manually with `curl -LsSf https://mcp-stata-install.tdmonk.com/install.sh | bash` (macOS/Linux) or `irm irm https://mcp-stata-install.tdmonk.com/install.ps1 | iex | iex` (Windows).
+- **Status bar says "CLI missing"**: Install `stata-agent` manually with `curl -LsSf https://stata-agent-install.tdmonk.com/install.sh | bash` (macOS/Linux) or `curl -LsSf https://stata-agent-install.tdmonk.com/install.ps1 | powershell` (Windows).
 - **Requests time out**: raise `stataMcp.requestTimeoutMs`.
-- Unexpected MCP errors: open the output channel for a structured error message.
+- Unexpected errors: open the output channel for a structured error message.
 - Cancel a stuck run: run `Stata: Cancel Current Request` from the command palette.
 
 ## Uninstall cleanup (optional)
-**Automatic removal:** Turn off `stataMcp.autoConfigureMcp`, `stataMcp.configureClaudeCode`, or `stataMcp.configureCodex` in settings; the extension removes the mcp_stata entry immediately.
-
-**Manual removal:** Edit the config file and delete the relevant entry:
-- VS Code format → delete `servers.mcp_stata`
-- Cursor format → delete `mcpServers.mcp_stata`
-- Claude Code → run `claude mcp remove mcp_stata`, or turn off `stataMcp.configureClaudeCode` to auto-remove
-- Codex → delete `[mcp_servers.mcp_stata]` and `[mcp_servers.mcp_stata.env]` from `~/.codex/config.toml`
+If you no longer need the extension, uninstall it from the Extensions view in your editor.
 
 ## Telemetry
 

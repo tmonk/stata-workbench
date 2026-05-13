@@ -5,28 +5,18 @@
 - Production build: `bun run bundle` (local builds default to development mode unless `CI=true` is set)
 - Watch mode: `bun run watch`
 - Unit Tests: `bun run test`
-- Integration Tests: `bun run test:integration` (requires `mcp-stata` on PATH)
+- Integration Tests: `bun run test:integration` (requires `stata-agent` on PATH)
 
-### Testing with Local mcp-stata
-To test changes to the `mcp-stata` server locally without publishing to PyPI:
+### Testing with Local stata-agent
+To test changes to the `stata-agent` server locally without publishing to PyPI:
 
-1. **In Integration Tests**: The test runner (`runTest.js`) automatically attempts to resolve the local `mcp-stata` directory. You can force a specific path by setting the `MCP_STATA_LOCAL_REPO` environment variable:
+1. **In Integration Tests**: The test runner (`runTest.js`) automatically attempts to resolve the local `stata-agent` directory. You can force a specific path by setting the `STATA_AGENT_LOCAL_REPO` environment variable:
    ```bash
-   MCP_STATA_LOCAL_REPO="/path/to/mcp-stata" bun run test:integration
+   STATA_AGENT_LOCAL_REPO="/path/to/stata-agent" bun run test:integration
    ```
 
-2. **In VS Code (Manual Testing)**: Create a `.vscode/mcp.json` file in the root of the `stata-workbench` workspace. This will override global MCP configurations:
-   ```json
-   {
-     "servers": {
-       "mcp_stata": {
-         "command": "uv",
-         "args": ["run", "--directory", "/path/to/your/mcp-stata", "mcp-stata"]
-       }
-     }
-   }
-   ```
-   *Note: Ensure `uv` is installed and the directory points to your local `mcp-stata` clone.*
+2. **In VS Code (Manual Testing)**: Configure the extension to point to your local `stata-agent` clone via the extension settings.
+   *Note: Ensure `uv` is installed and the directory points to your local `stata-agent` clone.*
 
 ## Commit Conventions
 We use [Conventional Commits](https://www.conventionalcommits.org/) to automate our release process. This is enforced locally via `commitlint` + `husky` and in CI via the `Commitlint` GitHub Actions workflow.
