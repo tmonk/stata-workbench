@@ -81,8 +81,19 @@ const createExtensionHarness = (overrides = {}) => {
         './terminal-panel': { TerminalPanel: terminalPanel },
         './data-browser-panel': { DataBrowserPanel: dataBrowserPanel },
         './artifact-utils': artifactUtils,
-        './daemon-manager': { DaemonManager: jest.fn().mockImplementation(() => daemonMgrMock) },
+        './daemon-manager': { DaemonManager: function() { return daemonMgrMock; } },
         './stata-client': { StataClient: jest.fn().mockImplementation(() => stataClientMock) },
+        './installer': {
+            isStataAgentInstalled: function() { return true; },
+            findStataAgentBinary: function() { return 'stata-agent'; },
+            promptInstall: function() {},
+            resetInstallPrompt: function() {},
+            runInstallInTerminal: function() {},
+            checkAndReport: function() {},
+        },
+        './updater': {
+            checkAndUpgrade: function() { return Promise.resolve({ upgraded: true }); },
+        },
     });
 
     return {

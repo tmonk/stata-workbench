@@ -5,7 +5,7 @@ const fs = require('fs');
 const cp = require('child_process');
 const net = require('net');
 
-const SESSION_DIR = path.join(os.homedir(), '.cache', 'mcp-stata', 'sessions');
+const SESSION_DIR = path.join(os.homedir(), '.cache', 'stata-agent', 'sessions');
 
 /**
  * Create a mock net.Socket that stores event handlers for manual triggering.
@@ -51,10 +51,10 @@ describe('DaemonManager', () => {
     let originalStataPath;
 
     beforeEach(() => {
-        // _findStataBinary returns STATA_PATH immediately if set;
+        // _findStataAgentBinary returns STATA_AGENT_PATH immediately if set;
         // unset so it goes through the normal binary search path.
-        originalStataPath = process.env.STATA_PATH;
-        delete process.env.STATA_PATH;
+        originalStataPath = process.env.STATA_AGENT_PATH;
+        delete process.env.STATA_AGENT_PATH;
 
         // Spy on module exports before requiring daemon-manager.
         // The daemon-manager wrapper delegates to require('child_process').spawn()
@@ -79,7 +79,7 @@ describe('DaemonManager', () => {
 
     afterEach(() => {
         if (originalStataPath !== undefined) {
-            process.env.STATA_PATH = originalStataPath;
+            process.env.STATA_AGENT_PATH = originalStataPath;
         }
         jest.restoreAllMocks();
     });
@@ -182,7 +182,7 @@ describe('DaemonManager', () => {
 
             expect(cp.spawn).toHaveBeenCalledTimes(1);
             // _findStataBinary falls through to 'stata'
-            expect(cp.spawn.mock.calls[0][0]).toBe('stata');
+            expect(cp.spawn.mock.calls[0][0]).toBe('stata-agent');
             expect(cp.spawn.mock.calls[0][1]).toEqual(
                 expect.arrayContaining(['daemon', 'start', '--session', 'default'])
             );
@@ -466,17 +466,26 @@ describe('DaemonManager', () => {
         });
     });
     // ------------------------------------------------------------------
-    // _findStataBinary — STATA_PATH env
+    // _findStataAgentBinary — STATA_AGENT_PATH env
     // ------------------------------------------------------------------
-    describe('_findStataBinary', () => {
+    describe('_findStataAgentBinary', () => {
         afterEach(() => {
-            delete process.env.STATA_PATH;
+            delete process.env.STATA_AGENT_PATH;
         });
 
-        it('returns STATA_PATH when set', () => {
-            process.env.STATA_PATH = '/custom/stata';
-            const result = manager._findStataBinary();
-            expect(result).toBe('/custom/stata');
+        it('returns STATA_AGENT_PATH when set', () => {
+            process.env.STATA_AGENT_PATH = '/custom/stata-agent';
+            const result = manager._findStataAgentBinary();
+            expect(result).toBe('/custom/stata-agent');
+        });
+
+        it('does not use STATA_PATH env (reserved for Stata Corp binary)', () => {
+            process.env.STATA_PATH = '/custom/stata-mp';
+            jest.spyOn(cp, 'spawnSync').mockReturnValue({ status: 0 });
+            const result = manager._findStataAgentBinary();
+            // Should fall through to discovery, not use STATA_PATH
+            expect(result).not.toBe('/custom/stata-mp');
+            expect(cp.spawnSync).toHaveBeenCalledWith('stata-agent', ['--version'], expect.any(Object));
         });
     });
 

@@ -6,16 +6,16 @@ const path = require('path');
 
 /**
  * Check whether the `stata` CLI (from the stata-agent package) is available.
- * This is the binary that DaemonManager._findStataBinary() uses to spawn the daemon.
+ * This is the binary that DaemonManager._findStataAgentBinary() uses to spawn the daemon.
  */
 const STATA_AVAILABLE = (() => {
     try {
-        const r = cp.spawnSync('stata', ['--version'], { timeout: 3000 });
+        const r = cp.spawnSync('stata-agent', ['--version'], { timeout: 3000 });
         if (r.status === 0) return true;
     } catch {}
     // Fallback: check via uv in the stata-agent project directory
     try {
-        const r = cp.spawnSync('uv', ['run', 'stata', '--version'], {
+        const r = cp.spawnSync('uv', ['run', 'stata-agent', '--version'], {
             cwd: path.join(process.env.HOME, 'projects', 'stata-agent'),
             timeout: 5000,
         });

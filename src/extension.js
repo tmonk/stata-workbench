@@ -8,6 +8,18 @@ const { getVscode, getEnv, getFs, getChildProcess, getMcpClient, createDepProxy 
 const { DaemonManager } = require('./daemon-manager');
 const { StataClient } = require('./stata-client');
 const pkg = require('../package.json');
+
+// Lazy-load installer/updater so proxyquire in tests can mock them
+// without affecting daemon-manager mock.
+let _installer, _updater;
+function getInstaller() {
+    if (!_installer) _installer = require('./installer');
+    return _installer;
+}
+function getUpdater() {
+    if (!_updater) _updater = require('./updater');
+    return _updater;
+}
 const { TerminalPanel } = require('./terminal-panel');
 const { DataBrowserPanel } = require('./data-browser-panel');
 const { openArtifact } = require('./artifact-utils');
@@ -151,6 +163,37 @@ function activate(context) {
         appendLine(`[stata] Client error: ${err.message}`);
     });
 
+    // ---- stata-agent installation check ----
+    try {
+        const { isStataAgentInstalled, promptInstall } = getInstaller();
+        if (!isStataAgentInstalled()) {
+            promptInstall(context); // non-blocking — shows notification
+        }
+    } catch (e) {
+        // installer not available (e.g., in test environments without vscode module)
+    }
+
+    // ---- auto-upgrade check (delegates to CLI) ----
+    try {
+        const { checkAndUpgrade } = getUpdater();
+        checkAndUpgrade(context, outputChannel).then((upgradeResult) => {
+            if (!upgradeResult.upgraded && upgradeResult.reason !== 'not_installed') {
+                // Suppress repeat notifications for 24 h
+                const lastTs = context.globalState.get('lastUpgradeFailedTs');
+                if (lastTs && (Date.now() - lastTs) < 24 * 3600 * 1000) {
+                    return; // suppress
+                }
+                vscode.window.showWarningMessage(
+                    'Stata Agent upgrade check failed — see Output channel for details.'
+                );
+            }
+        }).catch(() => {
+            // Silently ignore — the CLI handles its own error reporting
+        });
+    } catch (e) {
+        // updater not available (e.g., in test environments)
+    }
+
     statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
     statusBarItem.text = '$(beaker) Stata: Initializing';
     statusBarItem.tooltip = 'Stata Workbench';
@@ -171,6 +214,51 @@ function activate(context) {
             } else {
                 appendLine('Daemon: not running');
             }
+        }),
+        // ---- stata-agent install/upgrade commands ----
+        vscode.commands.registerCommand('stata-workbench.installStataAgent', async () => {
+            const { runInstallInTerminal } = getInstaller();
+            runInstallInTerminal(outputChannel);
+        }),
+        vscode.commands.registerCommand('stata-workbench.upgradeStataAgent', async () => {
+            appendLine('Upgrading stata-agent...');
+            const { checkAndUpgrade } = getUpdater();
+            const result = await checkAndUpgrade(context, outputChannel);
+            if (result.upgraded) {
+                vscode.window.showInformationMessage(
+                    'Stata Agent is up to date. Reload window to activate.'
+                );
+            } else if (result.reason === 'not_installed') {
+                const choice = await vscode.window.showInformationMessage(
+                    'Stata Agent is not installed. Install now?', 'Install'
+                );
+                const { runInstallInTerminal } = getInstaller();
+                if (choice === 'Install') {
+                    runInstallInTerminal(outputChannel);
+                }
+            } else {
+                vscode.window.showWarningMessage(
+                    `Stata Agent upgrade failed: ${result.reason}`
+                );
+            }
+        }),
+        vscode.commands.registerCommand('stata-workbench.checkInstall', async () => {
+            const { checkAndReport, isStataAgentInstalled } = getInstaller();
+            await checkAndReport(outputChannel);
+            if (!isStataAgentInstalled()) {
+                vscode.window.showInformationMessage(
+                    'Stata Agent not detected. Reload window or install manually.'
+                );
+            } else {
+                vscode.window.showInformationMessage(
+                    'Stata Agent detected. Reload VS Code window to activate.'
+                );
+            }
+        }),
+        vscode.commands.registerCommand('stata-workbench.resetInstallPrompt', async () => {
+            const { resetInstallPrompt } = getInstaller();
+            resetInstallPrompt(context);
+            vscode.window.showInformationMessage('Install prompt re-enabled.');
         }),
         vscode.commands.registerCommand('stata-workbench.viewData', viewData),
         vscode.commands.registerCommand('stata-workbench.cancelRequest', cancelRequest),

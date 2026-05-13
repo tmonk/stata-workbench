@@ -73,6 +73,22 @@
       {
         "command": "stata-workbench.showDaemonStatus",
         "title": "Stata: Show Daemon Status"
+      },
+      {
+        "command": "stata-workbench.installStataAgent",
+        "title": "Stata Workbench: Install Stata Agent"
+      },
+      {
+        "command": "stata-workbench.upgradeStataAgent",
+        "title": "Stata Workbench: Upgrade Stata Agent"
+      },
+      {
+        "command": "stata-workbench.checkInstall",
+        "title": "Stata Workbench: Check Again / Re-detect stata-agent"
+      },
+      {
+        "command": "stata-workbench.resetInstallPrompt",
+        "title": "Stata Workbench: Reset Install Prompt (re-enable after 'Not now')"
       }
     ],
     "menus": {

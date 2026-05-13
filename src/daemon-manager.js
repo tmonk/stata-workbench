@@ -6,7 +6,7 @@ const spawn = (bin, args, opts) => {
 	return child;
 };
 
-const SESSION_DIR = path.join(os.homedir(), '.cache', 'mcp-stata', 'sessions');
+const SESSION_DIR = path.join(os.homedir(), '.cache', 'stata-agent', 'sessions');
 
 class DaemonManager {
     constructor() {
@@ -33,8 +33,8 @@ class DaemonManager {
             fs.unlinkSync(metaPath);
         }
 
-        // Find the stata binary
-        const stataBin = this._findStataBinary();
+        // Find the stata-agent binary (shared implementation with installer.js)
+        const stataBin = this._findStataAgentBinary();
 
         const isWin = process.platform === 'win32';
         const transport = isWin ? 'tcp' : 'unix';
@@ -51,11 +51,16 @@ class DaemonManager {
         }
 
         return new Promise((resolve, reject) => {
-            const proc = spawn(stataBin, args, {
-                stdio: ['ignore', 'pipe', 'pipe'],
-                env: { ...process.env },
-                detached: !isWin,
-            });
+            let proc;
+            try {
+                proc = spawn(stataBin, args, {
+                    stdio: ['ignore', 'pipe', 'pipe'],
+                    env: { ...process.env },
+                    detached: !isWin,
+                });
+            } catch (err) {
+                return reject(err);
+            }
 
             this._processes.set(sessionName, proc);
 
@@ -150,34 +155,35 @@ class DaemonManager {
         this._crashCallbacks.set(sessionName, cbs);
     }
 
-    _findStataBinary() {
-        // Check STATA_PATH env
-        if (process.env.STATA_PATH) {
-            return process.env.STATA_PATH;
+    _findStataAgentBinary() {
+        // Check STATA_AGENT_PATH env directly (not STATA_PATH — that's for the Stata Corp binary)
+        if (process.env.STATA_AGENT_PATH) {
+            return process.env.STATA_AGENT_PATH;
         }
 
-        // Try python -m stata_agent.daemon (development mode)
-        // Use 'stata' CLI as primary
-        const candidates = ['stata', 'python3', 'python'];
+        // Delegate to the shared implementation in installer.js so that
+        // DaemonManager and installer never disagree about whether
+        // stata-agent is installed.
+        try {
+            const { findStataAgentBinary } = require('./installer');
+            const bin = findStataAgentBinary();
+            if (bin) return bin;
+        } catch {}
+
+        // Fallback: try basic discovery.
+        const candidates = ['stata-agent', 'python3', 'python'];
+        const { spawnSync } = require('child_process');
         for (const cmd of candidates) {
             try {
-                const result = require('child_process').spawnSync(cmd, ['--version'], {
+                const result = spawnSync(cmd, ['--version'], {
                     stdio: ['ignore', 'pipe', 'pipe'],
-                    timeout: 2000,
+                    timeout: 3000,
                 });
                 if (result.status === 0) return cmd;
             } catch {}
         }
 
-        // Look for the installed stata CLI
-        if (process.platform !== 'win32') {
-            for (const p of ['/usr/local/bin/stata', path.join(os.homedir(), '.local', 'bin', 'stata')]) {
-                if (fs.existsSync(p)) return p;
-            }
-        }
-
-        // Fall back to 'stata' (will fail gracefully with a clear error)
-        return 'stata';
+        return 'stata-agent';
     }
 }
 
