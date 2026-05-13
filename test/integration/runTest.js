@@ -175,14 +175,15 @@ function findStataAgentBinary() {
         return process.env.STATA_AGENT_PATH;
     }
 
-    // Try direct command first
     const { spawnSync } = require('child_process');
+
+    // Try direct command first
     try {
         const r = spawnSync('stata-agent', ['--version'], { timeout: 3000 });
         if (r.status === 0) return 'stata-agent';
     } catch {}
 
-    // Fallback: try via uv in the parent stata-agent directory
+    // Fallback: try via uv in the parent stata-agent project
     const stataAgentDir = path.resolve(__dirname, '../../stata-agent');
     if (fs.existsSync(stataAgentDir)) {
         try {
@@ -190,18 +191,14 @@ function findStataAgentBinary() {
                 cwd: stataAgentDir,
                 timeout: 5000,
             });
-            if (r.status === 0) return 'stata-agent';
+            if (r.status === 0) {
+                // Return the .venv bin path so spawn can find it
+                const venvBin = path.join(stataAgentDir, '.venv', 'bin', 'stata-agent');
+                if (fs.existsSync(venvBin)) return venvBin;
+                return 'stata-agent';
+            }
         } catch {}
     }
-
-    // Fallback: try uv run with the full module path
-    try {
-        const r = spawnSync('uv', ['run', 'python', '-m', 'stata_agent.cli', '--version'], {
-            cwd: stataAgentDir,
-            timeout: 5000,
-        });
-        if (r.status === 0) return 'uv';
-    } catch {}
 
     return 'stata-agent';
 }
