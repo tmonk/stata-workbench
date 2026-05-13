@@ -50,13 +50,15 @@ function parseSMCL(smclText) {
 
     // Regexes for SMCL tags.
     // We use a broader match without the ^ anchor to handle indentation in do-files.
-    const errRegex = /{err}(.*?)(?={txt}|{res}|{com}|$)/gs;
+    // {err} is included as a delimiter so chained {err}...{err}... blocks are
+    // treated as separate captures rather than one big match.
+    const errRegex = /{err}(.*?)(?={txt}|{res}|{com}|{err}|$)/gs;
 
     let rc = null;
     let errorContext = null;
 
-    // 1. Look for return codes r(N);
-    const rcRegex = /r\((\d+)\);/g;
+    // 1. Look for return codes: raw r(NNN); or SMCL-formatted {r(NNN)}
+    const rcRegex = /r\((\d+)\)(?:;|\})/g;
     let match;
     while ((match = rcRegex.exec(smclText)) !== null) {
         rc = parseInt(match[1]);
