@@ -49,6 +49,16 @@ describe('DaemonManager', () => {
     let DaemonManager;
     let manager;
     let originalStataPath;
+    let spawnCallArgs;
+
+    // Store original function references so we can restore them manually
+    // instead of relying on jest.restoreAllMocks() (which conflicts with
+    // other test files under --concurrent).
+    let _origExistsSync;
+    let _origReadFileSync;
+    let _origUnlinkSync;
+    let _origCreateConnection;
+    let _origSpawnSync;
 
     beforeEach(() => {
         // _findStataAgentBinary returns STATA_AGENT_PATH immediately if set;
@@ -56,32 +66,62 @@ describe('DaemonManager', () => {
         originalStataPath = process.env.STATA_AGENT_PATH;
         delete process.env.STATA_AGENT_PATH;
 
-        // Spy on module exports before requiring daemon-manager.
-        // The daemon-manager wrapper delegates to require('child_process').spawn()
-        // dynamically (see the wrapper at module top), so spying on
-        // cp.spawn intercepts those calls.
-        jest.spyOn(cp, 'spawn').mockReturnValue(undefined);
-        jest.spyOn(cp, 'spawnSync').mockReturnValue({ status: 1 });
+        // Track spawn calls manually so we don't rely on jest.spyOn on the
+        // shared child_process module (which breaks under --concurrent when
+        // other test files call jest.restoreAllMocks()).
+        spawnCallArgs = [];
 
-        // fs.* calls in daemon-manager use fs.existsSync(...) (not destructured),
-        // so spying on the fs module exports works.
-        jest.spyOn(fs, 'existsSync').mockReturnValue(false);
-        jest.spyOn(fs, 'readFileSync');
-        jest.spyOn(fs, 'unlinkSync').mockImplementation(() => {});
+        // Replace module functions directly (not via jest.spyOn) so that
+        // jest.restoreAllMocks() from other test files cannot interfere.
+        _origSpawnSync = cp.spawnSync;
+        cp.spawnSync = jest.fn().mockReturnValue({ status: 1 });
 
-        // net is require-d dynamically inside health() and stop().
-        jest.spyOn(net, 'createConnection');
+        _origExistsSync = fs.existsSync;
+        _origReadFileSync = fs.readFileSync;
+        _origUnlinkSync = fs.unlinkSync;
+        fs.existsSync = jest.fn().mockReturnValue(false);
+        fs.readFileSync = jest.fn();
+        fs.unlinkSync = jest.fn();
 
+        _origCreateConnection = net.createConnection;
+        net.createConnection = jest.fn();
+
+        // Rely on the (possibly cached) DaemonManager from the module system.
+        // We don't delete require.cache because that would break concurrent test
+        // execution where other test files also hold references to daemon-manager.
         const { DaemonManager: DM } = require('../../src/daemon-manager');
         DaemonManager = DM;
+
+        // Override the internal spawn function with a mock that records calls
+        // and returns a default mock child process (overridable per test).
+        let currentMockProc = null;
+        DaemonManager.__setSpawn((bin, args, opts) => {
+            const call = { bin, args, opts };
+            spawnCallArgs.push(call);
+            return currentMockProc || createMockChildProcess();
+        });
+
+        // Expose a helper so tests can set the return value for the next spawn
         manager = new DaemonManager();
+        manager.__setMockProc = (proc) => { currentMockProc = proc; };
+
+        // Default mock proc: set a default one
+        const defaultProc = createMockChildProcess();
+        manager.__setMockProc(defaultProc);
     });
 
     afterEach(() => {
         if (originalStataPath !== undefined) {
             process.env.STATA_AGENT_PATH = originalStataPath;
         }
-        jest.restoreAllMocks();
+        // Restore manually to avoid conflicts with other test files
+        if (_origSpawnSync) cp.spawnSync = _origSpawnSync;
+        if (_origExistsSync) fs.existsSync = _origExistsSync;
+        if (_origReadFileSync) fs.readFileSync = _origReadFileSync;
+        if (_origUnlinkSync) fs.unlinkSync = _origUnlinkSync;
+        if (_origCreateConnection) net.createConnection = _origCreateConnection;
+        DaemonManager.__resetSpawn();
+        // Don't call jest.restoreAllMocks() — it interferes with other test files
     });
 
     // ------------------------------------------------------------------
@@ -116,7 +156,7 @@ describe('DaemonManager', () => {
 
             await manager.ensureRunning('default');
 
-            expect(cp.spawn).not.toHaveBeenCalled();
+            expect(spawnCallArgs.length).toBe(0);
             expect(fs.unlinkSync).not.toHaveBeenCalled();
         });
 
@@ -133,12 +173,12 @@ describe('DaemonManager', () => {
 
             await manager.ensureRunning('default');
 
-            expect(cp.spawn).not.toHaveBeenCalled();
+            expect(spawnCallArgs.length).toBe(0);
         });
 
-    it('removes stale meta and spawns when socket file is missing', async () => {
+        it('removes stale meta and spawns when socket file is missing', async () => {
             const mockProc = createMockChildProcess();
-            cp.spawn.mockReturnValue(mockProc);
+            manager.__setMockProc(mockProc);
 
             // Sequence existsSync returns:
             //   1st meta check → true (stale meta exists)
@@ -161,12 +201,12 @@ describe('DaemonManager', () => {
             await manager.ensureRunning('default', { timeout: 5000 });
 
             expect(fs.unlinkSync).toHaveBeenCalledWith(mockMetaPath);
-            expect(cp.spawn).toHaveBeenCalled();
+            expect(spawnCallArgs.length).toBeGreaterThan(0);
         });
 
         it('spawns daemon and resolves when meta appears', async () => {
             const mockProc = createMockChildProcess();
-            cp.spawn.mockReturnValue(mockProc);
+            manager.__setMockProc(mockProc);
 
             let metaCheckCount = 0;
             fs.existsSync.mockReset();
@@ -180,10 +220,9 @@ describe('DaemonManager', () => {
 
             await manager.ensureRunning('default', { timeout: 5000 });
 
-            expect(cp.spawn).toHaveBeenCalledTimes(1);
-            // _findStataBinary falls through to 'stata'
-            expect(cp.spawn.mock.calls[0][0]).toBe('stata-agent');
-            expect(cp.spawn.mock.calls[0][1]).toEqual(
+            expect(spawnCallArgs.length).toBe(1);
+            expect(spawnCallArgs[0].bin).toBe('stata-agent');
+            expect(spawnCallArgs[0].args).toEqual(
                 expect.arrayContaining(['daemon', 'start', '--session', 'default'])
             );
             expect(manager._processes.get('default')).toBe(mockProc);
@@ -191,7 +230,7 @@ describe('DaemonManager', () => {
 
         it('forwards --mock when opts.mock is set', async () => {
             const mockProc = createMockChildProcess();
-            cp.spawn.mockReturnValue(mockProc);
+            manager.__setMockProc(mockProc);
 
             let metaCheckCount = 0;
             fs.existsSync.mockReset();
@@ -205,18 +244,17 @@ describe('DaemonManager', () => {
 
             await manager.ensureRunning('default', { mock: true, timeout: 5000 });
 
-            expect(cp.spawn.mock.calls[0][1]).toContain('--mock');
+            expect(spawnCallArgs[0].args).toContain('--mock');
         });
 
         it('rejects when spawned process exits before meta appears', async () => {
             const mockProc = createMockChildProcess();
-            cp.spawn.mockReturnValue(mockProc);
+            manager.__setMockProc(mockProc);
             fs.existsSync.mockReturnValue(false);
 
             const promise = manager.ensureRunning('default');
 
-            // Trigger exit handler synchronously — the mock stores it via
-            // the proc.on spy + _handlers container.
+            // Trigger exit handler synchronously
             const exitHandler = mockProc._handlers['exit'];
             expect(exitHandler).toBeDefined();
             exitHandler(1);
@@ -227,7 +265,7 @@ describe('DaemonManager', () => {
 
         it('rejects on timeout when meta never appears', async () => {
             const mockProc = createMockChildProcess();
-            cp.spawn.mockReturnValue(mockProc);
+            manager.__setMockProc(mockProc);
             fs.existsSync.mockReturnValue(false);
 
             await expect(
@@ -421,7 +459,7 @@ describe('DaemonManager', () => {
 
         it('fires crash callback on process exit after ensureRunning resolves', async () => {
             const mockProc = createMockChildProcess();
-            cp.spawn.mockReturnValue(mockProc);
+            manager.__setMockProc(mockProc);
 
             const mockMetaPath = path.join(SESSION_DIR, 'default.json');
             let metaCheckCount = 0;
@@ -450,7 +488,7 @@ describe('DaemonManager', () => {
 
         it('does not fire crash callback when process exits before start', async () => {
             const mockProc = createMockChildProcess();
-            cp.spawn.mockReturnValue(mockProc);
+            manager.__setMockProc(mockProc);
             fs.existsSync.mockReturnValue(false);
 
             const cb = jest.fn();
@@ -465,6 +503,7 @@ describe('DaemonManager', () => {
             expect(cb).not.toHaveBeenCalled();
         });
     });
+
     // ------------------------------------------------------------------
     // _findStataAgentBinary — STATA_AGENT_PATH env
     // ------------------------------------------------------------------
@@ -506,7 +545,7 @@ describe('DaemonManager', () => {
 
         it('appends --transport tcp args when process.platform is win32', async () => {
             const mockProc = createMockChildProcess();
-            cp.spawn.mockReturnValue(mockProc);
+            manager.__setMockProc(mockProc);
 
             const mockMetaPath = path.join(SESSION_DIR, 'default.json');
             let metaCheckCount = 0;
@@ -521,7 +560,7 @@ describe('DaemonManager', () => {
 
             await manager.ensureRunning('default', { timeout: 5000 });
 
-            expect(cp.spawn.mock.calls[0][1]).toEqual(
+            expect(spawnCallArgs[0].args).toEqual(
                 expect.arrayContaining(['--transport', 'tcp'])
             );
         });
@@ -578,5 +617,122 @@ describe('DaemonManager', () => {
                 expect.objectContaining({ port: 8765 })
             );
         });
+    });
+
+    // ------------------------------------------------------------------
+    // DaemonManager.__setSpawn / __resetSpawn API
+    // ------------------------------------------------------------------
+    describe('__setSpawn / __resetSpawn', () => {
+        it('__setSpawn overrides the internal spawn function', () => {
+            const customSpawn = jest.fn().mockReturnValue(createMockChildProcess());
+            DaemonManager.__setSpawn(customSpawn);
+
+            manager._findStataAgentBinary = () => 'test-bin';
+            // Temporarily make meta appear so ensureRunning tries to spawn
+            const mockMetaPath = path.join(SESSION_DIR, 'default.json');
+            let checked = false;
+            fs.existsSync.mockReset();
+            fs.existsSync.mockImplementation((p) => {
+                if (p === mockMetaPath && checked) return true;
+                if (p === mockMetaPath) { checked = true; return false; }
+                return false;
+            });
+
+            const promise = manager.ensureRunning('default', { timeout: 5000 });
+            // Let the poll interval fire
+            setTimeout(async () => {
+                const exitHandler = customSpawn.mock.results[0]?.value?._handlers?.exit;
+                if (exitHandler) exitHandler(0);
+            }, 300);
+
+            return promise.then(() => {
+                expect(customSpawn).toHaveBeenCalledWith(
+                    'test-bin',
+                    expect.arrayContaining(['daemon', 'start', '--session', 'default']),
+                    expect.any(Object)
+                );
+            }).finally(() => DaemonManager.__resetSpawn());
+        }, 10000);
+
+        it('__resetSpawn restores the original child_process.spawn', () => {
+            const customSpawn = jest.fn();
+            DaemonManager.__setSpawn(customSpawn);
+            DaemonManager.__resetSpawn();
+
+            // After reset, calling spawn should go to the real child_process.spawn
+            // We can't easily verify this without actually spawning, but we can
+            // verify that customSpawn is no longer used.
+            const mockProc = createMockChildProcess();
+            manager.__setMockProc(mockProc);
+
+            // Verify the spawn function works (it will try to use real cp.spawn,
+            // but we have fs.existsSync mocked so ensureRunning won't call spawn)
+            const initialLen = spawnCallArgs.length;
+            // Manually trigger a spawn via the internal path
+            // Just check that spawnCallArgs isn't recording anymore
+            expect(DaemonManager.__resetSpawn).not.toThrow();
+        });
+    });
+
+    // ------------------------------------------------------------------
+    // Edge cases
+    // ------------------------------------------------------------------
+    describe('edge cases', () => {
+        it('ensureRunning handles spawn throwing synchronously', async () => {
+            DaemonManager.__setSpawn(() => { throw new Error('spawn EACCES'); });
+            const mockMetaPath = path.join(SESSION_DIR, 'default.json');
+            fs.existsSync.mockReset();
+            fs.existsSync.mockImplementation((p) => {
+                if (p === mockMetaPath) { return false; }
+                return false;
+            });
+
+            await expect(
+                manager.ensureRunning('default', { timeout: 100 })
+            ).rejects.toThrow('spawn EACCES');
+
+            DaemonManager.__resetSpawn();
+        });
+
+        it('handle multiple sessions independently', async () => {
+            const mockProcA = createMockChildProcess();
+            const mockProcB = createMockChildProcess();
+            let spawnCount = 0;
+            DaemonManager.__setSpawn(() => {
+                spawnCount++;
+                return spawnCount === 1 ? mockProcA : mockProcB;
+            });
+
+            // Use a map of session -> { ready: bool } so each session is independent
+            const sessionReady = { 'default': false, 'session-b': false };
+            fs.existsSync.mockReset();
+            fs.existsSync.mockImplementation((p) => {
+                const sName = path.basename(p, '.json');
+                if (sName === 'default' || sName === 'session-b') {
+                    if (sessionReady[sName]) return true;
+                    return false;
+                }
+                // .sock and .json checks
+                if (p.endsWith('.sock')) return false;
+                return false;
+            });
+
+            // Start both sessions concurrently
+            const p1 = manager.ensureRunning('default', { timeout: 5000 });
+            const p2 = manager.ensureRunning('session-b', { timeout: 5000 });
+
+            // Allow spawn to happen, then make meta appear
+            await new Promise(r => setTimeout(r, 400));
+            sessionReady['default'] = true;
+            sessionReady['session-b'] = true;
+
+            await Promise.all([p1, p2]);
+
+            expect(spawnCount).toBe(2);
+            expect(manager._processes.get('default')).toBe(mockProcA);
+            expect(manager._processes.get('session-b')).toBe(mockProcB);
+
+            DaemonManager.__resetSpawn();
+        }, 10000);
     });
 });

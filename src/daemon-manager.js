@@ -1,9 +1,17 @@
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
-const spawn = (bin, args, opts) => {
-	const child = require('child_process').spawn(bin, args, opts);
-	return child;
+const cp = require('child_process');
+
+/**
+ * Internal spawn helper.
+ * Exposed as a static property on DaemonManager so tests can assign a mock
+ * without spying on the shared child_process module (which breaks under
+ * concurrent test execution when other files call jest.restoreAllMocks()).
+ */
+let _spawn = (bin, args, opts) => {
+    const child = cp.spawn(bin, args, opts);
+    return child;
 };
 
 const SESSION_DIR = path.join(os.homedir(), '.cache', 'stata-agent', 'sessions');
@@ -59,7 +67,7 @@ class DaemonManager {
         return new Promise((resolve, reject) => {
             let proc;
             try {
-                proc = spawn(stataBin, args, {
+                proc = _spawn(stataBin, args, {
                     stdio: ['ignore', 'pipe', 'pipe'],
                     env: { ...process.env },
                     detached: !isWin,
@@ -159,6 +167,25 @@ class DaemonManager {
         const cbs = this._crashCallbacks.get(sessionName) || [];
         cbs.push(cb);
         this._crashCallbacks.set(sessionName, cbs);
+    }
+
+    /**
+     * Override the internal spawn function for testing.
+     * When set, all daemon child processes are created via this function.
+     * @param {Function} fn (bin, args, opts) => ChildProcess
+     */
+    static __setSpawn(fn) {
+        _spawn = fn;
+    }
+
+    /**
+     * Reset spawn to the real child_process.spawn.
+     */
+    static __resetSpawn() {
+        _spawn = (bin, args, opts) => {
+            const child = cp.spawn(bin, args, opts);
+            return child;
+        };
     }
 
     _findStataAgentBinary() {
