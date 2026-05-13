@@ -37,16 +37,25 @@ const itIfAvailable = STATA_AVAILABLE ? it : it.skip;
 const describeIfAvailable = STATA_AVAILABLE ? describe : describe.skip;
 
 /**
- * Check whether the real Stata binary is available at the expected path.
- * The daemon runs in live mode (no --mock) for these tests.
+ * Check whether a real Stata binary is available using the stata-agent
+ * discovery module (same detection logic the daemon itself uses).
  */
-const REAL_STATA_AVAILABLE = fs.existsSync('/Applications/StataNow/stata-se') && (() => {
+const REAL_STATA_AVAILABLE = (() => {
     try {
-        fs.accessSync('/Applications/StataNow/stata-se', fs.constants.X_OK);
-        return true;
-    } catch {
-        return false;
-    }
+        const r = cp.spawnSync(
+            'uv',
+            ['run', 'python', '-c',
+             'from stata_agent.discovery import find_stata_candidates; '
+             + 'import json; print(json.dumps([p for p, e in find_stata_candidates()]))'
+            ],
+            { cwd: STATA_AGENT_DIR, timeout: 10000 }
+        );
+        if (r.status === 0) {
+            const candidates = JSON.parse(r.stdout.toString().trim());
+            return Array.isArray(candidates) && candidates.length > 0;
+        }
+    } catch {}
+    return false;
 })();
 
 const itIfRealAvailable = REAL_STATA_AVAILABLE ? it : it.skip;
@@ -74,7 +83,7 @@ describeIfAvailable('DaemonManager + StataClient end-to-end (mock daemon)', () =
 
     itIfAvailable('health check returns ok', async () => {
         const result = await stataClient.health('e2e-test');
-        expect(result.status).toBe('running');
+        expect(result.status).toBe('ok');
         expect(typeof result.pid).toBe('number');
     });
 
@@ -119,7 +128,7 @@ describeIfRealAvailable('DaemonManager + StataClient end-to-end (real Stata daem
 
     itIfRealAvailable('health check returns ok', async () => {
         const result = await stataClient.health('e2e-live-test');
-        expect(result.status).toBe('running');
+        expect(result.status).toBe('ok');
         expect(typeof result.pid).toBe('number');
     });
 
