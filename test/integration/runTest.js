@@ -4,7 +4,9 @@ const os = require('os');
 const { spawn } = require('child_process');
 const { runTests } = require('@vscode/test-electron');
 
-const SESSION_NAME = 'integration-test';
+// Use 'default' so the extension's StataClient (which defaults to sessionName='default')
+// connects to the daemon we start here, instead of spawning a second daemon.
+const SESSION_NAME = 'default';
 const SESSION_DIR = path.join(os.homedir(), '.cache', 'stata-agent', 'sessions');
 const STATA_AGENT_DIR = path.join(os.homedir(), 'projects', 'stata-agent');
 

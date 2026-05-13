@@ -112,7 +112,7 @@ describe('Run Dirty File Integration', () => {
         api.TerminalPanel._testOutgoingCapture = (msg) => outgoing.push(msg);
 
         // Configure setting to run disk file
-        await vscode.workspace.getConfiguration('stataMcp').update('runFileBehavior', 'runDiskFile', vscode.ConfigurationTarget.Global);
+        await vscode.workspace.getConfiguration('stata').update('runFileBehavior', 'runDiskFile', vscode.ConfigurationTarget.Global);
 
         try {
             const doc = await vscode.workspace.openTextDocument(diskFile);
@@ -142,7 +142,7 @@ describe('Run Dirty File Integration', () => {
 
         } finally {
             // Restore default setting
-            await vscode.workspace.getConfiguration('stataMcp').update('runFileBehavior', 'runDirtyFile', vscode.ConfigurationTarget.Global);
+            await vscode.workspace.getConfiguration('stata').update('runFileBehavior', 'runDirtyFile', vscode.ConfigurationTarget.Global);
             api.TerminalPanel._testOutgoingCapture = null;
             await vscode.commands.executeCommand('workbench.action.closeAllEditors');
         }
