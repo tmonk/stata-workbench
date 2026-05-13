@@ -278,7 +278,7 @@
     "compile": "bun ./build/esbuild.js",
     "bundle": "bun ./build/esbuild.js --production",
     "watch": "bun ./build/esbuild.js --watch",
-    "test": "bun test --concurrent --preload ./test/bun-preload.js test/unit test/integration/daemon-e2e.test.js",
+    "test": "bun test --preload ./test/bun-preload.js test/unit test/integration/daemon-e2e.test.js",
     "test:mcp-config": "bun test --concurrent --preload ./test/bun-preload.js test/unit --testPathPattern='mcp-config|extension.test'",
     "test:full": "bun test --concurrent --preload ./test/bun-preload.js test/unit && bun run test:integration:parallel",
     "pretest:integration": "bun run compile",
