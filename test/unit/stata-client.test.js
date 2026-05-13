@@ -363,4 +363,296 @@ describe('StataClient', () => {
             expect(errors[0].message).toBe('connection refused');
         });
     });
+    
+    describe('validateFilterExpr', () => {
+        it('returns { valid: true } on success response', async () => {
+            await client.ensureConnected('default');
+            const promise = client.validateFilterExpr('price > 5000');
+            await Promise.resolve();
+            const writtenData = mockSocket.write.mock.calls[0][0];
+            const request = JSON.parse(writtenData.trim());
+            expect(request.method).toBe('validate_filter');
+            expect(request.args.filter_expr).toBe('price > 5000');
+            mockSocket.emit('data', Buffer.from(JSON.stringify({ id: request.id, ok: true, result: {} }) + '\n'));
+            const result = await promise;
+            expect(result.valid).toBe(true);
+            expect(result.error).toBe(null);
+        });
+    
+        it('returns { valid: false, error } when stataClient throws', async () => {
+            client._call = jest.fn().mockRejectedValue(new Error('syntax error'));
+            const result = await client.validateFilterExpr('price > 5000');
+            expect(result.valid).toBe(false);
+            expect(result.error).toBe('syntax error');
+        });
+    });
+    
+    describe('computeViewIndices', () => {
+        it('sends compute_view_indices and returns indices array', async () => {
+            await client.ensureConnected('default');
+            const promise = client.computeViewIndices('price > 5000');
+            await Promise.resolve();
+            const writtenData = mockSocket.write.mock.calls[0][0];
+            const request = JSON.parse(writtenData.trim());
+            expect(request.method).toBe('compute_view_indices');
+            mockSocket.emit('data', Buffer.from(JSON.stringify({ id: request.id, ok: true, result: { indices: [1, 3, 7] } }) + '\n'));
+            const result = await promise;
+            expect(result).toEqual([1, 3, 7]);
+        });
+    
+        it('returns empty array when result has no indices key', async () => {
+            await client.ensureConnected('default');
+            const promise = client.computeViewIndices('price > 5000');
+            await Promise.resolve();
+            const writtenData = mockSocket.write.mock.calls[0][0];
+            const request = JSON.parse(writtenData.trim());
+            mockSocket.emit('data', Buffer.from(JSON.stringify({ id: request.id, ok: true, result: {} }) + '\n'));
+            const result = await promise;
+            expect(result).toEqual([]);
+        });
+    });
+    
+    describe('listGraphs', () => {
+        it('calls graph_list and returns result', async () => {
+            await client.ensureConnected('default');
+            const promise = client.listGraphs();
+            await Promise.resolve();
+            const writtenData = mockSocket.write.mock.calls[0][0];
+            const request = JSON.parse(writtenData.trim());
+            expect(request.method).toBe('graph_list');
+            mockSocket.emit('data', Buffer.from(JSON.stringify({ id: request.id, ok: true, result: { graph_names: ['mygraph'] } }) + '\n'));
+            const result = await promise;
+            expect(result.graph_names[0]).toBe('mygraph');
+        });
+    });
+    
+    describe('exportGraph', () => {
+        it('calls graph_export with name, format, out_path', async () => {
+            await client.ensureConnected('default');
+            const promise = client.exportGraph('mygraph', 'pdf', '/tmp/out.pdf');
+            await Promise.resolve();
+            const writtenData = mockSocket.write.mock.calls[0][0];
+            const request = JSON.parse(writtenData.trim());
+            expect(request.method).toBe('graph_export');
+            expect(request.args.name).toBe('mygraph');
+            expect(request.args.format).toBe('pdf');
+            expect(request.args.out_path).toBe('/tmp/out.pdf');
+            mockSocket.emit('data', Buffer.from(JSON.stringify({ id: request.id, ok: true, result: {} }) + '\n'));
+            await expect(promise).resolves.toBeDefined();
+        });
+    });
+    
+    describe('getResults', () => {
+        it('calls results with class=r by default', async () => {
+            await client.ensureConnected('default');
+            const promise = client.getResults();
+            await Promise.resolve();
+            const writtenData = mockSocket.write.mock.calls[0][0];
+            const request = JSON.parse(writtenData.trim());
+            expect(request.method).toBe('results');
+            expect(request.args.class).toBe('r');
+            mockSocket.emit('data', Buffer.from(JSON.stringify({ id: request.id, ok: true, result: {} }) + '\n'));
+            await promise;
+        });
+    
+        it('passes supplied resultClass to args.class', async () => {
+            await client.ensureConnected('default');
+            const promise = client.getResults('e');
+            await Promise.resolve();
+            const writtenData = mockSocket.write.mock.calls[0][0];
+            const request = JSON.parse(writtenData.trim());
+            expect(request.args.class).toBe('e');
+            mockSocket.emit('data', Buffer.from(JSON.stringify({ id: request.id, ok: true, result: {} }) + '\n'));
+            await promise;
+        });
+    });
+    
+    describe('getLogTail', () => {
+        it('calls log_tail with lines=50 by default', async () => {
+            await client.ensureConnected('default');
+            const promise = client.getLogTail();
+            await Promise.resolve();
+            const writtenData = mockSocket.write.mock.calls[0][0];
+            const request = JSON.parse(writtenData.trim());
+            expect(request.method).toBe('log_tail');
+            expect(request.args.lines).toBe(50);
+            mockSocket.emit('data', Buffer.from(JSON.stringify({ id: request.id, ok: true, result: {} }) + '\n'));
+            await promise;
+        });
+    
+        it('passes custom line count', async () => {
+            await client.ensureConnected('default');
+            const promise = client.getLogTail(100);
+            await Promise.resolve();
+            const writtenData = mockSocket.write.mock.calls[0][0];
+            const request = JSON.parse(writtenData.trim());
+            expect(request.args.lines).toBe(100);
+            mockSocket.emit('data', Buffer.from(JSON.stringify({ id: request.id, ok: true, result: {} }) + '\n'));
+            await promise;
+        });
+    });
+    
+    describe('searchLog', () => {
+        it('calls log_search with pattern', async () => {
+            await client.ensureConnected('default');
+            const promise = client.searchLog('r(111)');
+            await Promise.resolve();
+            const writtenData = mockSocket.write.mock.calls[0][0];
+            const request = JSON.parse(writtenData.trim());
+            expect(request.method).toBe('log_search');
+            expect(request.args.pattern).toBe('r(111)');
+            mockSocket.emit('data', Buffer.from(JSON.stringify({ id: request.id, ok: true, result: {} }) + '\n'));
+            await promise;
+        });
+    });
+    
+    describe('getTaskStatus', () => {
+        it('calls task_status with wait=false by default', async () => {
+            await client.ensureConnected('default');
+            const promise = client.getTaskStatus('tid');
+            await Promise.resolve();
+            const writtenData = mockSocket.write.mock.calls[0][0];
+            const request = JSON.parse(writtenData.trim());
+            expect(request.method).toBe('task_status');
+            expect(request.args.wait).toBe(false);
+            mockSocket.emit('data', Buffer.from(JSON.stringify({ id: request.id, ok: true, result: {} }) + '\n'));
+            await promise;
+        });
+    
+        it('passes wait=true and timeout when opts supplied', async () => {
+            await client.ensureConnected('default');
+            const promise = client.getTaskStatus('tid', { wait: true, timeout: 60 });
+            await Promise.resolve();
+            const writtenData = mockSocket.write.mock.calls[0][0];
+            const request = JSON.parse(writtenData.trim());
+            expect(request.args.wait).toBe(true);
+            expect(request.args.timeout).toBe(60);
+            mockSocket.emit('data', Buffer.from(JSON.stringify({ id: request.id, ok: true, result: {} }) + '\n'));
+            await promise;
+        });
+    });
+    
+    describe('cancelTask', () => {
+        it('sends task_cancel with task_id', async () => {
+            await client.ensureConnected('default');
+            const promise = client.cancelTask('tid-123');
+            await Promise.resolve();
+            const writtenData = mockSocket.write.mock.calls[0][0];
+            const request = JSON.parse(writtenData.trim());
+            expect(request.method).toBe('task_cancel');
+            expect(request.args.task_id).toBe('tid-123');
+            mockSocket.emit('data', Buffer.from(JSON.stringify({ id: request.id, ok: true, result: {} }) + '\n'));
+            await promise;
+        });
+    });
+    
+    describe('setRequestTimeout', () => {
+        it('updates _requestTimeoutMs', () => {
+            expect(client._requestTimeoutMs).toBe(100000);
+            client.setRequestTimeout(5000);
+            expect(client._requestTimeoutMs).toBe(5000);
+        });
+    });
+    
+    describe('_onData fragmentation', () => {
+        it('handles response split across two data events', async () => {
+            await client.ensureConnected('default');
+            const promise = client.runCode('display 1', { sessionName: 'default' });
+            await Promise.resolve();
+            const writtenData = mockSocket.write.mock.calls[0][0];
+            const request = JSON.parse(writtenData.trim());
+            const responseJson = JSON.stringify({ id: request.id, ok: true, result: { ok: true, rc: 0, stdout: '1' } });
+            const halfIdx = Math.floor(responseJson.length / 2);
+            mockSocket.emit('data', Buffer.from(responseJson.slice(0, halfIdx)));
+            mockSocket.emit('data', Buffer.from(responseJson.slice(halfIdx) + '\n'));
+            const result = await promise;
+            expect(result.ok).toBe(true);
+            expect(result.rc).toBe(0);
+        });
+    
+        it('processes multiple responses in a single data event', async () => {
+            await client.ensureConnected('default');
+            const promiseA = client.runCode('display 1', { sessionName: 'default' });
+            await Promise.resolve();
+            const reqA = JSON.parse(mockSocket.write.mock.calls[0][0].trim());
+            const promiseB = client.runCode('display 2', { sessionName: 'default' });
+            await Promise.resolve();
+            const reqB = JSON.parse(mockSocket.write.mock.calls[1][0].trim());
+            const respA = JSON.stringify({ id: reqA.id, ok: true, result: { ok: true, rc: 0, stdout: '1' } }) + '\n';
+            const respB = JSON.stringify({ id: reqB.id, ok: true, result: { ok: true, rc: 0, stdout: '2' } }) + '\n';
+            mockSocket.emit('data', Buffer.from(respA + respB));
+            const r1 = await promiseA;
+            const r2 = await promiseB;
+            expect(r1.stdout).toBe('1');
+            expect(r2.stdout).toBe('2');
+        });
+    });
+    
+    describe('request timeout', () => {
+        it('rejects with timeout error when no response arrives within _requestTimeoutMs', async () => {
+            jest.useFakeTimers();
+            try {
+                client.setRequestTimeout(100);
+                await client.ensureConnected('default');
+                const promise = client.runCode('display 1', { sessionName: 'default' });
+                await Promise.resolve();
+                jest.advanceTimersByTime(101);
+                await expect(promise).rejects.toThrow(/timed out/i);
+            } finally {
+                jest.useRealTimers();
+            }
+        });
+    });
+    
+    describe('socket write error', () => {
+        it('rejects the pending promise when socket.write callback receives an error', async () => {
+            mockSocket.write = jest.fn((data, encoding, cb) => {
+                if (cb) cb(new Error('EPIPE'));
+                return false;
+            });
+            await client.ensureConnected('default');
+            const promise = client.runCode('display 1', { sessionName: 'default' });
+            await expect(promise).rejects.toThrow('EPIPE');
+            expect(client._pending.size).toBe(0);
+        });
+    });
+    
+    describe('_scheduleReconnect', () => {
+        it('emits error after _maxReconnectAttempts consecutive failures', async () => {
+            client._maxReconnectAttempts = 1;
+            // Register a no-op error handler so emit('error') doesn't throw
+            client.on('error', () => {});
+            const emitSpy = jest.spyOn(client, 'emit');
+            
+            // Make ensureRunning fail so reconnect attempts accumulate
+            daemonMgr.ensureRunning = jest.fn().mockRejectedValue(new Error('cannot start'));
+            
+            // First call: count = 0 < maxAttempts, sets count to 1, schedules reconnect
+            client._scheduleReconnect('default');
+            
+            // After 2s, the timer fires, ensureRunning rejects, catch triggers recursive call
+            // In the recursive call: count (1) >= maxAttempts (1) → emits 'error'
+            await new Promise(r => setTimeout(r, 3000));
+            
+            expect(emitSpy).toHaveBeenCalledWith('error', expect.objectContaining({
+                message: expect.stringContaining('failed to restart'),
+            }));
+        }, 8000);
+    });
+    
+    describe('multi-session', () => {
+        it('maintains independent sockets for two sessions', async () => {
+            const net = require('net');
+            const socketA = createMockSocket();
+            const socketB = createMockSocket();
+            net.createConnection.mockReturnValueOnce(socketA).mockReturnValueOnce(socketB);
+            await client.ensureConnected('session-a');
+            await client.ensureConnected('session-b');
+            expect(client.isConnected('session-a')).toBe(true);
+            expect(client.isConnected('session-b')).toBe(true);
+            await client.disconnect('session-a');
+            expect(client.isConnected('session-a')).toBe(false);
+            expect(client.isConnected('session-b')).toBe(true);
+        });
+    });
 });

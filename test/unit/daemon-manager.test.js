@@ -144,6 +144,7 @@ describe('DaemonManager', () => {
             //   1st meta check → true (stale meta exists)
             //   after unlink → gone for a few polls, then reappears
             let metaCheckCount = 0;
+            fs.existsSync.mockReset();
             fs.existsSync.mockImplementation((p) => {
                 if (p === mockMetaPath) {
                     metaCheckCount++;
@@ -168,6 +169,7 @@ describe('DaemonManager', () => {
             cp.spawn.mockReturnValue(mockProc);
 
             let metaCheckCount = 0;
+            fs.existsSync.mockReset();
             fs.existsSync.mockImplementation((p) => {
                 if (p === mockMetaPath) {
                     metaCheckCount++;
@@ -192,6 +194,7 @@ describe('DaemonManager', () => {
             cp.spawn.mockReturnValue(mockProc);
 
             let metaCheckCount = 0;
+            fs.existsSync.mockReset();
             fs.existsSync.mockImplementation((p) => {
                 if (p === mockMetaPath) {
                     metaCheckCount++;
@@ -422,6 +425,7 @@ describe('DaemonManager', () => {
 
             const mockMetaPath = path.join(SESSION_DIR, 'default.json');
             let metaCheckCount = 0;
+            fs.existsSync.mockReset();
             fs.existsSync.mockImplementation((p) => {
                 if (p === mockMetaPath) {
                     metaCheckCount++;
@@ -459,6 +463,111 @@ describe('DaemonManager', () => {
 
             await expect(promise).rejects.toThrow();
             expect(cb).not.toHaveBeenCalled();
+        });
+    });
+    // ------------------------------------------------------------------
+    // _findStataBinary — STATA_PATH env
+    // ------------------------------------------------------------------
+    describe('_findStataBinary', () => {
+        afterEach(() => {
+            delete process.env.STATA_PATH;
+        });
+
+        it('returns STATA_PATH when set', () => {
+            process.env.STATA_PATH = '/custom/stata';
+            const result = manager._findStataBinary();
+            expect(result).toBe('/custom/stata');
+        });
+    });
+
+    // ------------------------------------------------------------------
+    // ensureRunning — windows TCP branch
+    // ------------------------------------------------------------------
+    describe('ensureRunning', () => {
+        let origPlatform;
+
+        beforeEach(() => {
+            origPlatform = process.platform;
+            Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+        });
+
+        afterEach(() => {
+            Object.defineProperty(process, 'platform', { value: origPlatform, configurable: true });
+        });
+
+        it('appends --transport tcp args when process.platform is win32', async () => {
+            const mockProc = createMockChildProcess();
+            cp.spawn.mockReturnValue(mockProc);
+
+            const mockMetaPath = path.join(SESSION_DIR, 'default.json');
+            let metaCheckCount = 0;
+            fs.existsSync.mockReset();
+            fs.existsSync.mockImplementation((p) => {
+                if (p === mockMetaPath) {
+                    metaCheckCount++;
+                    return metaCheckCount > 3;
+                }
+                return false;
+            });
+
+            await manager.ensureRunning('default', { timeout: 5000 });
+
+            expect(cp.spawn.mock.calls[0][1]).toEqual(
+                expect.arrayContaining(['--transport', 'tcp'])
+            );
+        });
+    });
+
+    // ------------------------------------------------------------------
+    // stop — TCP transport
+    // ------------------------------------------------------------------
+    describe('stop', () => {
+        it('creates TCP connection when meta transport is tcp', async () => {
+            const mockProc = createMockChildProcess();
+            manager._processes.set('default', mockProc);
+
+            const mockSocket = createMockSocket();
+            net.createConnection.mockReturnValue(mockSocket);
+            fs.existsSync.mockReturnValue(true);
+            fs.readFileSync.mockReturnValue(JSON.stringify({
+                transport: 'tcp',
+                port: 9876,
+                host: '127.0.0.1',
+            }));
+
+            await manager.stop('default');
+
+            expect(net.createConnection).toHaveBeenCalledWith(
+                expect.objectContaining({ port: 9876, host: '127.0.0.1' })
+            );
+        });
+    });
+
+    // ------------------------------------------------------------------
+    // health — TCP transport
+    // ------------------------------------------------------------------
+    describe('health', () => {
+        it('connects via TCP when meta transport is tcp', async () => {
+            const mockMetaPath = path.join(SESSION_DIR, 'default.json');
+            fs.existsSync.mockReturnValue(true);
+            fs.readFileSync.mockReturnValue(JSON.stringify({
+                transport: 'tcp',
+                port: 8765,
+            }));
+
+            const mockSocket = createMockSocket();
+            net.createConnection.mockReturnValue(mockSocket);
+
+            const healthPromise = manager.health('default');
+            mockSocket._trigger('data', Buffer.from(
+                JSON.stringify({ result: { status: 'running', pid: 12345 } }) + '\n'
+            ));
+
+            const result = await healthPromise;
+            expect(result).toEqual({ status: 'running', pid: 12345 });
+            expect(net.createConnection).toHaveBeenCalledWith(
+                expect.objectContaining({ port: 8765 })
+            );
         });
     });
 });

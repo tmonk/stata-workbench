@@ -1,6 +1,8 @@
 const { jest } = require('bun:test');
 const proxyquire = require('proxyquire').noCallThru().noPreserveCache();
 const { createVscodeMock } = require('../mocks/vscode');
+const { EventEmitter } = require('events');
+
 
 const createExtensionHarness = (overrides = {}) => {
     const vscode = overrides.vscode || createVscodeMock();
@@ -26,8 +28,7 @@ const createExtensionHarness = (overrides = {}) => {
         })
     };
 
-    const stataClientMock = overrides.stataClientMock || {
-        on: jest.fn().mockReturnValue({ dispose: jest.fn() }),
+    const stataClientMock = overrides.stataClientMock || Object.assign(new EventEmitter(), {
         ensureConnected: jest.fn().mockResolvedValue(),
         disconnect: jest.fn().mockResolvedValue(),
         isConnected: jest.fn().mockReturnValue(true),
@@ -39,7 +40,8 @@ const createExtensionHarness = (overrides = {}) => {
         getDatasetState: jest.fn().mockResolvedValue({ obs_count: 0, var_count: 0, dataset_name: '' }),
         getDataPage: jest.fn().mockResolvedValue(Buffer.from([])),
         health: jest.fn().mockResolvedValue({ status: 'ok', pid: 12345, sessions: ['default'] }),
-    };
+        exportGraph: jest.fn().mockResolvedValue({ file_path: '/tmp/graph.pdf' }),
+    });
 
     const daemonMgrMock = overrides.daemonMgrMock || {
         ensureRunning: jest.fn().mockResolvedValue(),

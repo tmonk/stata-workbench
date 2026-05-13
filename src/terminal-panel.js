@@ -654,7 +654,41 @@ class TerminalPanel {
 
 }
 
-module.exports = { TerminalPanel, toEntry, normalizeArtifacts, determineSuccess };
+/**
+ * Safely slice HTML string to a maximum length, preferring cut points at newlines or tag boundaries.
+ * @param {string} html
+ * @param {number} limit
+ * @returns {string}
+ */
+function safeSliceTail(html, limit) {
+    if (!html || html.length <= limit) return html || '';
+    let start = html.length - limit;
+
+    const firstNewline = html.indexOf(String.fromCharCode(10), start);
+    const firstHtmlTag = html.indexOf('<', start);
+    const firstSmclTag = html.indexOf('{', start);
+
+    let cutPoint = -1;
+    let offset = 0;
+
+    const candidates = [];
+    if (firstNewline !== -1) candidates.push({ pos: firstNewline, offset: 1 });
+    if (firstHtmlTag !== -1) candidates.push({ pos: firstHtmlTag, offset: 0 });
+    if (firstSmclTag !== -1) candidates.push({ pos: firstSmclTag, offset: 0 });
+
+    if (candidates.length > 0) {
+        candidates.sort((a, b) => a.pos - b.pos);
+        cutPoint = candidates[0].pos;
+        offset = candidates[0].offset;
+    }
+
+    if (cutPoint !== -1 && cutPoint < html.length - 1) {
+        return html.substring(cutPoint + offset);
+    }
+    return html.slice(-limit);
+}
+
+module.exports = { TerminalPanel, toEntry, normalizeArtifacts, determineSuccess, safeSliceTail };
 
 function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = []) {
   const designUri = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'src', 'ui-shared', 'design.css'));
@@ -1093,33 +1127,6 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
         scrollToBottom();
     }
 
-    function safeSliceTail(html, limit) {
-        if (!html || html.length <= limit) return html || '';
-        let start = html.length - limit;
-        
-        const firstNewline = html.indexOf(String.fromCharCode(10), start);
-        const firstHtmlTag = html.indexOf('<', start);
-        const firstSmclTag = html.indexOf('{', start);
-        
-        let cutPoint = -1;
-        let offset = 0;
-
-        const candidates = [];
-        if (firstNewline !== -1) candidates.push({ pos: firstNewline, offset: 1 });
-        if (firstHtmlTag !== -1) candidates.push({ pos: firstHtmlTag, offset: 0 });
-        if (firstSmclTag !== -1) candidates.push({ pos: firstSmclTag, offset: 0 });
-
-        if (candidates.length > 0) {
-            candidates.sort((a, b) => a.pos - b.pos);
-            cutPoint = candidates[0].pos;
-            offset = candidates[0].offset;
-        }
-
-        if (cutPoint !== -1 && cutPoint < html.length - 1) {
-            return html.substring(cutPoint + offset);
-        }
-        return html.slice(-limit);
-    }
 
     function scrollToBottom() {
         const top = document.body.scrollHeight;

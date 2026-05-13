@@ -259,8 +259,12 @@ function activate(context) {
             DataBrowserPanel,
             daemonMgr,
             stataClient,
-        };
-    }
+            terminalRunCommand,
+            variableListProvider,
+            downloadGraphAsPdf,
+            logRunToOutput,
+    };
+}
 }
 
 async function deactivate() {
