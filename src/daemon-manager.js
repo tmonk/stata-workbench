@@ -33,6 +33,12 @@ class DaemonManager {
             fs.unlinkSync(metaPath);
         }
 
+        // Clean up any stale socket file from a previous aborted run
+        const staleSock = path.join(SESSION_DIR, `${sessionName}.sock`);
+        try {
+            if (fs.existsSync(staleSock)) fs.unlinkSync(staleSock);
+        } catch {}
+
         // Find the stata-agent binary (shared implementation with installer.js)
         const stataBin = this._findStataAgentBinary();
 
