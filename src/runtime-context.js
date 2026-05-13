@@ -56,12 +56,13 @@ const getMcpClient = () => {
 };
 
 const runWithContext = (context, fn) => {
+    const parent = storage.getStore();
     const next = {
-        vscode: context?.vscode ?? defaultVscode,
-        env: context?.env ?? defaultEnv,
-        fs: context?.fs ?? defaultFs,
-        childProcess: context?.childProcess ?? defaultChildProcess,
-        mcpClient: context?.mcpClient ?? defaultMcpClient
+        vscode: context?.vscode ?? parent?.vscode ?? defaultVscode,
+        env: context?.env ?? parent?.env ?? defaultEnv,
+        fs: context?.fs ?? parent?.fs ?? defaultFs,
+        childProcess: context?.childProcess ?? parent?.childProcess ?? defaultChildProcess,
+        mcpClient: context?.mcpClient ?? parent?.mcpClient ?? defaultMcpClient
     };
     return storage.run(next, fn);
 };
