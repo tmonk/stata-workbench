@@ -6,13 +6,7 @@ const { runTests } = require('@vscode/test-electron');
 
 const SESSION_NAME = 'integration-test';
 const SESSION_DIR = path.join(os.homedir(), '.cache', 'stata-agent', 'sessions');
-
-// Resolve stata-agent binary (fallback for when it's not on PATH)
 const STATA_AGENT_DIR = path.join(os.homedir(), 'projects', 'stata-agent');
-const VENV_BIN = path.join(STATA_AGENT_DIR, '.venv', 'bin', 'stata-agent');
-if (!process.env.STATA_AGENT_PATH && fs.existsSync(VENV_BIN)) {
-    process.env.STATA_AGENT_PATH = VENV_BIN;
-}
 
 async function main() {
     const shardTotal = Math.max(1, parseInt(process.env.TEST_SHARD_TOTAL || '1', 10));
@@ -127,18 +121,15 @@ async function main() {
  * Returns the ChildProcess once the daemon is ready (meta file exists).
  */
 async function startDaemon(sessionName) {
-    // Determine the stata-agent binary
-    const stataBin = findStataAgentBinary();
+    // Always use uv run from the dev directory so the latest development
+    // version of stata-agent is used, even when not installed on PATH.
+    const cmd = 'uv';
+    const args = ['run', 'stata-agent', 'daemon', 'start', '--session', sessionName, '--mock'];
 
-    const args = [
-        'daemon', 'start',
-        '--session', sessionName,
-        '--mock',
-    ];
+    console.error(`[INTEGRATION] Starting daemon: ${cmd} ${args.join(' ')} (cwd=${STATA_AGENT_DIR})`);
 
-    console.error(`[INTEGRATION] Starting daemon: ${stataBin} ${args.join(' ')}`);
-
-    const proc = spawn(stataBin, args, {
+    const proc = spawn(cmd, args, {
+        cwd: STATA_AGENT_DIR,
         stdio: ['ignore', 'pipe', 'pipe'],
         env: { ...process.env, STATA_AGENT_MOCK: '1' },
         detached: process.platform !== 'win32',
@@ -172,42 +163,6 @@ async function startDaemon(sessionName) {
     // Timeout — kill and throw
     try { proc.kill('SIGKILL'); } catch {}
     throw new Error(`Daemon failed to start within ${timeout}ms for session '${sessionName}'`);
-}
-
-/**
- * Find the stata-agent binary path.
- */
-function findStataAgentBinary() {
-    if (process.env.STATA_AGENT_PATH) {
-        return process.env.STATA_AGENT_PATH;
-    }
-
-    const { spawnSync } = require('child_process');
-
-    // Try direct command first
-    try {
-        const r = spawnSync('stata-agent', ['--version'], { timeout: 3000 });
-        if (r.status === 0) return 'stata-agent';
-    } catch {}
-
-    // Fallback: try via uv in the parent stata-agent project
-    const stataAgentDir = path.resolve(__dirname, '../../stata-agent');
-    if (fs.existsSync(stataAgentDir)) {
-        try {
-            const r = spawnSync('uv', ['run', 'stata-agent', '--version'], {
-                cwd: stataAgentDir,
-                timeout: 5000,
-            });
-            if (r.status === 0) {
-                // Return the .venv bin path so spawn can find it
-                const venvBin = path.join(stataAgentDir, '.venv', 'bin', 'stata-agent');
-                if (fs.existsSync(venvBin)) return venvBin;
-                return 'stata-agent';
-            }
-        } catch {}
-    }
-
-    return 'stata-agent';
 }
 
 function sanitizeHostElectronEnv() {
