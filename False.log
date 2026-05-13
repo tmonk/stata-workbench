@@ -17,7 +17,7 @@ end of do-file
 . 
 . capture noisily {
 .     do "/var/folders/2_/4klqy60x2rb_vpg4whtr27f40000gn/T/test_run_error_17786
-> 72959668.do"
+> 73186312.do"
 
 . forvalues i = 1/100000 {
   2.     display "."
@@ -100041,8 +100041,8 @@ invalid syntax
 
 . 
 . capture noisily {
-.     do "/var/folders/2_/4klqy60x2rb_vpg4whtr27f40000gn/T/stata_tmp_1778672960
-> 428_main.do"
+.     do "/var/folders/2_/4klqy60x2rb_vpg4whtr27f40000gn/T/stata_tmp_1778673187
+> 126_main.do"
 
 . display "UNSAVED-VERSION"
 UNSAVED-VERSION
@@ -100061,6 +100061,23 @@ r(601);
 .     display as error "[MCP-MSG] `:display _rc[message]\'
 invalid syntax
 [MCP-MSG] 
+. }
+
+. 
+. capture noisily {
+.     do "/var/folders/2_/4klqy60x2rb_vpg4whtr27f40000gn/T/stata_test_177867318
+> 7088/main.do"
+
+. display "DISK-VERSION"
+DISK-VERSION
+
+. 
+end of do-file
+. }
+
+. if _rc != 0 {
+.     display as error "[MCP-ERROR] rc=" _rc
+.     display as error "[MCP-MSG] `:display _rc[message]\'
 . }
 
 . 
@@ -100103,21 +100120,5 @@ r(199);
 .     display as error "[MCP-MSG] `:display _rc[message]\'
 invalid syntax
 [MCP-MSG] 
-. }
-
-. 
-. capture noisily {
-.     do "/var/folders/2_/4klqy60x2rb_vpg4whtr27f40000gn/T/tab_completion.do"
-
-. display "TAB-COMPLETION"
-TAB-COMPLETION
-
-. 
-end of do-file
-. }
-
-. if _rc != 0 {
-.     display as error "[MCP-ERROR] rc=" _rc
-.     display as error "[MCP-MSG] `:display _rc[message]\'
 . }
 
