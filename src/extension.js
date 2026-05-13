@@ -4,7 +4,7 @@ require("./instrument.js");
 const Sentry = require("@sentry/node");
 const path = require('path');
 const os = require('os');
-const { getVscode, getEnv, getFs, getChildProcess, getMcpClient, createDepProxy } = require('./runtime-context');
+const { getVscode, getEnv, getFs, getChildProcess, createDepProxy } = require('./runtime-context');
 const { DaemonManager } = require('./daemon-manager');
 const { StataClient } = require('./stata-client');
 const pkg = require('../package.json');
@@ -29,7 +29,6 @@ const { getTmpFilePath, getTmpDir } = require('./fs-utils');
 const vscode = createDepProxy(getVscode);
 const fs = createDepProxy(getFs);
 const cp = createDepProxy(getChildProcess);
-const mcpClient = createDepProxy(() => getMcpClient() || require('./mcp-client').client);
 
 let daemonMgr = null;
 let stataClient = null;

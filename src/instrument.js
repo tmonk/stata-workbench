@@ -45,9 +45,7 @@ Sentry.init({
             // Allow only our own infrastructure URLS
             const isOurs =
                 url.includes("stata-workbench") ||
-                url.includes("mcp-stata") ||
                 url.includes("tmonk") ||
-                url.includes("pypi.org/pypi/mcp-stata") ||
                 url.includes("localhost") && (url.includes("get_ui_channel") || url.includes("stata_manage_session") || url.includes("stata"));
 
             if (!isOurs) return null;
@@ -79,9 +77,7 @@ Sentry.init({
         const isOurTransaction =
             name.startsWith("stata.") ||
             name.includes("stata-workbench") ||
-            name.includes("mcp-stata") ||
-            name.includes("tmonk") ||
-            name.includes("pypi.org/pypi/mcp-stata");
+            name.includes("tmonk");
 
         return isOurTransaction ? event : null;
     },
@@ -122,7 +118,6 @@ Sentry.init({
                     frame.filename && (
                         frame.filename.includes('test/') ||
                         frame.filename.includes('.test.') ||
-                        frame.filename.includes('mcp-client.test') ||
                         frame.filename.includes('pypi-versioning.test')
                     )
                 )
@@ -160,7 +155,7 @@ Sentry.init({
 
             // Generic check for errors in non-extension files
             const hasExternalFileRef = /\.[a-z0-9]+:\d+:\d+/i.test(msg);
-            if (hasExternalFileRef && !msg.includes('stata-workbench') && !msg.includes('mcp-stata') && !msg.includes('tmonk')) {
+            if (hasExternalFileRef && !msg.includes('stata-workbench') && !msg.includes('tmonk')) {
                 return null;
             }
 
@@ -181,14 +176,13 @@ Sentry.init({
             const hasOurFrame = ex.stacktrace?.frames?.some(frame =>
                 frame.filename && (
                     frame.filename.includes('stata-workbench') ||
-                    frame.filename.includes('mcp-stata') ||
                     frame.filename.includes('tmonk')
                 )
             );
             if (hasOurFrame) return true;
 
             const val = (ex.value || "").toLowerCase();
-            return val.includes('stata-workbench') || val.includes('tmonk') || val.includes('mcp-stata');
+            return val.includes('stata-workbench') || val.includes('tmonk');
         });
 
         if (!isFromOurExtension) {

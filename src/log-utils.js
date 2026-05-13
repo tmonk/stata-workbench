@@ -1,5 +1,5 @@
 /**
- * Utility for filtering out mcp-stata internal log markers and management commands.
+ * Utility for filtering out Stata internal log markers and management commands.
  * Centralized here to ensure DRY (Don't Repeat Yourself) consistency across the extension.
  */
 
@@ -18,7 +18,7 @@ const INTERNAL_PATTERNS = [
 ];
 
 /**
- * Filter out mcp-stata internal lines from a block of text.
+ * Filter out Stata internal management lines from a block of text.
  * @param {string} text Raw SMCL or plain text from Stata
  * @returns {string} Filtered text with internal markers removed
  */

@@ -101,7 +101,7 @@ window.stataUI = {
     smclToHtml: function (text) {
         if (!text) return '';
 
-        // 0. Filter out mcp-stata internal lines
+        // 0. Filter out internal management lines
         const filteredText = window.stataUI.filterMcpLogs(text);
 
         // Normalize newlines early

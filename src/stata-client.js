@@ -322,7 +322,7 @@ class StataClient extends EventEmitter {
     }
 
     _readMeta(sessionName) {
-        const metaPath = path.join(os.homedir(), '.cache', 'mcp-stata', 'sessions', `${sessionName}.json`);
+        const metaPath = path.join(os.homedir(), '.cache', 'stata-agent', 'sessions', `${sessionName}.json`);
         try {
             const content = fs.readFileSync(metaPath, 'utf8');
             return JSON.parse(content);
