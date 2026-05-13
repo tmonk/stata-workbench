@@ -77,7 +77,41 @@ const createExtensionHarness = (overrides = {}) => {
         openArtifact: jest.fn()
     };
 
+    // Mock Sentry so deactivate() with Sentry.flush() doesn't hang in tests
+    const sentryMock = {
+        init: jest.fn(),
+        flush: jest.fn().mockResolvedValue(undefined),
+        captureException: jest.fn(),
+        captureMessage: jest.fn(),
+        startSpan: jest.fn().mockImplementation((_opts, fn) => fn()),
+        setTag: jest.fn(),
+        setContext: jest.fn(),
+        withScope: jest.fn(),
+    };
+
+    // Mock instrument.js (side-effect only — registers globals).
+    // Note: extension.js requires './instrument.js' (with extension), so the
+    // proxyquire key must match exactly.
+    const instrumentMock = {
+        // instrument.js exports nothing — it's loaded for side-effects
+    };
+
+    // Pre-set the global log buffer and shutdown flag that instrument.js normally sets.
+    if (typeof global.addLogToSentryBuffer !== 'function') {
+        const logBuffer = [];
+        global.addLogToSentryBuffer = (msg) => {
+            if (!msg) return;
+            logBuffer.push(msg);
+            if (logBuffer.length > 200) logBuffer.shift();
+        };
+    }
+    if (typeof global.setStataWorkbenchShuttingDown !== 'function') {
+        global.setStataWorkbenchShuttingDown = () => {};
+    }
+
     const extension = proxyquire('../../src/extension', {
+        './instrument.js': instrumentMock,
+        '@sentry/node': sentryMock,
         './terminal-panel': { TerminalPanel: terminalPanel },
         './data-browser-panel': { DataBrowserPanel: dataBrowserPanel },
         './artifact-utils': artifactUtils,

@@ -161,7 +161,7 @@ describe('extension unit tests', () => {
 
             await extension.deactivate();
             expect(mockStop).toHaveBeenCalledWith('default');
-        });
+        }, 10000);
 
         itWithHarness('handles deactivate gracefully when daemonMgr is null', async () => {
             // Directly access extension module and set daemonMgr to null
@@ -171,7 +171,7 @@ describe('extension unit tests', () => {
             }
             // Should not throw
             await extension.deactivate();
-        });
+        }, 10000);
     });
 
     describe('config', () => {
