@@ -969,6 +969,30 @@ function renderHtml(webview, extensionUri, nonce, filePath, initialEntries = [])
         });
     };
 
+    // Truncate a string to the last N chars, aligning to a safe cut point
+    function safeSliceTail(html, limit) {
+        if (!html || html.length <= limit) return html || '';
+        var start = html.length - limit;
+        var firstNewline = html.indexOf(String.fromCharCode(10), start);
+        var firstHtmlTag = html.indexOf('<', start);
+        var firstSmclTag = html.indexOf('{', start);
+        var cutPoint = -1;
+        var offset = 0;
+        var candidates = [];
+        if (firstNewline !== -1) candidates.push({ pos: firstNewline, offset: 1 });
+        if (firstHtmlTag !== -1) candidates.push({ pos: firstHtmlTag, offset: 0 });
+        if (firstSmclTag !== -1) candidates.push({ pos: firstSmclTag, offset: 0 });
+        if (candidates.length > 0) {
+            candidates.sort(function(a, b) { return a.pos - b.pos; });
+            cutPoint = candidates[0].pos;
+            offset = candidates[0].offset;
+        }
+        if (cutPoint !== -1 && cutPoint < html.length - 1) {
+            return html.substring(cutPoint + offset);
+        }
+        return html.slice(-limit);
+    }
+
     let highlightTimer = null;
     let highlightScheduled = 0;
     function scheduleHighlight() {
