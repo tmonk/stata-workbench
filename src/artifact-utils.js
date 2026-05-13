@@ -23,7 +23,6 @@ function openArtifact(raw, baseDir) {
             }
         }
         // Open in VS Code tab instead of external app
-        // Open in VS Code tab instead of external app
         vscode.commands.executeCommand('vscode.open', uri, {
             preview: false,
             viewColumn: vscode.ViewColumn.Active
