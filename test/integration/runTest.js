@@ -58,13 +58,11 @@ async function main() {
         userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vscode-test-user-'));
         extDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vscode-test-exts-'));
 
-        // Start the stata-agent daemon (mock mode) before launching VS Code.
+        // Start the stata-agent daemon (live Stata mode) before launching VS Code.
         daemonProcess = await startDaemon(SESSION_NAME);
 
-        // Set env vars for the spawned VS Code process so extension uses the
-        // correct daemon and mock mode.
+        // Set env var for the spawned VS Code process so extension uses the correct daemon.
         process.env.STATA_AGENT_INTEGRATION = '1';
-        process.env.STATA_AGENT_MOCK = '1';
 
         await runTests({
             extensionDevelopmentPath,

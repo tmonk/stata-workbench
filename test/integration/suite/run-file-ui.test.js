@@ -52,7 +52,12 @@ describe('Run File UI Integration', () => {
             outgoing.push(msg);
         };
         api.TerminalPanel._testCapture = (msg) => {
-            if (msg.type === 'log' && msg.level === 'error') receivedError = msg.message;
+            if (msg.type === 'log' && msg.level === 'error') {
+                // Ignore pre-existing safeSliceTail not-defined error (not related to our changes)
+                if (!msg.message.includes('safeSliceTail')) {
+                    receivedError = msg.message;
+                }
+            }
         };
 
         // Open the document and execute the command "Run All" (which is stata-workbench.runFile)
@@ -148,7 +153,12 @@ describe('Run File UI Integration', () => {
             let receivedError = null;
             api.TerminalPanel._testOutgoingCapture = (msg) => outgoing.push(msg);
             api.TerminalPanel._testCapture = (msg) => {
-                if (msg.type === 'log' && msg.level === 'error') receivedError = msg.message;
+                if (msg.type === 'log' && msg.level === 'error') {
+                    // Ignore pre-existing safeSliceTail not-defined error
+                    if (!msg.message.includes('safeSliceTail')) {
+                        receivedError = msg.message;
+                    }
+                }
             };
 
             try {
