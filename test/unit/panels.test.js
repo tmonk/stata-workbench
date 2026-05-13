@@ -320,4 +320,142 @@ describe('Panels', () => {
             DataBrowserPanel.currentPanel = null;
         });
     });
+
+    describe('DataBrowserPanel — webview message handlers', () => {
+        function createMockStataClient() {
+            return {
+                listVariables: jest.fn().mockResolvedValue([{ name: 'price', type: 'float', label: 'Price' }]),
+                getDatasetState: jest.fn().mockResolvedValue({ obs_count: 74, var_count: 1, dataset_name: 'auto' }),
+                getDataPage: jest.fn().mockResolvedValue(Buffer.from([1, 2, 3])),
+                validateFilterExpr: jest.fn().mockResolvedValue({ valid: true, error: null }),
+                computeViewIndices: jest.fn().mockResolvedValue([1, 5, 10]),
+            };
+        }
+
+        function createMockPanel(stataClient) {
+            const mock = {
+                webview: {
+                    postMessage: jest.fn(),
+                    onDidReceiveMessage: jest.fn(),
+                    asWebviewUri: (u) => u,
+                    cspSource: '',
+                    html: '',
+                },
+                onDidDispose: jest.fn().mockReturnValue({ dispose: jest.fn() }),
+                reveal: jest.fn(),
+                dispose: jest.fn(),
+                viewColumn: 1,
+            };
+            return mock;
+        }
+
+        itWithContext('constructor stores stataClient', () => {
+            const { DataBrowserPanel } = loadDataBrowserPanel();
+            const stataClient = createMockStataClient();
+            const panel = createMockPanel(stataClient);
+            const instance = new DataBrowserPanel(panel, { fsPath: '/test' }, stataClient);
+            expect(instance._stataClient).toBe(stataClient);
+        });
+
+        itWithContext('requestVariables: calls listVariables + getDatasetState, posts variables message', async () => {
+            const { DataBrowserPanel } = loadDataBrowserPanel();
+            const stataClient = createMockStataClient();
+            const panel = createMockPanel(stataClient);
+
+            new DataBrowserPanel(panel, { fsPath: '/test' }, stataClient);
+
+            // Find and trigger the message handler registered by constructor
+            const handler = panel.webview.onDidReceiveMessage.mock.calls[0]?.[0];
+            expect(handler).toBeDefined();
+
+            await handler({ type: 'requestVariables' });
+
+            expect(stataClient.listVariables).toHaveBeenCalled();
+            expect(stataClient.getDatasetState).toHaveBeenCalled();
+            expect(panel.webview.postMessage).toHaveBeenCalledWith(
+                expect.objectContaining({ type: 'variables' })
+            );
+        });
+
+        itWithContext('requestVariables: posts error message when listVariables throws', async () => {
+            const { DataBrowserPanel } = loadDataBrowserPanel();
+            const stataClient = createMockStataClient();
+            stataClient.listVariables = jest.fn().mockRejectedValue(new Error('timeout'));
+            const panel = createMockPanel(stataClient);
+
+            new DataBrowserPanel(panel, { fsPath: '/test' }, stataClient);
+            const handler = panel.webview.onDidReceiveMessage.mock.calls[0]?.[0];
+
+            await handler({ type: 'requestVariables' });
+
+            expect(panel.webview.postMessage).toHaveBeenCalledWith(
+                expect.objectContaining({ type: 'error', message: 'timeout' })
+            );
+        });
+
+        itWithContext('requestPage: calls getDataPage, posts arrow-page message', async () => {
+            const { DataBrowserPanel } = loadDataBrowserPanel();
+            const stataClient = createMockStataClient();
+            const panel = createMockPanel(stataClient);
+
+            new DataBrowserPanel(panel, { fsPath: '/test' }, stataClient);
+            const handler = panel.webview.onDidReceiveMessage.mock.calls[0]?.[0];
+
+            await handler({ type: 'requestPage', start: 0, count: 50, varlist: 'price' });
+
+            expect(stataClient.getDataPage).toHaveBeenCalledWith(0, 50, 'price');
+            expect(panel.webview.postMessage).toHaveBeenCalledWith(
+                expect.objectContaining({ type: 'arrow-page' })
+            );
+        });
+
+        itWithContext('filter — valid expr: validates, computes indices, posts filterResult', async () => {
+            const { DataBrowserPanel } = loadDataBrowserPanel();
+            const stataClient = createMockStataClient();
+            const panel = createMockPanel(stataClient);
+
+            new DataBrowserPanel(panel, { fsPath: '/test' }, stataClient);
+            const handler = panel.webview.onDidReceiveMessage.mock.calls[0]?.[0];
+
+            await handler({ type: 'filter', expr: 'price > 5000' });
+
+            expect(stataClient.validateFilterExpr).toHaveBeenCalledWith('price > 5000');
+            expect(stataClient.computeViewIndices).toHaveBeenCalledWith('price > 5000');
+            expect(panel.webview.postMessage).toHaveBeenCalledWith(
+                expect.objectContaining({ type: 'filterResult', valid: true, indices: [1, 5, 10] })
+            );
+        });
+
+        itWithContext('filter — invalid expr: posts filterResult with valid=false and error', async () => {
+            const { DataBrowserPanel } = loadDataBrowserPanel();
+            const stataClient = createMockStataClient();
+            stataClient.validateFilterExpr = jest.fn().mockResolvedValue({ valid: false, error: 'syntax error' });
+            const panel = createMockPanel(stataClient);
+
+            new DataBrowserPanel(panel, { fsPath: '/test' }, stataClient);
+            const handler = panel.webview.onDidReceiveMessage.mock.calls[0]?.[0];
+
+            await handler({ type: 'filter', expr: 'bad expr' });
+
+            expect(panel.webview.postMessage).toHaveBeenCalledWith(
+                expect.objectContaining({ type: 'filterResult', valid: false, error: 'syntax error' })
+            );
+        });
+
+        itWithContext('filter — stataClient throws: posts filterResult with valid=false', async () => {
+            const { DataBrowserPanel } = loadDataBrowserPanel();
+            const stataClient = createMockStataClient();
+            stataClient.validateFilterExpr = jest.fn().mockRejectedValue(new Error('conn error'));
+            const panel = createMockPanel(stataClient);
+
+            new DataBrowserPanel(panel, { fsPath: '/test' }, stataClient);
+            const handler = panel.webview.onDidReceiveMessage.mock.calls[0]?.[0];
+
+            await handler({ type: 'filter', expr: 'bad' });
+
+            expect(panel.webview.postMessage).toHaveBeenCalledWith(
+                expect.objectContaining({ type: 'filterResult', valid: false })
+            );
+        });
+    });
 });
