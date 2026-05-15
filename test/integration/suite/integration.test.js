@@ -132,4 +132,126 @@ describe('StataClient integration', () => {
         const filePath = result.file_path || result.path || '';
         expect(filePath).toMatch(/\.pdf$/i);
     });
+
+    test('health returns daemon status', async () => {
+        const result = await client.health();
+        expect(result).toBeDefined();
+        expect(result.status).toBe('ok');
+        expect(typeof result.pid).toBe('number');
+    });
+
+    test('getDatasetState returns dataset metadata', async () => {
+        await client.runCode('sysuse auto', { strict: false });
+
+        const state = await client.getDatasetState();
+        expect(state).toBeDefined();
+        expect(typeof state.obs_count).toBe('number');
+        expect(typeof state.var_count).toBe('number');
+        expect(typeof state.dataset_name).toBe('string');
+    });
+
+    test('getDataPage returns binary data', async () => {
+        await client.runCode('sysuse auto', { strict: false });
+
+        const page = await client.getDataPage(0, 10, 'price mpg');
+        expect(page).toBeDefined();
+        expect(Buffer.isBuffer(page)).toBe(true);
+    });
+
+    test('computeViewIndices returns array of matching indices', async () => {
+        await client.runCode('sysuse auto', { strict: false });
+
+        const indices = await client.computeViewIndices('price > 5000');
+        expect(Array.isArray(indices)).toBe(true);
+    });
+
+    test('validateFilterExpr returns valid=true for correct expressions', async () => {
+        const result = await client.validateFilterExpr('price > 5000');
+        expect(result.valid).toBe(true);
+        expect(result.error).toBeNull();
+    });
+
+    test('listGraphs returns graph names', async () => {
+        await client.runCode('sysuse auto', { strict: false });
+        await client.runCode('scatter price mpg', { strict: false });
+        await client.runCode('graph export "gint.pdf", replace', { strict: false });
+
+        const result = await client.listGraphs();
+        expect(result).toBeDefined();
+    });
+
+    test('getResults returns stored result macros', async () => {
+        await client.runCode('sysuse auto', { strict: false });
+        await client.runCode('summarize price', { strict: false });
+
+        const rResults = await client.getResults('r');
+        expect(rResults).toBeDefined();
+
+        const eResults = await client.getResults('e');
+        expect(eResults).toBeDefined();
+    });
+
+    test('getLogTail returns recent log lines', async () => {
+        const result = await client.getLogTail(10);
+        expect(result).toBeDefined();
+        expect(typeof result.text).toBe('string');
+    });
+
+    test('searchLog finds patterns in log', async () => {
+        const result = await client.searchLog('auto');
+        expect(result).toBeDefined();
+    });
+
+    test('readLogAtOffset reads log at given offset', async () => {
+        // First run something to generate log output
+        await client.runCode('display "log-read-test-12345"', { strict: false });
+
+        // Get the log tail to find our output
+        const tail = await client.getLogTail(50);
+        expect(tail.log_path).toBeTruthy();
+
+        if (tail.log_path) {
+            const chunk = await client.readLogAtOffset(tail.log_path, 0, 4096);
+            expect(chunk).toBeDefined();
+            expect(typeof chunk.text).toBe('string');
+            expect(typeof chunk.next_offset).toBe('number');
+        }
+    });
+
+    test('getTaskStatus returns task info for a known task', async () => {
+        const result = await client.getTaskStatus('nonexistent-task-id');
+        expect(result).toBeDefined();
+    });
+
+    test('cancelTask returns acknowledgement', async () => {
+        const result = await client.cancelTask('nonexistent-task-id');
+        expect(result).toBeDefined();
+    });
+
+    test('supports multi-session isolation', async () => {
+        // Create a second session
+        await daemonMgr.ensureRunning('session-b', { mock: true });
+        await client.ensureConnected('session-b');
+
+        // Run code in session-b
+        const r1 = await client.runCode('display "session-b-active"', {
+            sessionName: 'session-b',
+            strict: false,
+        });
+        expect(r1.ok).toBe(true);
+
+        // Session 'default' still works
+        const r2 = await client.runCode('display "default-active"', { strict: false });
+        expect(r2.ok).toBe(true);
+
+        // Health check on both sessions
+        const healthDefault = await client.health('default');
+        const healthB = await client.health('session-b');
+        expect(healthDefault.status).toBe('ok');
+        expect(healthB.status).toBe('ok');
+
+        // Clean up second session
+        await client.disconnect('session-b');
+        await daemonMgr.stop('session-b');
+    });
 });

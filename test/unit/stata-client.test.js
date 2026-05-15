@@ -620,26 +620,372 @@ describe('StataClient', () => {
     describe('_scheduleReconnect', () => {
         it('emits error after _maxReconnectAttempts consecutive failures', async () => {
             client._maxReconnectAttempts = 1;
-            // Register a no-op error handler so emit('error') doesn't throw
             client.on('error', () => {});
             const emitSpy = jest.spyOn(client, 'emit');
             
-            // Make ensureRunning fail so reconnect attempts accumulate
             daemonMgr.ensureRunning = jest.fn().mockRejectedValue(new Error('cannot start'));
             
-            // First call: count = 0 < maxAttempts, sets count to 1, schedules reconnect
             client._scheduleReconnect('default');
-            
-            // After 2s, the timer fires, ensureRunning rejects, catch triggers recursive call
-            // In the recursive call: count (1) >= maxAttempts (1) → emits 'error'
             await new Promise(r => setTimeout(r, 3000));
             
             expect(emitSpy).toHaveBeenCalledWith('error', expect.objectContaining({
                 message: expect.stringContaining('failed to restart'),
             }));
         }, 8000);
+
+        it('reconnects successfully when daemon restarts after disconnect', async () => {
+            client._maxReconnectAttempts = 1;
+            client.on('error', () => {});
+            const statusEvents = [];
+            client.on('status', (s) => statusEvents.push(s));
+
+            daemonMgr.ensureRunning = jest.fn().mockResolvedValue();
+
+            // Set up so _readMeta returns valid meta after reconnect
+            const fs = require('fs');
+            fs.readFileSync.mockReturnValue(
+                JSON.stringify({ transport: 'unix', path: '/tmp/reconn.sock' })
+            );
+
+            // Use emit to trigger the close handler through the socket's hander map
+            await client.ensureConnected('default');
+            expect(client.isConnected('default')).toBe(true);
+
+            // Trigger socket close via the stored handler
+            mockSocket.emit('close');
+
+            // Wait for reconnect timer (2s) + buffer
+            await new Promise(r => setTimeout(r, 2500));
+
+            // Should have reconnected and emitted status events
+            expect(statusEvents).toContain('reconnecting');
+            expect(statusEvents).toContain('connected');
+            expect(client.isConnected('default')).toBe(true);
+        }, 6000);
     });
     
+    describe('ensureConnected — edge paths', () => {
+        it('calls daemonManager.ensureRunning when meta file is missing then connects after meta appears', async () => {
+            const fs = require('fs');
+            const net = require('net');
+            // Return null for first _readMeta calls, then valid meta
+            let callCounter = 0;
+            fs.readFileSync.mockReset();
+            fs.readFileSync.mockImplementation(() => {
+                callCounter++;
+                // First call (meta in ensureConnected): null to trigger ensureRunning
+                // Second call (in _waitForMeta polling): null to keep waiting
+                // Third+ calls: valid meta so _waitForMeta returns
+                if (callCounter <= 2) return null;
+                return JSON.stringify({ transport: 'unix', path: '/tmp/new.sock' });
+            });
+            // Create a fresh mock socket for the new connection
+            const newSocket = createMockSocket();
+            net.createConnection.mockReset();
+            net.createConnection.mockReturnValue(newSocket);
+
+            await client.ensureConnected('lazy-session');
+
+            expect(daemonMgr.ensureRunning).toHaveBeenCalledWith('lazy-session');
+            expect(client.isConnected('lazy-session')).toBe(true);
+        }, 5000);
+
+        it('throws when meta file never appears after ensureRunning', async () => {
+            // Override _waitForMeta to resolve immediately (simulate timeout without delay)
+            // but keep _readMeta returning null so finalMeta check throws
+            client._waitForMeta = jest.fn().mockResolvedValue(undefined);
+
+            const fs = require('fs');
+            fs.readFileSync.mockReset();
+            fs.readFileSync.mockReturnValue(null);
+
+            await expect(
+                client.ensureConnected('no-meta-session')
+            ).rejects.toThrow('Cannot connect to daemon session');
+        });
+    });
+
+    describe('getDatasetState', () => {
+        it('calls inspect_describe and returns state object', async () => {
+            await client.ensureConnected('default');
+
+            const promise = client.getDatasetState('default');
+            await Promise.resolve();
+
+            const writtenData = mockSocket.write.mock.calls[0][0];
+            const request = JSON.parse(writtenData.trim());
+            expect(request.method).toBe('inspect_describe');
+
+            mockSocket.emit(
+                'data',
+                Buffer.from(
+                    JSON.stringify({
+                        id: request.id,
+                        ok: true,
+                        result: { obs_count: 74, var_count: 12, dataset_name: 'auto.dta' },
+                    }) + '\n',
+                ),
+            );
+
+            const state = await promise;
+            expect(state.obs_count).toBe(74);
+            expect(state.var_count).toBe(12);
+            expect(state.dataset_name).toBe('auto.dta');
+        });
+
+        it('uses defaults when response is missing fields', async () => {
+            await client.ensureConnected('default');
+
+            const promise = client.getDatasetState('default');
+            await Promise.resolve();
+
+            const writtenData = mockSocket.write.mock.calls[0][0];
+            const request = JSON.parse(writtenData.trim());
+
+            mockSocket.emit(
+                'data',
+                Buffer.from(
+                    JSON.stringify({
+                        id: request.id,
+                        ok: true,
+                        result: {},
+                    }) + '\n',
+                ),
+            );
+
+            const state = await promise;
+            expect(state.obs_count).toBe(0);
+            expect(state.var_count).toBe(0);
+            expect(state.dataset_name).toBe('');
+        });
+    });
+
+    describe('getDataPage — error path', () => {
+        it('throws when response has no path field', async () => {
+            await client.ensureConnected('default');
+
+            const promise = client.getDataPage(0, 10, 'price', 'default');
+            await Promise.resolve();
+
+            const writtenData = mockSocket.write.mock.calls[0][0];
+            const request = JSON.parse(writtenData.trim());
+
+            mockSocket.emit(
+                'data',
+                Buffer.from(
+                    JSON.stringify({
+                        id: request.id,
+                        ok: true,
+                        result: { size_bytes: 100 },
+                    }) + '\n',
+                ),
+            );
+
+            await expect(promise).rejects.toThrow('getDataPage: no path in response');
+        });
+    });
+
+    describe('_onData — malformed JSON', () => {
+        it('emits error event when response is not valid JSON', async () => {
+            const errors = [];
+            client.on('error', (e) => errors.push(e));
+
+            await client.ensureConnected('default');
+
+            // Send invalid NDJSON
+            mockSocket.emit('data', Buffer.from('not valid json at all\n'));
+
+            expect(errors.length).toBeGreaterThan(0);
+            expect(errors[0].message).toContain('Failed to parse NDJSON');
+        });
+
+        it('skips empty lines in NDJSON stream', async () => {
+            await client.ensureConnected('default');
+
+            const promise = client.runCode('display 1', { sessionName: 'default' });
+            await Promise.resolve();
+
+            const writtenData = mockSocket.write.mock.calls[0][0];
+            const request = JSON.parse(writtenData.trim());
+
+            // Send empty line then valid response
+            mockSocket.emit('data', Buffer.from('\n'));
+            mockSocket.emit(
+                'data',
+                Buffer.from(
+                    JSON.stringify({
+                        id: request.id,
+                        ok: true,
+                        result: { ok: true, rc: 0, stdout: '1' },
+                    }) + '\n',
+                ),
+            );
+
+            const result = await promise;
+            expect(result.ok).toBe(true);
+        });
+    });
+
+    describe('_rejectAllPending', () => {
+        it('rejects all pending promises when socket closes', async () => {
+            // Prevent reconnect from creating a new connection mid-test
+            client._maxReconnectAttempts = 0;
+            client.on('error', () => {}); // suppress 'error' from reconnect burnout
+
+            await client.ensureConnected('default');
+
+            const promise1 = client.runCode('display 1', { sessionName: 'default' });
+            const promise2 = client.runCode('display 2', { sessionName: 'default' });
+            await Promise.resolve();
+
+            expect(client._pending.size).toBe(2);
+
+            // Pre-register catch handlers so synchronous rejections aren't treated as unhandled
+            const caught1 = promise1.catch(err => ({ rejected: true, err }));
+            const caught2 = promise2.catch(err => ({ rejected: true, err }));
+
+            // Socket close triggers _markDisconnected → _rejectAllPending synchronously
+            mockSocket.emit('close');
+
+            const r1 = await caught1;
+            const r2 = await caught2;
+            expect(r1.rejected).toBe(true);
+            expect(r1.err.message).toBe('Socket closed');
+            expect(r2.rejected).toBe(true);
+            expect(r2.err.message).toBe('Socket closed');
+            expect(client._pending.size).toBe(0);
+        });
+    });
+
+    describe('socket write errors on EVERY RPC method (all 17)', () => {
+        // All methods that go through _call (the shared RPC layer)
+        const methods = [
+            ['runCode', ['display 1', { sessionName: 'default' }]],
+            ['runFile', ['/tmp/test.do', { sessionName: 'default' }]],
+            ['cancel', ['default']],
+            ['listVariables', ['default']],
+            ['getDatasetState', ['default']],
+            ['getDataPage', [0, 10, 'price', 'default']],
+            ['computeViewIndices', ['price > 5000', 'default']],
+            ['listGraphs', ['default']],
+            ['exportGraph', ['mygraph', 'pdf', '/tmp/out.pdf', 'default']],
+            ['getResults', ['r', 'default']],
+            ['getLogTail', [20, 'default']],
+            ['searchLog', ['pattern', 'default']],
+            ['readLogAtOffset', ['/tmp/test.log', 0, 1024]],
+            ['getTaskStatus', ['tid', { sessionName: 'default' }]],
+            ['cancelTask', ['tid', 'default']],
+            ['health', ['default']],
+        ];
+
+        methods.forEach(([method, args]) => {
+            it(`rejects ${method} on socket write error`, async () => {
+                const fs = require('fs');
+                fs.readFileSync.mockReturnValue(
+                    JSON.stringify({ transport: 'unix', path: '/tmp/mock.sock' })
+                );
+                const mockSocket = createMockSocket();
+                mockSocket.write = jest.fn((_data, _enc, cb) => {
+                    if (cb) cb(new Error('EPIPE'));
+                    return false;
+                });
+                const net = require('net');
+                net.createConnection.mockReset();
+                net.createConnection.mockReturnValue(mockSocket);
+
+                await client.ensureConnected('default');
+                client._sockets.set('default', mockSocket);
+
+                const promise = client[method](...args);
+                await expect(promise).rejects.toThrow('EPIPE');
+            });
+        });
+    });
+
+    describe('validateFilterExpr handles errors instead of throwing', () => {
+        it('returns { valid: false, error } on socket write error', async () => {
+            client._call = jest.fn().mockRejectedValue(new Error('EPIPE'));
+            const result = await client.validateFilterExpr('price > 0');
+            expect(result.valid).toBe(false);
+            expect(result.error).toBe('EPIPE');
+        });
+
+        it('returns { valid: false, error } on timeout', async () => {
+            client._call = jest.fn().mockRejectedValue(new Error('Request timed out'));
+            const result = await client.validateFilterExpr('price > 0');
+            expect(result.valid).toBe(false);
+            expect(result.error).toBe('Request timed out');
+        });
+    });
+
+    describe('request timeout on EVERY RPC method (all 17)', () => {
+        const methods = [
+            ['runCode', ['display 1', { sessionName: 'default' }]],
+            ['runFile', ['/tmp/test.do', { sessionName: 'default' }]],
+            ['cancel', ['default']],
+            ['listVariables', ['default']],
+            ['getDatasetState', ['default']],
+            ['getDataPage', [0, 10, 'price', 'default']],
+            ['computeViewIndices', ['price > 0', 'default']],
+            ['listGraphs', ['default']],
+            ['exportGraph', ['mygraph', 'pdf', '/tmp/out.pdf', 'default']],
+            ['getResults', ['e', 'default']],
+            ['getLogTail', [10, 'default']],
+            ['searchLog', ['test', 'default']],
+            ['readLogAtOffset', ['/tmp/test.log', 0, 1024]],
+            ['getTaskStatus', ['tid', { sessionName: 'default' }]],
+            ['cancelTask', ['tid', 'default']],
+            ['health', ['default']],
+        ];
+
+        methods.forEach(([method, args]) => {
+            it(`rejects ${method} on request timeout`, async () => {
+                jest.useFakeTimers();
+                try {
+                    client.setRequestTimeout(100);
+                    await client.ensureConnected('default');
+
+                    const promise = client[method](...args);
+                    await Promise.resolve();
+                    jest.advanceTimersByTime(101);
+
+                    await expect(promise).rejects.toThrow(/timed out/i);
+                } finally {
+                    jest.useRealTimers();
+                }
+            });
+        });
+    });
+
+    describe('rapid-fire concurrent command bursts', () => {
+        it('handles N=10 rapid concurrent runCode calls', async () => {
+            await client.ensureConnected('default');
+
+            // Fire 10 concurrent commands
+            const promises = [];
+            for (let i = 0; i < 10; i++) {
+                promises.push(client.runCode(`display ${i}`, { sessionName: 'default' }));
+            }
+            await Promise.resolve();
+
+            // Respond to all 10 with the same on-request-id callback
+            // Each request wrote to the socket; collect the IDs and respond
+            const calls = mockSocket.write.mock.calls;
+            for (let i = 0; i < calls.length; i++) {
+                const request = JSON.parse(calls[i][0].trim());
+                mockSocket.emit('data', Buffer.from(
+                    JSON.stringify({ id: request.id, ok: true, result: { ok: true, rc: 0, stdout: String(i) } }) + '\n'
+                ));
+            }
+
+            const results = await Promise.all(promises);
+            expect(results).toHaveLength(10);
+            results.forEach(r => {
+                expect(r.ok).toBe(true);
+            });
+        });
+    });
+
     describe('multi-session', () => {
         it('maintains independent sockets for two sessions', async () => {
             const net = require('net');

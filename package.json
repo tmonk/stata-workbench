@@ -279,6 +279,8 @@
     "bundle": "bun ./build/esbuild.js --production",
     "watch": "bun ./build/esbuild.js --watch",
     "test": "bun test --preload ./test/bun-preload.js test/unit test/integration/daemon-e2e.test.js",
+    "test:coverage": "bun test --preload ./test/bun-preload.js --coverage test/unit/installer.test.js test/unit/updater.test.js test/unit/daemon-manager.test.js test/unit/stata-client.test.js test/unit/runtime-context.test.js test/unit/log-utils.test.js test/unit/fs-utils.test.js test/unit/artifact-utils.test.js",
+    "test:coverage:check": "node scripts/check-coverage.js",
     "test:mcp-config": "bun test --concurrent --preload ./test/bun-preload.js test/unit --testPathPattern='mcp-config|extension.test'",
     "test:full": "bun test --concurrent --preload ./test/bun-preload.js test/unit && bun run test:integration:parallel",
     "pretest:integration": "bun run compile",

@@ -350,8 +350,10 @@ function activate(context) {
             variableListProvider,
             downloadGraphAsPdf,
             logRunToOutput,
-    };
-}
+            clearAllCommand,
+            escapeHtml,
+        };
+    }
 }
 
 async function deactivate() {

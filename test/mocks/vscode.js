@@ -85,6 +85,11 @@ const createVscodeMock = () => {
                 show: jest.fn(),
                 clear: jest.fn()
             }),
+            createTerminal: jest.fn().mockReturnValue({
+                show: jest.fn(),
+                sendText: jest.fn(),
+                dispose: jest.fn()
+            }),
             createStatusBarItem: jest.fn().mockReturnValue({
                 show: jest.fn(),
                 hide: jest.fn(),

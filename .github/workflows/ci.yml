@@ -58,8 +58,10 @@ jobs:
       - name: Build
         run: bun run bundle
 
-      - name: Unit tests
-        run: bun run test
+      - name: Full test suite (unit + mock daemon integration + coverage gate)
+        run: |
+          bun run test:coverage:check
+          bun run test
 
   release-dry-run:
     name: Release Dry Run

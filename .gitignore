@@ -20,6 +20,12 @@ mcp-stata/
 .env.sentry-build-plugin
 .envrc
 bin/*
+
+# pi agent state
+.pi/
+
+# Coverage reports
+coverage/
 test_full_output.txt
 test_results.json
 test_results.xml
