@@ -308,20 +308,181 @@ describe('installer module', () => {
             installer.resetInstallPrompt(context);
             expect(updateSpy).toHaveBeenCalledWith('stataAgentInstallDeclined', false);
         });
+    });
 
-        it('opens terminal when user selects "Install"', async () => {
-            const context = {
-                globalState: {
-                    get: jest.fn().mockReturnValue(false),
-                    update: jest.fn().mockResolvedValue(),
-                },
+    // ==================================================================
+    // autoInstall
+    // ==================================================================
+    describe('autoInstall', () => {
+        beforeEach(() => {
+            jest.restoreAllMocks();
+        });
+
+        function mockSpawnProcess({ code = 0, stderr = '' } = {}) {
+            const proc = {
+                on: jest.fn(),
+                kill: jest.fn(),
+                stdout: { on: jest.fn() },
+                stderr: { on: jest.fn() },
             };
+            jest.spyOn(cp, 'spawn').mockReturnValue(proc);
 
-            jest.spyOn(installer, 'runInstallInTerminal').mockImplementation(() => {});
-            mockVscode.window.showInformationMessage.mockResolvedValue('Install');
+            // Simulate events by wiring the 'data' and 'close' calls
+            setTimeout(() => {
+                // Trigger stdout data
+                const stdoutDataHandler = proc.stdout.on.mock.calls.find(c => c[0] === 'data')?.[1];
+                if (stdoutDataHandler) stdoutDataHandler(Buffer.from('install output'));
 
-            await installer.promptInstall(context);
-            expect(installer.runInstallInTerminal).toHaveBeenCalled();
+                // Trigger stderr data (if any)
+                if (stderr) {
+                    const stderrDataHandler = proc.stderr.on.mock.calls.find(c => c[0] === 'data')?.[1];
+                    if (stderrDataHandler) stderrDataHandler(Buffer.from(stderr));
+                }
+
+                // Trigger close event
+                const closeHandler = proc.on.mock.calls.find(c => c[0] === 'close')?.[1];
+                if (closeHandler) closeHandler(code);
+            }, 10);
+
+            return proc;
+        }
+
+        it('runs curl|bash on Unix when stata-agent not installed', async () => {
+            const origPlatform = process.platform;
+            Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true });
+
+            mockSpawnProcess({ code: 0 });
+
+            const result = await installer.autoInstall();
+
+            expect(cp.spawn).toHaveBeenCalledWith(
+                '/bin/sh',
+                ['-c', expect.stringContaining('curl -LsSf')],
+                expect.objectContaining({
+                    env: expect.objectContaining({ STATA_AGENT_INSTALL_SOURCE: 'workbench' }),
+                })
+            );
+            expect(result.success).toBe(true);
+
+            Object.defineProperty(process, 'platform', { value: origPlatform, configurable: true });
+        });
+
+        it('runs irm|iex via powershell on Windows', async () => {
+            const origPlatform = process.platform;
+            Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+
+            mockSpawnProcess({ code: 0 });
+
+            const result = await installer.autoInstall();
+
+            expect(cp.spawn).toHaveBeenCalledWith(
+                'powershell.exe',
+                ['-Command', expect.stringContaining('irm ')],
+                expect.any(Object)
+            );
+            expect(result.success).toBe(true);
+
+            Object.defineProperty(process, 'platform', { value: origPlatform, configurable: true });
+        });
+
+        it('sets STATA_AGENT_INSTALL_SOURCE=workbench in child process env', async () => {
+            mockSpawnProcess({ code: 0 });
+
+            await installer.autoInstall();
+
+            expect(cp.spawn).toHaveBeenCalledWith(
+                expect.any(String),
+                expect.any(Array),
+                expect.objectContaining({
+                    env: expect.objectContaining({ STATA_AGENT_INSTALL_SOURCE: 'workbench' }),
+                })
+            );
+        });
+
+        it('resolves with success when process exits with code 0', async () => {
+            mockSpawnProcess({ code: 0 });
+
+            const result = await installer.autoInstall();
+
+            expect(result.success).toBe(true);
+        });
+
+        it('resolves with failure when process exits with non-zero code', async () => {
+            mockSpawnProcess({ code: 1, stderr: 'some error occurred' });
+
+            const result = await installer.autoInstall();
+
+            expect(result.success).toBe(false);
+            expect(result.reason).toBe('some error occurred');
+        });
+
+        it('resolves with failure when process errors', async () => {
+            const proc = {
+                on: jest.fn(),
+                kill: jest.fn(),
+                stdout: { on: jest.fn() },
+                stderr: { on: jest.fn() },
+            };
+            jest.spyOn(cp, 'spawn').mockReturnValue(proc);
+
+            setTimeout(() => {
+                const errorHandler = proc.on.mock.calls.find(c => c[0] === 'error')?.[1];
+                if (errorHandler) errorHandler(new Error('spawn failed'));
+            }, 10);
+
+            const result = await installer.autoInstall();
+
+            expect(result.success).toBe(false);
+            expect(result.reason).toBe('spawn failed');
+        });
+
+        it('kills process and resolves with failure on timeout', async () => {
+            jest.useFakeTimers();
+
+            const proc = {
+                on: jest.fn(),
+                kill: jest.fn(),
+                stdout: { on: jest.fn() },
+                stderr: { on: jest.fn() },
+            };
+            jest.spyOn(cp, 'spawn').mockReturnValue(proc);
+
+            // Start autoInstall but don't resolve child events
+            const promise = installer.autoInstall();
+
+            // Advance past the 120s timeout
+            jest.advanceTimersByTime(120001);
+            await promise;
+
+            expect(proc.kill).toHaveBeenCalledWith('SIGTERM');
+
+            const result = await promise;
+            expect(result.success).toBe(false);
+            expect(result.reason).toBe('Installation timed out');
+
+            jest.useRealTimers();
+        });
+
+        it('does not kill process nor resolve timeout when process completes before timeout', async () => {
+            const proc = {
+                on: jest.fn(),
+                kill: jest.fn(),
+                stdout: { on: jest.fn() },
+                stderr: { on: jest.fn() },
+            };
+            jest.spyOn(cp, 'spawn').mockReturnValue(proc);
+
+            // Simulate immediate completion
+            setTimeout(() => {
+                const closeHandler = proc.on.mock.calls.find(c => c[0] === 'close')?.[1];
+                if (closeHandler) closeHandler(0);
+            }, 5);
+
+            const result = await installer.autoInstall();
+
+            expect(result.success).toBe(true);
+            expect(proc.kill).not.toHaveBeenCalled();
         });
     });
+
 });

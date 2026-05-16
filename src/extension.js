@@ -162,11 +162,24 @@ function activate(context) {
         appendLine(`[stata] Client error: ${err.message}`);
     });
 
-    // ---- stata-agent installation check ----
+    // ---- stata-agent automatic installation check ----
     try {
-        const { isStataAgentInstalled, promptInstall } = getInstaller();
+        const { isStataAgentInstalled, autoInstall } = getInstaller();
         if (!isStataAgentInstalled()) {
-            promptInstall(context); // non-blocking — shows notification
+            appendLine('stata-agent not found — installing automatically...');
+            autoInstall().then((result) => {
+                if (result.success) {
+                    appendLine('stata-agent installed successfully.');
+                    vscode.window.showInformationMessage('Stata Agent installed successfully.');
+                } else {
+                    appendLine(`stata-agent installation failed: ${result.reason}`);
+                    vscode.window.showWarningMessage(
+                        `Stata Agent installation failed: ${result.reason}. You can install manually via the "Install Stata Agent" command.`
+                    );
+                }
+            }).catch((err) => {
+                appendLine(`stata-agent auto-install error: ${err.message}`);
+            });
         }
     } catch (e) {
         // installer not available (e.g., in test environments without vscode module)

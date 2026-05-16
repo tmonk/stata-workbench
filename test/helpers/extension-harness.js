@@ -124,6 +124,7 @@ const createExtensionHarness = (overrides = {}) => {
             resetInstallPrompt: function() {},
             runInstallInTerminal: function() {},
             checkAndReport: function() {},
+            autoInstall: function() { return Promise.resolve({ success: true }); },
         },
         './updater': {
             checkAndUpgrade: function() { return Promise.resolve({ upgraded: true }); },

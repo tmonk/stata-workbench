@@ -136,6 +136,53 @@ mod.runInstallInTerminal = function runInstallInTerminal(outputChannel) {
 };
 
 /**
+ * Automatically install stata-agent in the background.
+ *
+ * Runs the install script via child_process (no visible terminal).
+ * Returns a promise resolving to {success: true} or {success: false, reason: string}.
+ * Has a 120-second timeout to prevent hanging.
+ */
+mod.autoInstall = function autoInstall() {
+    return new Promise((resolve) => {
+        const isWin = process.platform === 'win32';
+        const cmd = isWin ? 'powershell.exe' : '/bin/sh';
+        const args = isWin
+            ? ['-Command', `irm ${INSTALL_SCRIPT_PS1_URL} | iex`]
+            : ['-c', `curl -LsSf ${INSTALL_SCRIPT_URL} | bash`];
+
+        const env = { ...process.env, STATA_AGENT_INSTALL_SOURCE: 'workbench' };
+
+        const child = cp.spawn(cmd, args, { env, stdio: ['ignore', 'pipe', 'pipe'] });
+
+        let stdout = '';
+        let stderr = '';
+
+        child.stdout.on('data', (data) => { stdout += data.toString(); });
+        child.stderr.on('data', (data) => { stderr += data.toString(); });
+
+        const timer = setTimeout(() => {
+            child.kill('SIGTERM');
+            resolve({ success: false, reason: 'Installation timed out' });
+        }, 120000);
+
+        child.on('close', (code) => {
+            clearTimeout(timer);
+            if (code === 0) {
+                resolve({ success: true });
+            } else {
+                const reason = stderr.trim() || `Install script exited with code ${code}`;
+                resolve({ success: false, reason });
+            }
+        });
+
+        child.on('error', (err) => {
+            clearTimeout(timer);
+            resolve({ success: false, reason: err.message });
+        });
+    });
+};
+
+/**
  * Check installation status and emit to the output channel.
  */
 mod.checkAndReport = async function checkAndReport(outputChannel) {
