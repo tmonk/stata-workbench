@@ -110,6 +110,7 @@ const createExtensionHarness = (overrides = {}) => {
     }
 
     const extension = proxyquire('../../src/extension', {
+        'vscode': vscode,
         './instrument.js': instrumentMock,
         '@sentry/node': sentryMock,
         './terminal-panel': { TerminalPanel: terminalPanel },

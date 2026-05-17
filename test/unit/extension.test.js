@@ -66,6 +66,16 @@ function mockStdHandlers() {
 }
 
 describe('extension unit tests', () => {
+    // Clear harness-specific state after each test to prevent cross-test
+    // leakage. This is lightweight (no global mock resets that could
+    // interfere with parallel test execution).
+    afterEach(() => {
+        const harness = getHarness();
+        if (harness?.vscode?.commands) {
+            harness.vscode.commands._commands = [];
+        }
+    });
+
     const itWithHarness = (name, fn) => it(name, () => {
         const harness = createExtensionHarness();
         return withTestContext({
