@@ -30,7 +30,7 @@ async function run() {
             delete options._;
         } else if (shardTotal > 1) {
             const allTests = fs.readdirSync(suiteDir)
-                .filter((file) => file.endsWith('.test.js') && file !== 'benchmark.test.js' && file !== 'integration.test.js')
+                .filter((file) => file.endsWith('.vscode-test.js') && file !== 'benchmark.vscode-test.js' && file !== 'integration.vscode-test.js')
                 .sort()
                 .map((file) => path.join(suiteDir, file));
 
