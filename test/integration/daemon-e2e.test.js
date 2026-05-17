@@ -71,7 +71,12 @@ const describeIfAvailable = STATA_AVAILABLE ? describe : describe.skip;
  * Check whether a real Stata binary is available using the stata-agent
  * discovery module (same detection logic the daemon itself uses).
  */
+// Gate behind an explicit env var (set by runTest.js in CI) because:
+// 1) Having Stata binaries installed doesn't mean the daemon integration works
+// 2) Running these tests locally without a real daemon produces confusing failures
+// 3) The mock daemon doesn't implement all methods these tests exercise
 const REAL_STATA_AVAILABLE = (() => {
+    if (process.env.STATA_AGENT_INTEGRATION !== '1') return false;
     try {
         const r = cp.spawnSync(
             'uv',
