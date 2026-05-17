@@ -76,6 +76,5 @@ describe('Webview Script Integrity', () => {
         }
 
         expect(scriptsFound).toBeGreaterThan(0);
-        mock.restore();
     });
 });
